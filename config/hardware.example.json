@@ -16,5 +16,11 @@
     "name": "Public runtime name",
     "version": "Public version",
     "backend": "Public backend"
+  },
+  "runtime_configuration": {
+    "context_window_tokens": null,
+    "concurrent_requests": null,
+    "speculative_decoding": "unknown",
+    "offload_mode": "unknown"
   }
 }

@@ -553,6 +553,16 @@ class PublicSafetyTest(unittest.TestCase):
         inside = self.repository.scan("--staged")
         self.assertEqual(inside.returncode, 0, inside.stdout)
 
+    def test_secret_scanner_suppression_marker_is_rejected_without_echo(self) -> None:
+        marker = "git" + "leaks:allow"
+        self.repository.write("candidate.json", '{"source":"' + marker + '"}\n')
+        self.repository.add("candidate.json")
+
+        completed = self.repository.scan("--staged")
+
+        self.assertRules(completed, "scanner-suppression")
+        self.assertNotIn(marker, completed.stdout)
+
     def test_output_has_only_rule_path_and_line_fields(self) -> None:
         private_address = "172" + ".20" + ".3" + ".9"
         self.repository.write("guide.txt", "do not publish " + private_address + "\n")

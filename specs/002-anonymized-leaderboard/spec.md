@@ -115,8 +115,8 @@ dataset and that Pages deployment runs only from the default branch.
   credential.
 - **FR-004**: The leaderboard MUST rank eligible entries by semantic score and then exact-format
   score, with dense ties.
-- **FR-005**: Latency and throughput MUST be displayed with their hardware and runtime context and
-  MUST NOT affect quality rank.
+- **FR-005**: Latency and throughput MUST be displayed with their hardware, runtime, and any reported
+  runtime-configuration context and MUST NOT affect quality rank.
 - **FR-006**: The site MUST identify records as self-reported and not independently reproduced.
 - **FR-007**: The site MUST render all record strings through text-only DOM operations.
 - **FR-008**: The site MUST provide a useful empty and load-error state.
@@ -154,6 +154,10 @@ dataset and that Pages deployment runs only from the default branch.
   bounded runtime name, version, and backend.
 - **FR-024**: The hardware descriptor MUST use a closed versioned schema, remain ignored and
   owner-readable locally, and contain no free-form notes or general machine inventory.
+- **FR-025**: The descriptor MAY include a closed `runtime_configuration` object containing exactly
+  context-window tokens, concurrent requests, speculative-decoding state, and offload mode. Export
+  MUST preserve it when supplied, MUST preserve legacy records without it, and MUST NOT infer a
+  default. Known context-window tokens MUST not be smaller than the generation output budget.
 
 ### Key entities
 
@@ -162,7 +166,7 @@ dataset and that Pages deployment runs only from the default branch.
 - **Submission identifier**: A deterministic digest of canonical submission content.
 - **Leaderboard case**: A case identifier plus categorical outcome, termination, and route fields.
 - **Hardware descriptor**: Structured public product details for the CPU, system memory,
-  accelerators used during inference, execution mode, and runtime.
+  accelerators used during inference, execution mode, runtime, and optional runtime configuration.
 - **Leaderboard dataset**: The deterministic collection of accepted records with quality-only ranks.
 - **Submission review**: The public pull request and automated checks used before an entry is accepted.
 

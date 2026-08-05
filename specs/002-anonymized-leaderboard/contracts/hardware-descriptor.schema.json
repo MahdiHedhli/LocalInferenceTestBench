@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "hardware-descriptor.schema.json",
   "title": "Local Inference Test Bench public environment descriptor",
-  "description": "A closed description of the hardware used for inference and its runtime. Direct machine identifiers, network data, unused inventory, and free-form notes are outside this contract.",
+  "description": "A closed description of the hardware used for inference, its runtime, and an optional explicit runtime configuration. Direct machine identifiers, network data, unused inventory, and free-form notes are outside this contract.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,6 +19,9 @@
     },
     "runtime": {
       "$ref": "#/$defs/runtime"
+    },
+    "runtime_configuration": {
+      "$ref": "#/$defs/runtimeConfiguration"
     }
   },
   "$defs": {
@@ -249,6 +252,50 @@
         },
         "backend": {
           "$ref": "#/$defs/publicText100"
+        }
+      }
+    },
+    "runtimeConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "context_window_tokens",
+        "concurrent_requests",
+        "speculative_decoding",
+        "offload_mode"
+      ],
+      "properties": {
+        "context_window_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "concurrent_requests": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "speculative_decoding": {
+          "enum": [
+            "enabled",
+            "disabled",
+            "unknown"
+          ]
+        },
+        "offload_mode": {
+          "enum": [
+            "none",
+            "partial",
+            "maximum",
+            "not_applicable",
+            "unknown"
+          ]
         }
       }
     }

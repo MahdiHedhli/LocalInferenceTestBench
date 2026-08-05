@@ -89,6 +89,7 @@ _GENERIC_ACCOUNT_NAMES = {
 }
 _PUBLIC_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _VALIDITIES = {"valid", "limited", "invalid"}
+_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 _OUTCOMES = {"pass", "semantic_only", "format_only", "fail", "not_scored"}
 _ROUTES = {
     "direct_response",
@@ -333,11 +334,14 @@ def _boolean(value: Any, path: str) -> bool:
 
 
 def _validate_settings(value: Any, path: str) -> int:
-    settings = _object(
-        value,
-        {"temperature", "top_p", "max_output_tokens", "seed"},
-        path,
-    )
+    required = {"temperature", "top_p", "max_output_tokens", "seed"}
+    if (
+        not isinstance(value, Mapping)
+        or not required.issubset(value)
+        or not set(value).issubset(required | {"reasoning_effort"})
+    ):
+        raise ReportError(f"{path} has an unsupported object contract")
+    settings = value
     temperature = _number(settings["temperature"], f"{path}.temperature")
     if temperature > 2:
         raise ReportError(f"{path}.temperature exceeds the supported maximum")
@@ -349,6 +353,12 @@ def _validate_settings(value: Any, path: str) -> int:
     )
     if settings["seed"] is not None:
         _integer(settings["seed"], f"{path}.seed", minimum=-(2**63))
+    if "reasoning_effort" in settings:
+        _enum(
+            settings["reasoning_effort"],
+            _REASONING_EFFORTS,
+            f"{path}.reasoning_effort",
+        )
     return maximum
 
 

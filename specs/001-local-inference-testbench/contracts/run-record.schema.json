@@ -107,6 +107,16 @@
             "null"
           ],
           "minimum": -9223372036854775808
+        },
+        "reasoning_effort": {
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
         }
       }
     },

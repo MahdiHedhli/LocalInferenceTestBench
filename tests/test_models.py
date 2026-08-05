@@ -74,6 +74,10 @@ class ManifestTests(unittest.TestCase):
             ("top_p", lambda settings: settings.__setitem__("top_p", 0)),
             ("max_output_tokens", lambda settings: settings.__setitem__("max_output_tokens", 0)),
             ("seed", lambda settings: settings.__setitem__("seed", True)),
+            (
+                "reasoning_effort",
+                lambda settings: settings.__setitem__("reasoning_effort", "extreme"),
+            ),
         )
         for label, mutate in mutations:
             data = valid_manifest_data()
@@ -90,6 +94,17 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(manifest.models[0].id, "model-a-rev-1")
         self.assertEqual(manifest.models[0].settings.max_output_tokens, 256)
         self.assertRegex(manifest.public_sha256, r"^[0-9a-f]{64}$")
+
+    def test_optional_reasoning_effort_is_public_and_bounded(self) -> None:
+        data = valid_manifest_data()
+        data["models"][0]["settings"]["reasoning_effort"] = "none"
+
+        manifest = parse_manifest(data)
+
+        settings = manifest.models[0].settings
+        self.assertEqual(settings.reasoning_effort, "none")
+        self.assertEqual(settings.as_api_parameters()["reasoning_effort"], "none")
+        self.assertEqual(settings.as_report_data()["reasoning_effort"], "none")
 
     def test_public_fingerprint_excludes_credential_and_runtime_selector(self) -> None:
         first_data = valid_manifest_data()

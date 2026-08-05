@@ -166,6 +166,9 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     r"[^\s,;#}]+"
     r")"
 )
+_SCANNER_SUPPRESSION_MARKER = re.compile(
+    r"(?i)\b" + "git" + r"leaks\s*:\s*allow\b"
+)
 
 
 @dataclass(frozen=True, order=True)
@@ -487,6 +490,9 @@ def _scan_line(line: str, path: str, line_number: int, context: ScanContext) -> 
 
     if _PRIVATE_KEY_HEADER.search(line):
         yield Finding("private-key", path, line_number)
+
+    if _SCANNER_SUPPRESSION_MARKER.search(line):
+        yield Finding("scanner-suppression", path, line_number)
 
     for assignment in _CREDENTIAL_ASSIGNMENT.finditer(line):
         if not _credential_value_is_safe(assignment.group("name"), assignment.group("value")):

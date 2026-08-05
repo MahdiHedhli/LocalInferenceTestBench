@@ -1,0 +1,29 @@
+# Tasks: Guided result sharing
+
+**Input**: Design documents from `specs/003-guided-result-sharing/`
+
+## Phase 1: Post-run decision and safe local retry
+
+- [x] T001 Add safe-default post-run CLI arguments and TTY gating in `cli.py`.
+- [x] T002 Persist the private report before post-action eligibility or prompting.
+- [x] T003 Add canonical submission rendering and idempotent owner-only saving.
+- [x] T004 Add CLI tests for private, save, invalid, non-interactive, cancel, and multi-model paths.
+
+## Phase 2: Reviewed GitHub publication
+
+- [x] T005 Add fixed-host GitHub identity preflight and explicit public disclosure.
+- [x] T006 Add strict denylist, Gitleaks, unit, deterministic, privacy, and exact-diff gates.
+- [x] T007 Build candidate and leaderboard bytes in an isolated canonical clone.
+- [x] T008 Add owner-branch and verified-fork Git-data API flow without direct `main` writes.
+- [x] T009 Add accepted-result, open-PR, stale-base, ref-collision, and partial-failure behavior.
+- [x] T010 Add mocked command/API tests proving fixed routing and minimized payloads.
+
+## Phase 3: Hosted boundary and documentation
+
+- [x] T011 Add benchmark PR exact-diff validation and unit tests.
+- [x] T012 Add the exact-diff guard to the publication CI job.
+- [x] T013 Update README, contribution, submission, privacy, and Pages guidance.
+- [x] T014 Publish this Spec Kit feature set and CLI contract.
+- [x] T015 Run the complete unit, syntax, deterministic, strict privacy, and secret checks.
+- [x] T016 Exercise isolated clone preparation with a synthetic candidate and no GitHub mutation.
+- [x] T017 Complete final privacy/security review and confirm the working tree contains no result data.

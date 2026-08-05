@@ -378,6 +378,20 @@ class ClientIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(partial.finish_reason, "length")
 
+    def test_explicit_reasoning_effort_is_sent_as_a_top_level_parameter(self) -> None:
+        with StubServer() as stub:
+            client = OpenAICompatibleClient(stub.endpoint, timeout_seconds=2)
+            client.chat_completions(
+                model="stub-model",
+                messages=({"role": "user", "content": "synthetic request"},),
+                settings=GenerationSettings(
+                    max_output_tokens=32,
+                    reasoning_effort="none",
+                ),
+            )
+
+        self.assertEqual(stub.server.last_request["reasoning_effort"], "none")
+
     def test_response_size_limit_fails_with_a_categorical_error(self) -> None:
         with StubServer() as stub, patch.object(client_module, "MAX_RESPONSE_BYTES", 64):
             client = OpenAICompatibleClient(stub.endpoint, timeout_seconds=2)

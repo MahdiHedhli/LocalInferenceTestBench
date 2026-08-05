@@ -18,10 +18,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from local_inference_test_bench.submissions import (  # noqa: E402
     SubmissionError,
     build_leaderboard,
+    ensure_submission,
     load_json_object,
     load_public_environment_file,
+    load_saved_submission,
     prepare_submission,
     prepare_submissions,
+    render_submission_bytes,
     validate_submission,
     write_leaderboard,
     write_submission,
@@ -60,6 +63,15 @@ def public_environment(*, cpu_model: str = "Example CPU") -> dict:
             "version": "1.2.3",
             "backend": "generic-backend",
         },
+    }
+
+
+def runtime_configuration() -> dict:
+    return {
+        "context_window_tokens": 4096,
+        "concurrent_requests": 1,
+        "speculative_decoding": "disabled",
+        "offload_mode": "maximum",
     }
 
 
@@ -356,6 +368,13 @@ class SubmissionTests(unittest.TestCase):
                 with self.assertRaises(SubmissionError):
                     prepare_submission(report, public_environment())
 
+    def test_public_text_rejects_secret_scanner_suppression_marker(self) -> None:
+        marker = "git" + "leaks:allow"
+        report = valid_report(source="example/model " + marker)
+
+        with self.assertRaisesRegex(SubmissionError, "scanner suppression"):
+            prepare_submission(report, public_environment())
+
     def test_public_hardware_is_closed_safe_and_affects_content_id(self) -> None:
         first = prepare_submission(valid_report(), public_environment(cpu_model="Processor One"))
         second = prepare_submission(valid_report(), public_environment(cpu_model="Processor Two"))
@@ -367,6 +386,89 @@ class SubmissionTests(unittest.TestCase):
         for descriptor in (unsafe, unknown):
             with self.assertRaises(SubmissionError):
                 prepare_submission(valid_report(), descriptor)
+
+    def test_runtime_configuration_is_optional_closed_and_carried_to_dataset(self) -> None:
+        legacy = prepare_submission(valid_report(), public_environment())
+        descriptor = public_environment()
+        descriptor["runtime_configuration"] = runtime_configuration()
+
+        configured = prepare_submission(valid_report(), descriptor)
+
+        self.assertNotIn("runtime_configuration", legacy)
+        self.assertEqual(
+            configured["runtime_configuration"],
+            descriptor["runtime_configuration"],
+        )
+        self.assertNotEqual(configured["submission_id"], legacy["submission_id"])
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / f"{configured['submission_id']}.json").write_text(
+                json.dumps(configured),
+                encoding="utf-8",
+            )
+            leaderboard = build_leaderboard(directory)
+        self.assertEqual(
+            leaderboard["entries"][0]["runtime_configuration"],
+            descriptor["runtime_configuration"],
+        )
+
+    def test_runtime_configuration_rejects_unknown_fields_ranges_and_categories(self) -> None:
+        invalid_configurations = []
+        extra = runtime_configuration()
+        extra["runtime_flags"] = "not accepted"
+        invalid_configurations.append(extra)
+        missing = runtime_configuration()
+        missing.pop("concurrent_requests")
+        invalid_configurations.append(missing)
+        for field, value in (
+            ("context_window_tokens", 0),
+            ("context_window_tokens", True),
+            ("concurrent_requests", 0),
+            ("concurrent_requests", 4097),
+            ("speculative_decoding", "automatic"),
+            ("offload_mode", "full"),
+        ):
+            configuration = runtime_configuration()
+            configuration[field] = value
+            invalid_configurations.append(configuration)
+
+        for configuration in invalid_configurations:
+            with self.subTest(configuration=configuration):
+                descriptor = public_environment()
+                descriptor["runtime_configuration"] = configuration
+                with self.assertRaises(SubmissionError):
+                    prepare_submission(valid_report(), descriptor)
+
+    def test_runtime_configuration_nulls_are_explicit_and_context_bounds_output(self) -> None:
+        unknown = public_environment()
+        unknown["runtime_configuration"] = runtime_configuration()
+        unknown["runtime_configuration"]["context_window_tokens"] = None
+        unknown["runtime_configuration"]["concurrent_requests"] = None
+
+        submission = prepare_submission(valid_report(), unknown)
+
+        self.assertIsNone(submission["runtime_configuration"]["context_window_tokens"])
+        self.assertIsNone(submission["runtime_configuration"]["concurrent_requests"])
+
+        too_small = public_environment()
+        too_small["runtime_configuration"] = runtime_configuration()
+        too_small["runtime_configuration"]["context_window_tokens"] = 64
+        with self.assertRaisesRegex(SubmissionError, "configured context window"):
+            prepare_submission(valid_report(), too_small)
+
+    def test_optional_reasoning_effort_is_preserved_and_validated(self) -> None:
+        legacy = prepare_submission(valid_report(), public_environment())
+        report = valid_report()
+        report["models"][0]["settings"]["reasoning_effort"] = "high"
+
+        submission = prepare_submission(report, public_environment())
+
+        self.assertNotIn("reasoning_effort", legacy["settings"])
+        self.assertEqual(submission["settings"]["reasoning_effort"], "high")
+
+        report["models"][0]["settings"]["reasoning_effort"] = "automatic"
+        with self.assertRaises(SubmissionError):
+            prepare_submission(report, public_environment())
 
     def test_public_hardware_rejects_identifiers_hidden_in_allowed_text(self) -> None:
         descriptors = []
@@ -502,6 +604,68 @@ class SubmissionTests(unittest.TestCase):
                 with self.assertRaisesRegex(SubmissionError, "regular"):
                     load_public_environment_file(link)
 
+    def test_saved_submission_loader_requires_exact_secure_canonical_candidate(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        ignored_parent = repository / ".local"
+        ignored_parent.mkdir(exist_ok=True)
+        submission = prepare_submission(valid_report(), public_environment())
+        canonical = render_submission_bytes(submission)
+        with (
+            tempfile.TemporaryDirectory(prefix="candidate-", dir=ignored_parent) as ignored,
+            tempfile.TemporaryDirectory(prefix=".candidate-", dir=repository) as visible,
+        ):
+            ignored_directory = Path(ignored)
+            accepted = ignored_directory / f"{submission['submission_id']}.json"
+            accepted.write_bytes(canonical)
+            accepted.chmod(0o600)
+
+            self.assertEqual(load_saved_submission(accepted), submission)
+
+            wrong_name = ignored_directory / "candidate.json"
+            wrong_name.write_bytes(canonical)
+            wrong_name.chmod(0o600)
+            with self.assertRaisesRegex(SubmissionError, "filename"):
+                load_saved_submission(wrong_name)
+
+            # Give it the required digest name in its own ignored directory so the
+            # byte-format rejection, rather than the filename rejection, is exercised.
+            nested = ignored_directory / "nested"
+            nested.mkdir(mode=0o700)
+            noncanonical = nested / accepted.name
+            noncanonical.write_text(
+                json.dumps(submission, sort_keys=True), encoding="utf-8"
+            )
+            noncanonical.chmod(0o600)
+            with self.assertRaisesRegex(SubmissionError, "not canonical"):
+                load_saved_submission(noncanonical)
+
+            visible_path = Path(visible) / accepted.name
+            visible_path.write_bytes(canonical)
+            visible_path.chmod(0o600)
+            with self.assertRaisesRegex(SubmissionError, "Git-ignored"):
+                load_saved_submission(visible_path)
+
+            with tempfile.TemporaryDirectory() as outside:
+                outside_path = Path(outside) / accepted.name
+                outside_path.write_bytes(canonical)
+                outside_path.chmod(0o600)
+                self.assertEqual(load_saved_submission(outside_path), submission)
+
+            if os.name != "nt":
+                accepted.chmod(0o644)
+                with self.assertRaisesRegex(SubmissionError, "owner-only"):
+                    load_saved_submission(accepted)
+                accepted.chmod(0o600)
+
+            link = ignored_directory / f"linked-{accepted.name}"
+            try:
+                link.symlink_to(accepted)
+            except (NotImplementedError, OSError):
+                link = None
+            if link is not None:
+                with self.assertRaisesRegex(SubmissionError, "regular"):
+                    load_saved_submission(link)
+
     def test_write_is_owner_only_and_append_only(self) -> None:
         submission = prepare_submission(valid_report(), public_environment())
         with tempfile.TemporaryDirectory() as temporary:
@@ -512,6 +676,73 @@ class SubmissionTests(unittest.TestCase):
 
         if os.name != "nt":
             self.assertEqual(mode, 0o600)
+
+    def test_ensure_submission_is_idempotent_but_never_overwrites(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "candidates"
+            first = ensure_submission(submission, directory)
+            second = ensure_submission(submission, directory)
+
+            self.assertEqual(first, second)
+            self.assertEqual(first.read_bytes(), render_submission_bytes(submission))
+
+            first.write_text("{}\n", encoding="utf-8")
+            with self.assertRaisesRegex(SubmissionError, "different content"):
+                ensure_submission(submission, directory)
+
+    @unittest.skipIf(os.name == "nt", "POSIX permission contract")
+    def test_ensure_submission_rejects_a_visible_existing_candidate(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "candidates"
+            path = ensure_submission(submission, directory)
+            path.chmod(0o644)
+
+            with self.assertRaisesRegex(SubmissionError, "owner-only"):
+                ensure_submission(submission, directory)
+
+    def test_submission_destination_must_be_ignored_inside_a_worktree(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(
+                ["git", "init", "--quiet"],
+                cwd=root,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            (root / ".gitignore").write_text(".private/\n", encoding="utf-8")
+
+            with (
+                mock.patch.dict(os.environ, {"GIT_DIR": "/invalid/repository"}),
+                self.assertRaisesRegex(SubmissionError, "destination"),
+            ):
+                ensure_submission(submission, root / "site" / "data" / "submissions")
+
+            with mock.patch.dict(os.environ, {"GIT_DIR": "/invalid/repository"}):
+                saved = ensure_submission(submission, root / ".private" / "submissions")
+            self.assertTrue(saved.is_file())
+
+    def test_submission_destination_rejects_an_indeterminate_tracked_probe(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            destination = root / ".private" / "submissions"
+            results = (
+                subprocess.CompletedProcess([], 0, stdout=f"{root}\n", stderr=""),
+                subprocess.CompletedProcess([], 128, stdout="", stderr=""),
+                subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+            )
+            with (
+                mock.patch(
+                    "local_inference_test_bench.safety.subprocess.run",
+                    side_effect=results,
+                ),
+                self.assertRaisesRegex(SubmissionError, "destination"),
+            ):
+                ensure_submission(submission, destination)
 
     def test_leaderboard_ranks_quality_only_and_shares_ranks_for_ties(self) -> None:
         best_fast = prepare_submission(

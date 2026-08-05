@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "leaderboard-dataset.schema.json",
   "title": "Local Inference Test Bench leaderboard dataset",
-  "description": "The deterministic static dataset built from accepted leaderboard submissions.",
+  "description": "The deterministic static dataset built from accepted leaderboard submissions, preserving optional explicit runtime configuration.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -62,6 +62,9 @@
         },
         "runtime": {
           "$ref": "hardware-descriptor.schema.json#/$defs/runtime"
+        },
+        "runtime_configuration": {
+          "$ref": "hardware-descriptor.schema.json#/$defs/runtimeConfiguration"
         },
         "model": {
           "$ref": "leaderboard-submission.schema.json#/$defs/model"

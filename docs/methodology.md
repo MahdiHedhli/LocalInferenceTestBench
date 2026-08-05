@@ -11,7 +11,7 @@ latency, throughput, memory pressure, and thermals generally cannot.
 Treat the following tuple as one candidate. If any element changes, record a new result instead of
 overwriting the old one:
 
-- model source and exact revision or digest;
+- model source and exact revision, weight digest, or documented composite checksum-manifest digest;
 - artifact format and quantization or precision;
 - runtime and runtime version;
 - context limit and generation settings;
@@ -31,15 +31,20 @@ conditions before testing. Avoid selecting metrics after seeing results.
 
 ### 2. Freeze the case and candidate manifests
 
-Pin the suite version and record public provenance for every candidate. Keep runtime selectors in a
-local ignored manifest if they reveal internal naming.
+Pin the suite version and record public provenance for every candidate. For multi-shard artifacts,
+the operator guide defines the path-free `sha256-manifest-v1` checksum-manifest scheme; record its
+derivation evidence privately and do not present it as an independent rehash of the weights. Keep
+runtime selectors in a local ignored manifest if they reveal internal naming.
 
 ### 3. Establish a valid comparison window
 
 - Load and configure models outside the baseline harness.
 - Test one resource-intensive model at a time.
 - Stop unrelated local inference clients and record whether the environment was stable.
-- Use the same runtime settings for models in the same performance comparison.
+- Pin the runtime/backend version; verify context, concurrency, speculation, and offload settings.
+- Use the same verified runtime settings for models in the same performance comparison.
+- Record an explicit reasoning effort when used; omission means unreported/runtime behavior, not an
+  inferred effort level.
 - Warm up consistently, or label cold-start and warm measurements separately.
 
 The reference runner does not collect machine inventory. If an adapter collects resource data, keep
@@ -101,5 +106,7 @@ changes, and rollback planning belong to a separate reviewed change.
 - Treat missing usage data as missing, not zero.
 - A fenced but correct JSON object can pass semantics while failing exact-envelope adherence.
 - A response that consumes its output budget is not automatically a context-window failure.
+- A reasoning-only response at the configured output ceiling must be rerun with a justified larger
+  budget before it is treated as a model-quality result.
 - Reasoning text without a usable final message or tool call is not a successful consumer response.
 - Retain failed and invalid runs; do not silently replace inconvenient evidence.

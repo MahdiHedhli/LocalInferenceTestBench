@@ -38,12 +38,20 @@ Benchmark submissions use a public pull request. Before opening one, read
 
 1. Run the current `standard` profile and confirm that the report is valid.
 2. Copy `config/hardware.example.json` to `.local/hardware.json`, restrict it to owner access, and
-   enter the exact hardware used for inference plus the serving runtime.
-3. Run `litb prepare-submission` and review the complete minimized JSON file.
-4. Copy that file to `site/data/submissions/<submission_id>.json`.
-5. Run `python3 scripts/build_leaderboard.py` and commit the regenerated dataset.
-6. Run the unit suite and `./scripts/public-check --full-tree --strict`.
-7. Open the pull request with the benchmark submission template.
+   enter the exact hardware used for inference plus the serving runtime and its known configuration.
+3. Choose the public-PR option after a valid interactive standard run, or run
+   `litb run ... --submission pr --confirm-public` for an explicit non-interactive flow.
+4. Read the complete identifier-minimized JSON and the public-account disclosure before confirming.
+5. Let the tool build and validate an isolated two-file change and open the reviewed pull request.
+
+If a publication attempt is cancelled or fails, use
+`litb publish-submission --candidate .local/leaderboard-submissions/<submission-id>.json` to retry
+the already-saved candidate without rerunning the benchmark.
+
+The manual `litb prepare-submission` → copy → rebuild → validate → PR process remains available in
+[submitting a benchmark](docs/submitting-benchmarks.md). Automated benchmark PRs may add exactly one
+digest-named submission and update the generated leaderboard; do not mix code or documentation into
+them.
 
 The submission JSON has no contributor field, but your GitHub account and pull request are public.
 Exact hardware and performance details can also make a setup recognizable. Do not submit a file you
