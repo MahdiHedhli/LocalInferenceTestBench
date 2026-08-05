@@ -11,6 +11,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -22,6 +23,7 @@ from local_inference_test_bench.client import (  # noqa: E402
     Usage,
 )
 from local_inference_test_bench.models import parse_manifest  # noqa: E402
+from local_inference_test_bench import reporting as reporting_module  # noqa: E402
 from local_inference_test_bench.reporting import (  # noqa: E402
     ReportError,
     validate_report,
@@ -131,6 +133,25 @@ class StepClock:
 
 
 class RunnerTests(unittest.TestCase):
+    def test_runtime_identifier_collection_never_resolves_fqdn(self) -> None:
+        reporting_module._runtime_identifiers.cache_clear()
+        self.addCleanup(reporting_module._runtime_identifiers.cache_clear)
+        with (
+            mock.patch.object(
+                reporting_module.socket,
+                "gethostname",
+                return_value="host-label.example",
+            ),
+            mock.patch.object(
+                reporting_module.socket,
+                "getfqdn",
+                side_effect=AssertionError("resolver-backed lookup must not run"),
+            ),
+        ):
+            identifiers = set(reporting_module._runtime_identifiers())
+
+        self.assertTrue({"host-label", "host-label.example"}.issubset(identifiers))
+
     def test_baseline_imports_and_executes_without_site_or_optional_packages(self) -> None:
         script = textwrap.dedent(
             """

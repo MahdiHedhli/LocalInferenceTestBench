@@ -5,6 +5,7 @@ import ipaddress
 import json
 from pathlib import Path
 import socket
+from socketserver import TCPServer
 import sys
 import tempfile
 import threading
@@ -33,6 +34,16 @@ LOOPBACK = ".".join(("127", "0", "0", "1"))
 def ipv4(first: int, second: int, third: int, fourth: int) -> str:
     value = (first << 24) | (second << 16) | (third << 8) | fourth
     return str(ipaddress.IPv4Address(value))
+
+
+class ResolverFreeThreadingHTTPServer(ThreadingHTTPServer):
+    """Test-only HTTP server that never performs reverse DNS during bind."""
+
+    def server_bind(self) -> None:
+        TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
 
 
 class DeterministicStubHandler(BaseHTTPRequestHandler):
@@ -164,12 +175,16 @@ class DeterministicStubHandler(BaseHTTPRequestHandler):
 
 class StubServer:
     def __enter__(self):
-        self.server = ThreadingHTTPServer((LOOPBACK, 0), DeterministicStubHandler)
+        self.server = ResolverFreeThreadingHTTPServer((LOOPBACK, 0), DeterministicStubHandler)
         self.server.daemon_threads = True
         self.server.seen_authorization = None
         self.server.last_request = None
         self.server.omit_model_metadata = False
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(
+            target=self.server.serve_forever,
+            kwargs={"poll_interval": 0.01},
+            daemon=True,
+        )
         self.thread.start()
         host, port = self.server.server_address
         self.endpoint = f"http://{host}:{port}"
@@ -179,6 +194,8 @@ class StubServer:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
+        if self.thread.is_alive():
+            raise RuntimeError("synthetic HTTP server failed to stop")
 
 
 def answer(address: str) -> tuple:
@@ -291,6 +308,17 @@ class EndpointSafetyTests(unittest.TestCase):
 
 
 class ClientIntegrationTests(unittest.TestCase):
+    def test_stub_server_startup_never_resolves_fqdn(self) -> None:
+        with (
+            patch.object(
+                socket,
+                "getfqdn",
+                side_effect=AssertionError("synthetic server must not perform reverse DNS"),
+            ),
+            StubServer() as stub,
+        ):
+            self.assertTrue(stub.thread.is_alive())
+
     def test_request_envelope_includes_only_supported_generation_and_tool_fields(self) -> None:
         tool = {
             "type": "function",

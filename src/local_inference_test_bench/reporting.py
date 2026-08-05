@@ -194,14 +194,16 @@ def _runtime_identifiers() -> tuple[str, ...]:
         username = ""
     if username and username.casefold() not in _GENERIC_ACCOUNT_NAMES:
         candidates.add(username)
-    for getter in (socket.gethostname, socket.getfqdn):
-        try:
-            hostname = getter().strip().rstrip(".")
-        except OSError:
-            hostname = ""
-        if hostname and hostname.casefold() not in {"localhost", "localhost.localdomain"}:
-            candidates.add(hostname)
-            candidates.add(hostname.split(".", 1)[0])
+    # getfqdn() can block on resolver configuration. The kernel-provided
+    # hostname is local and immediate; private DNS aliases belong in the
+    # required local denylist.
+    try:
+        hostname = socket.gethostname().strip().rstrip(".")
+    except OSError:
+        hostname = ""
+    if hostname and hostname.casefold() not in {"localhost", "localhost.localdomain"}:
+        candidates.add(hostname)
+        candidates.add(hostname.split(".", 1)[0])
     return tuple(candidate for candidate in candidates if len(candidate) >= 3)
 
 
