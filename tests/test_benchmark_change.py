@@ -120,8 +120,17 @@ class BenchmarkChangeBoundaryTests(unittest.TestCase):
                 check=True,
             )
             validate_benchmark_modes(root, "HEAD")
-            submission.chmod(0o755)
-            subprocess.run(["git", "add", submission.relative_to(root)], cwd=root, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "update-index",
+                    "--chmod=+x",
+                    "--",
+                    submission.relative_to(root).as_posix(),
+                ],
+                cwd=root,
+                check=True,
+            )
             subprocess.run(
                 [
                     "git",
