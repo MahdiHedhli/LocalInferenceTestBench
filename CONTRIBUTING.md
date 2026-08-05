@@ -40,7 +40,9 @@ Benchmark submissions use a public pull request. Before opening one, read
 2. Copy `config/hardware.example.json` to `.local/hardware.json`, restrict it to owner access, and
    enter the exact hardware used for inference plus the serving runtime and its known configuration.
 3. Choose the public-PR option after a valid interactive standard run, or run
-   `litb run ... --submission pr --confirm-public` for an explicit non-interactive flow.
+   `litb run ... --submission pr --confirm-public --submission-model <report-model-id>` for an
+   explicit non-interactive flow. The model selection is required when the report contains more
+   than one model and may be omitted for a single-model run.
 4. Read the complete identifier-minimized JSON and the public-account disclosure before confirming.
 5. Let the tool build and validate an isolated two-file change and open the reviewed pull request.
 

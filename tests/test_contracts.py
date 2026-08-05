@@ -52,6 +52,9 @@ class PublishedContractTests(unittest.TestCase):
         environment["runtime_configuration"] = runtime_configuration()
         submission = prepare_submission(report, environment)
         self.validator.validate(submission, "leaderboard-submission.schema.json")
+        self.assertEqual(
+            submission["runtime_configuration"], environment["runtime_configuration"]
+        )
 
         with tempfile.TemporaryDirectory() as temporary:
             submissions = Path(temporary)
@@ -60,6 +63,10 @@ class PublishedContractTests(unittest.TestCase):
             dataset = build_leaderboard(submissions)
 
         self.validator.validate(dataset, "leaderboard-dataset.schema.json")
+        self.assertEqual(
+            dataset["entries"][0]["runtime_configuration"],
+            environment["runtime_configuration"],
+        )
 
     def test_every_accepted_record_matches_runtime_and_published_contracts(self) -> None:
         submissions = PROJECT_ROOT / "site" / "data" / "submissions"

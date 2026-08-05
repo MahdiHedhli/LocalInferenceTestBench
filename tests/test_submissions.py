@@ -426,7 +426,11 @@ class SubmissionTests(unittest.TestCase):
             ("concurrent_requests", 0),
             ("concurrent_requests", 4097),
             ("speculative_decoding", "automatic"),
+            ("speculative_decoding", []),
+            ("speculative_decoding", {}),
             ("offload_mode", "full"),
+            ("offload_mode", []),
+            ("offload_mode", {}),
         ):
             configuration = runtime_configuration()
             configuration[field] = value
@@ -438,6 +442,18 @@ class SubmissionTests(unittest.TestCase):
                 descriptor["runtime_configuration"] = configuration
                 with self.assertRaises(SubmissionError):
                     prepare_submission(valid_report(), descriptor)
+
+        descriptor = public_environment()
+        descriptor["runtime_configuration"] = runtime_configuration()
+        candidate = prepare_submission(valid_report(), descriptor)
+        for field in ("speculative_decoding", "offload_mode"):
+            for value in ([], {}):
+                invalid = copy.deepcopy(candidate)
+                invalid["runtime_configuration"][field] = value
+                with self.subTest(field=field, value=value), self.assertRaisesRegex(
+                    SubmissionError, rf"{field} is unsupported"
+                ):
+                    validate_submission(invalid)
 
     def test_runtime_configuration_nulls_are_explicit_and_context_bounds_output(self) -> None:
         unknown = public_environment()
@@ -466,9 +482,13 @@ class SubmissionTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", legacy["settings"])
         self.assertEqual(submission["settings"]["reasoning_effort"], "high")
 
-        report["models"][0]["settings"]["reasoning_effort"] = "automatic"
-        with self.assertRaises(SubmissionError):
-            prepare_submission(report, public_environment())
+        for value in ("automatic", [], {}):
+            invalid = copy.deepcopy(submission)
+            invalid["settings"]["reasoning_effort"] = value
+            with self.subTest(value=value), self.assertRaisesRegex(
+                SubmissionError, "reasoning_effort is unsupported"
+            ):
+                validate_submission(invalid)
 
     def test_public_hardware_rejects_identifiers_hidden_in_allowed_text(self) -> None:
         descriptors = []

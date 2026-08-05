@@ -24,6 +24,7 @@ from local_inference_test_bench.models import GenerationSettings  # noqa: E402
 from local_inference_test_bench.safety import (  # noqa: E402
     SafetyError,
     load_credential,
+    validate_env_file,
     validate_endpoint,
 )
 
@@ -305,6 +306,38 @@ class EndpointSafetyTests(unittest.TestCase):
                 path.chmod(0o644)
                 with self.assertRaisesRegex(SafetyError, "owner-only"):
                     load_credential("INFERENCE_TEST_TOKEN", env_file=path, environ={})
+
+    def test_git_probe_exception_allows_only_optional_outside_worktree_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / ".env"
+            path.write_text("INFERENCE_TEST_TOKEN=placeholder\n", encoding="utf-8")
+            if sys.platform != "win32":
+                path.chmod(0o600)
+
+            with patch(
+                "local_inference_test_bench.safety.subprocess.run",
+                side_effect=OSError("git unavailable"),
+            ):
+                self.assertEqual(validate_env_file(path), path)
+
+            with (
+                patch(
+                    "local_inference_test_bench.safety.subprocess.run",
+                    side_effect=OSError("git unavailable"),
+                ),
+                self.assertRaisesRegex(SafetyError, "ignored by Git"),
+            ):
+                validate_env_file(path, require_worktree=True)
+
+            (Path(temporary) / ".git").mkdir()
+            with (
+                patch(
+                    "local_inference_test_bench.safety.subprocess.run",
+                    side_effect=OSError("git unavailable"),
+                ),
+                self.assertRaisesRegex(SafetyError, "ignored by Git"),
+            ):
+                validate_env_file(path)
 
 
 class ClientIntegrationTests(unittest.TestCase):

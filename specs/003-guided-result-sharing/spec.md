@@ -113,14 +113,19 @@ generated leaderboard, fixed digest metadata, and fixed repository routing.
   MUST receive a scrubbed environment and uploaded bytes MUST be read from the checked Git index.
 - **FR-010**: Publication MUST operate in an isolated private temporary clone of canonical upstream
   and MUST stage exactly one new digest-named submission plus the generated leaderboard.
-- **FR-011**: The source report, descriptor, endpoint, credentials, environment, artifact directory,
-  denylist, local paths, and private model selector MUST NOT enter a GitHub API request or PR body.
+- **FR-011**: Raw or private inputs—the source report, raw descriptor or environment, endpoint,
+  credentials, artifact directory, denylist, local paths, and private model selector—MUST NOT enter
+  a GitHub API request or PR body. Publication MAY upload only the validated candidate submission
+  and deterministically generated leaderboard payloads, including the approved public
+  `runtime_configuration` retained in those bytes; other PR metadata MUST remain fixed and
+  non-secret.
 - **FR-012**: Publication MUST abort before branch creation when upstream changes during preparation.
 - **FR-013**: A multi-model public PR MUST require explicit selection of one result; local save MAY
   preserve all separated candidates.
-- **FR-014**: Retry MUST recognize an already accepted result or matching open PR only after verifying
-  exact repository, branch, base, file set, and payload bytes, and MUST refuse a colliding branch
-  without overwriting it.
+- **FR-014**: Retry MUST recognize an already accepted result, matching open PR, or verified
+  deterministic branch left by failed PR creation only after verifying the exact repository,
+  branch, base parent, file set, commit tree, and payload bytes. A verified orphan branch MAY be
+  resumed only by creating its missing PR; any mismatch MUST be refused without overwriting it.
 - **FR-015**: Continuous integration MUST reject any benchmark PR that changes anything beyond one
   append-only submission and the deterministically regenerated leaderboard, using validator bytes
   from the trusted pull-request base commit.

@@ -87,11 +87,31 @@ class _CommandResult:
 
 
 @dataclass(frozen=True)
+class _BinaryCommandResult:
+    returncode: int
+    stdout: bytes
+
+
+@dataclass(frozen=True)
 class _PreparedChange:
     base_sha: str
     base_tree: str
     submission_bytes: bytes
     leaderboard_bytes: bytes
+
+
+def _command_environment(
+    *,
+    extra_environment: Mapping[str, str] | None = None,
+    github_auth: bool = False,
+) -> dict[str, str]:
+    allowed = _SAFE_ENVIRONMENT_KEYS + (
+        _GITHUB_AUTH_ENVIRONMENT_KEYS if github_auth else ()
+    )
+    environment = {key: os.environ[key] for key in allowed if key in os.environ}
+    if extra_environment:
+        environment.update(extra_environment)
+    return environment
 
 
 def _run_command(
@@ -103,12 +123,10 @@ def _run_command(
     extra_environment: Mapping[str, str] | None = None,
     github_auth: bool = False,
 ) -> _CommandResult:
-    allowed = _SAFE_ENVIRONMENT_KEYS + (
-        _GITHUB_AUTH_ENVIRONMENT_KEYS if github_auth else ()
+    environment = _command_environment(
+        extra_environment=extra_environment,
+        github_auth=github_auth,
     )
-    environment = {key: os.environ[key] for key in allowed if key in os.environ}
-    if extra_environment:
-        environment.update(extra_environment)
     try:
         completed = subprocess.run(
             list(arguments),
@@ -127,6 +145,34 @@ def _run_command(
     return _CommandResult(completed.returncode, completed.stdout)
 
 
+def _run_binary_command(
+    arguments: Sequence[str],
+    *,
+    cwd: Path | None = None,
+    timeout: float = 120.0,
+    extra_environment: Mapping[str, str] | None = None,
+    github_auth: bool = False,
+) -> _BinaryCommandResult:
+    environment = _command_environment(
+        extra_environment=extra_environment,
+        github_auth=github_auth,
+    )
+    try:
+        completed = subprocess.run(
+            list(arguments),
+            cwd=cwd,
+            text=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=timeout,
+            env=environment,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise PublicationError("publication helper could not run safely") from error
+    return _BinaryCommandResult(completed.returncode, completed.stdout)
+
+
 def _must_run(
     arguments: Sequence[str],
     *,
@@ -141,6 +187,27 @@ def _must_run(
         arguments,
         cwd=cwd,
         input_text=input_text,
+        timeout=timeout,
+        extra_environment=extra_environment,
+        github_auth=github_auth,
+    )
+    if result.returncode != 0:
+        raise PublicationError(error_message)
+    return result.stdout
+
+
+def _must_run_bytes(
+    arguments: Sequence[str],
+    *,
+    cwd: Path | None = None,
+    timeout: float = 120.0,
+    extra_environment: Mapping[str, str] | None = None,
+    github_auth: bool = False,
+    error_message: str,
+) -> bytes:
+    result = _run_binary_command(
+        arguments,
+        cwd=cwd,
         timeout=timeout,
         extra_environment=extra_environment,
         github_auth=github_auth,
@@ -336,14 +403,17 @@ def _assert_exact_index(repository: Path, expected: set[str]) -> None:
 
 
 def _read_staged_bytes(repository: Path, relative: Path) -> bytes:
-    raw = _must_run(
-        ["git", "-C", os.fspath(repository), "show", f":{relative.as_posix()}"],
+    return _must_run_bytes(
+        [
+            "git",
+            "-C",
+            os.fspath(repository),
+            "cat-file",
+            "blob",
+            f":{relative.as_posix()}",
+        ],
         error_message="the staged publication payload could not be read",
     )
-    try:
-        return raw.encode("utf-8")
-    except UnicodeError as error:
-        raise PublicationError("the staged publication payload was not UTF-8") from error
 
 
 def _prepare_change(
@@ -525,6 +595,93 @@ def _create_blob(repository: str, contents: bytes) -> str:
     return sha
 
 
+def _verify_existing_publication_branch(
+    repository: str,
+    branch: str,
+    reference: Mapping[str, Any],
+    prepared: _PreparedChange,
+    submission_id: str,
+) -> None:
+    target = reference.get("object")
+    expected_ref = f"refs/heads/{branch}"
+    if (
+        reference.get("ref") != expected_ref
+        or not isinstance(target, dict)
+        or target.get("type") != "commit"
+        or not isinstance(target.get("sha"), str)
+        or _COMMIT_SHA.fullmatch(target["sha"]) is None
+    ):
+        raise PublicationError(
+            "the existing deterministic publication branch has unexpected identity"
+        )
+    commit_sha = target["sha"]
+    commit = _gh_api(
+        f"repos/{repository}/git/commits/{quote(commit_sha, safe='')}",
+        error_message="the existing deterministic publication branch could not be inspected",
+    )
+    tree = commit.get("tree")
+    parents = commit.get("parents")
+    tree_sha = tree.get("sha") if isinstance(tree, dict) else None
+    if (
+        commit.get("sha") != commit_sha
+        or commit.get("message") != f"data: submit benchmark {submission_id}"
+        or not isinstance(tree_sha, str)
+        or _COMMIT_SHA.fullmatch(tree_sha) is None
+        or not isinstance(parents, list)
+        or len(parents) != 1
+        or not isinstance(parents[0], dict)
+        or parents[0].get("sha") != prepared.base_sha
+    ):
+        raise PublicationError(
+            "the existing deterministic publication branch has unexpected content"
+        )
+    comparison = _gh_api(
+        f"repos/{repository}/compare/{prepared.base_sha}...{commit_sha}?per_page=100",
+        error_message="the existing deterministic publication branch could not be compared",
+    )
+    base_commit = comparison.get("base_commit")
+    merge_base = comparison.get("merge_base_commit")
+    commits = comparison.get("commits")
+    files = comparison.get("files")
+    submission_path = f"site/data/submissions/{submission_id}.json"
+    expected_files = {
+        ("added", submission_path),
+        ("modified", "site/data/leaderboard.json"),
+    }
+    observed_files = (
+        {(item.get("status"), item.get("filename")) for item in files}
+        if isinstance(files, list) and all(isinstance(item, dict) for item in files)
+        else set()
+    )
+    if (
+        comparison.get("status") != "ahead"
+        or comparison.get("ahead_by") != 1
+        or comparison.get("behind_by") != 0
+        or comparison.get("total_commits") != 1
+        or not isinstance(base_commit, dict)
+        or base_commit.get("sha") != prepared.base_sha
+        or not isinstance(merge_base, dict)
+        or merge_base.get("sha") != prepared.base_sha
+        or not isinstance(commits, list)
+        or len(commits) != 1
+        or not isinstance(commits[0], dict)
+        or commits[0].get("sha") != commit_sha
+        or observed_files != expected_files
+        or not isinstance(files, list)
+        or len(files) != 2
+    ):
+        raise PublicationError(
+            "the existing deterministic publication branch has unexpected content"
+        )
+    _verify_publication_tree(
+        repository,
+        tree_sha,
+        submission_path,
+        prepared,
+        subject="publication branch",
+    )
+
+
 def _existing_pull_request(
     identity: PublicationIdentity, branch: str
 ) -> dict[str, Any] | None:
@@ -545,18 +702,64 @@ def _existing_pull_request(
 def _repository_blob_bytes(repository: str, blob_sha: str) -> bytes:
     payload = _gh_api(
         f"repos/{repository}/git/blobs/{quote(blob_sha, safe='')}",
-        error_message="an existing pull-request payload could not be inspected",
+        error_message="an existing public payload could not be inspected",
     )
     content = payload.get("content")
     if payload.get("encoding") != "base64" or not isinstance(content, str):
-        raise PublicationError("GitHub returned an invalid pull-request payload")
+        raise PublicationError("GitHub returned an invalid public payload")
     compact = "".join(content.split())
     if len(compact) > 4 * 1024 * 1024:
-        raise PublicationError("an existing pull-request payload was too large")
+        raise PublicationError("an existing public payload was too large")
     try:
         return base64.b64decode(compact, validate=True)
     except (ValueError, binascii.Error) as error:
-        raise PublicationError("GitHub returned an invalid pull-request payload") from error
+        raise PublicationError("GitHub returned an invalid public payload") from error
+
+
+def _verify_publication_tree(
+    repository: str,
+    tree_sha: str,
+    submission_path: str,
+    prepared: _PreparedChange,
+    *,
+    subject: str,
+) -> None:
+    tree = _gh_api(
+        f"repos/{repository}/git/trees/{quote(tree_sha, safe='')}?recursive=1",
+        error_message=f"an existing {subject} tree could not be inspected",
+    )
+    entries = tree.get("tree")
+    if tree.get("truncated") is True or not isinstance(entries, list):
+        raise PublicationError(f"GitHub returned an incomplete {subject} tree")
+    expected_paths = {submission_path, "site/data/leaderboard.json"}
+    selected = {
+        item.get("path"): item
+        for item in entries
+        if isinstance(item, dict) and item.get("path") in expected_paths
+    }
+    if set(selected) != expected_paths:
+        raise PublicationError(f"an existing deterministic {subject} is missing public files")
+    blob_shas: dict[str, str] = {}
+    for path, item in selected.items():
+        sha = item.get("sha")
+        if (
+            item.get("mode") != "100644"
+            or item.get("type") != "blob"
+            or not isinstance(sha, str)
+            or _COMMIT_SHA.fullmatch(sha) is None
+        ):
+            raise PublicationError(f"an existing deterministic {subject} has unsafe file modes")
+        blob_shas[path] = sha
+    if (
+        _repository_blob_bytes(repository, blob_shas[submission_path])
+        != prepared.submission_bytes
+        or _repository_blob_bytes(
+            repository,
+            blob_shas["site/data/leaderboard.json"],
+        )
+        != prepared.leaderboard_bytes
+    ):
+        raise PublicationError(f"an existing deterministic {subject} has unexpected content")
 
 
 def _verified_existing_pull_request(
@@ -608,42 +811,13 @@ def _verified_existing_pull_request(
     tree_sha = commit_tree.get("sha") if isinstance(commit_tree, dict) else None
     if not isinstance(tree_sha, str) or _COMMIT_SHA.fullmatch(tree_sha) is None:
         raise PublicationError("GitHub returned an invalid pull-request tree")
-    tree = _gh_api(
-        f"repos/{identity.target_repository}/git/trees/{quote(tree_sha, safe='')}?recursive=1",
-        error_message="an existing pull-request tree could not be inspected",
+    _verify_publication_tree(
+        identity.target_repository,
+        tree_sha,
+        submission_path,
+        prepared,
+        subject="pull request",
     )
-    entries = tree.get("tree")
-    if tree.get("truncated") is True or not isinstance(entries, list):
-        raise PublicationError("GitHub returned an incomplete pull-request tree")
-    expected_paths = {submission_path, "site/data/leaderboard.json"}
-    selected = {
-        item.get("path"): item
-        for item in entries
-        if isinstance(item, dict) and item.get("path") in expected_paths
-    }
-    if set(selected) != expected_paths:
-        raise PublicationError("an existing deterministic pull request is missing public files")
-    blob_shas: dict[str, str] = {}
-    for path, item in selected.items():
-        sha = item.get("sha")
-        if (
-            item.get("mode") != "100644"
-            or item.get("type") != "blob"
-            or not isinstance(sha, str)
-            or _COMMIT_SHA.fullmatch(sha) is None
-        ):
-            raise PublicationError("an existing deterministic pull request has unsafe file modes")
-        blob_shas[path] = sha
-    if (
-        _repository_blob_bytes(identity.target_repository, blob_shas[submission_path])
-        != prepared.submission_bytes
-        or _repository_blob_bytes(
-            identity.target_repository,
-            blob_shas["site/data/leaderboard.json"],
-        )
-        != prepared.leaderboard_bytes
-    ):
-        raise PublicationError("an existing deterministic pull request has unexpected content")
     return url
 
 
@@ -699,58 +873,62 @@ def publish_submission(
     existing_ref = _try_gh_api(
         f"repos/{target}/git/ref/heads/{quote(branch, safe='/')}"
     )
-    if existing_ref is not None:
-        existing_pr = _verified_existing_pull_request(identity, branch, prepared)
-        if existing_pr is not None:
-            return PublicationResult(existing_pr, "existing_pull_request", branch)
-        raise PublicationError("the deterministic publication branch already exists without a PR")
     candidate_path = f"site/data/submissions/{submission_id}.json"
-    candidate_blob = _create_blob(target, prepared.submission_bytes)
-    leaderboard_blob = _create_blob(target, prepared.leaderboard_bytes)
-    tree = _gh_api(
-        f"repos/{target}/git/trees",
-        method="POST",
-        payload={
-            "base_tree": prepared.base_tree,
-            "tree": [
-                {
-                    "path": candidate_path,
-                    "mode": "100644",
-                    "type": "blob",
-                    "sha": candidate_blob,
-                },
-                {
-                    "path": "site/data/leaderboard.json",
-                    "mode": "100644",
-                    "type": "blob",
-                    "sha": leaderboard_blob,
-                },
-            ],
-        },
-        error_message="the isolated publication tree could not be created",
-    )
-    tree_sha = tree.get("sha")
-    if not isinstance(tree_sha, str):
-        raise PublicationError("GitHub returned an invalid publication tree")
-    commit = _gh_api(
-        f"repos/{target}/git/commits",
-        method="POST",
-        payload={
-            "message": f"data: submit benchmark {submission_id}",
-            "tree": tree_sha,
-            "parents": [prepared.base_sha],
-        },
-        error_message="the isolated publication commit could not be created",
-    )
-    commit_sha = commit.get("sha")
-    if not isinstance(commit_sha, str):
-        raise PublicationError("GitHub returned an invalid publication commit")
-    _gh_api(
-        f"repos/{target}/git/refs",
-        method="POST",
-        payload={"ref": f"refs/heads/{branch}", "sha": commit_sha},
-        error_message="the public publication branch could not be created",
-    )
+    if existing_ref is not None:
+        _verify_existing_publication_branch(
+            target,
+            branch,
+            existing_ref,
+            prepared,
+            submission_id,
+        )
+    else:
+        candidate_blob = _create_blob(target, prepared.submission_bytes)
+        leaderboard_blob = _create_blob(target, prepared.leaderboard_bytes)
+        tree = _gh_api(
+            f"repos/{target}/git/trees",
+            method="POST",
+            payload={
+                "base_tree": prepared.base_tree,
+                "tree": [
+                    {
+                        "path": candidate_path,
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": candidate_blob,
+                    },
+                    {
+                        "path": "site/data/leaderboard.json",
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": leaderboard_blob,
+                    },
+                ],
+            },
+            error_message="the isolated publication tree could not be created",
+        )
+        tree_sha = tree.get("sha")
+        if not isinstance(tree_sha, str):
+            raise PublicationError("GitHub returned an invalid publication tree")
+        commit = _gh_api(
+            f"repos/{target}/git/commits",
+            method="POST",
+            payload={
+                "message": f"data: submit benchmark {submission_id}",
+                "tree": tree_sha,
+                "parents": [prepared.base_sha],
+            },
+            error_message="the isolated publication commit could not be created",
+        )
+        commit_sha = commit.get("sha")
+        if not isinstance(commit_sha, str):
+            raise PublicationError("GitHub returned an invalid publication commit")
+        _gh_api(
+            f"repos/{target}/git/refs",
+            method="POST",
+            payload={"ref": f"refs/heads/{branch}", "sha": commit_sha},
+            error_message="the public publication branch could not be created",
+        )
     head_owner = target.split("/", 1)[0]
     try:
         pull = _gh_api(

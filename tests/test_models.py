@@ -106,6 +106,18 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(settings.as_api_parameters()["reasoning_effort"], "none")
         self.assertEqual(settings.as_report_data()["reasoning_effort"], "none")
 
+    def test_reasoning_effort_may_be_omitted_but_not_explicitly_null(self) -> None:
+        omitted = parse_manifest(valid_manifest_data()).models[0].settings
+
+        self.assertIsNone(omitted.reasoning_effort)
+        self.assertNotIn("reasoning_effort", omitted.as_api_parameters())
+        self.assertNotIn("reasoning_effort", omitted.as_report_data())
+
+        data = valid_manifest_data()
+        data["models"][0]["settings"]["reasoning_effort"] = None
+        with self.assertRaisesRegex(ManifestError, "reasoning_effort is unsupported"):
+            parse_manifest(data)
+
     def test_public_fingerprint_excludes_credential_and_runtime_selector(self) -> None:
         first_data = valid_manifest_data()
         second_data = copy.deepcopy(first_data)

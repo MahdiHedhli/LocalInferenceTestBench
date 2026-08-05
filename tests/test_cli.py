@@ -163,6 +163,9 @@ class PostRunCliTests(unittest.TestCase):
         identity = PublicationIdentity("example", "owner", "repo", "main", False)
         output = io.StringIO()
         with (
+            mock.patch.object(
+                cli, "_prompt_hardware_path", return_value=Path("hardware.json")
+            ),
             mock.patch.object(cli, "load_public_environment_file", return_value={}),
             mock.patch.object(cli, "prepare_submissions", return_value=(candidate,)),
             mock.patch.object(

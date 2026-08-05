@@ -164,7 +164,7 @@ def _is_in_ignored_worktree(path: Path, *, require_worktree: bool = False) -> bo
             env=_git_environment(),
         )
     except (OSError, subprocess.SubprocessError):
-        return False
+        return not require_worktree and not _has_git_marker(path.parent)
     if root_result.returncode != 0:
         return not require_worktree and not _has_git_marker(path.parent)
     root = Path(root_result.stdout.strip()).resolve()

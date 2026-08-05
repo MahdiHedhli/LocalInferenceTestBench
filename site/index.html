@@ -162,8 +162,10 @@
         <div class="submission-tool" aria-labelledby="submission-tool-title">
           <h3 id="submission-tool-title">Check a prepared submission</h3>
           <p>
-            The fastest route is <code>litb run --profile standard --submission pr</code>. To stop at
-            a local file, choose <code>--submission save</code>, then select that JSON here.
+            The fastest route is
+            <code>litb run --profile standard --submission pr --submission-model &lt;report-model-id&gt;</code>.
+            The model option may be omitted for a single-model run. To stop at a local file, choose
+            <code>--submission save</code>, then select that JSON here.
           </p>
           <label class="file-label" for="submission-file">Prepared submission file</label>
           <input id="submission-file" type="file" accept="application/json,.json">

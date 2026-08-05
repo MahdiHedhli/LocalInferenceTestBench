@@ -256,6 +256,255 @@ class PublishingTests(unittest.TestCase):
         self.assertEqual(pull_payload["base"], "main")
         self.assertNotEqual(pull_payload["head"], "main")
 
+    def test_retry_resumes_after_branch_creation_when_pr_creation_failed(self) -> None:
+        branch = f"litb/submission-{SUBMISSION_ID}"
+        commit_sha = "5" * 40
+        tree_sha = "4" * 40
+        state = {"branch_created": False, "pull_attempts": 0}
+        api_calls: list[tuple[str, str, object]] = []
+
+        def try_api(endpoint: str) -> dict | None:
+            if not state["branch_created"]:
+                return None
+            return {
+                "ref": f"refs/heads/{branch}",
+                "object": {"type": "commit", "sha": commit_sha},
+            }
+
+        def create_blob(_: str, contents: bytes) -> str:
+            if contents == PREPARED.submission_bytes:
+                return "candidate-blob"
+            self.assertEqual(contents, PREPARED.leaderboard_bytes)
+            return "leaderboard-blob"
+
+        def api(
+            endpoint: str,
+            *,
+            method: str = "GET",
+            payload: object = None,
+            error_message: str,
+        ) -> dict:
+            api_calls.append((endpoint, method, payload))
+            if endpoint.endswith("/git/trees"):
+                return {"sha": tree_sha}
+            if endpoint.endswith(f"/git/commits/{commit_sha}"):
+                return {
+                    "sha": commit_sha,
+                    "message": f"data: submit benchmark {SUBMISSION_ID}",
+                    "tree": {"sha": tree_sha},
+                    "parents": [{"sha": PREPARED.base_sha}],
+                }
+            if "/compare/" in endpoint:
+                return {
+                    "status": "ahead",
+                    "ahead_by": 1,
+                    "behind_by": 0,
+                    "total_commits": 1,
+                    "base_commit": {"sha": PREPARED.base_sha},
+                    "merge_base_commit": {"sha": PREPARED.base_sha},
+                    "commits": [{"sha": commit_sha}],
+                    "files": [
+                        {
+                            "status": "added",
+                            "filename": f"site/data/submissions/{SUBMISSION_ID}.json",
+                        },
+                        {
+                            "status": "modified",
+                            "filename": "site/data/leaderboard.json",
+                        },
+                    ],
+                }
+            if "/git/trees/" in endpoint:
+                return {
+                    "truncated": False,
+                    "tree": [
+                        {
+                            "path": f"site/data/submissions/{SUBMISSION_ID}.json",
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": "8" * 40,
+                        },
+                        {
+                            "path": "site/data/leaderboard.json",
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": "9" * 40,
+                        },
+                    ],
+                }
+            if endpoint.endswith("/git/commits"):
+                return {"sha": commit_sha}
+            if endpoint.endswith("/git/refs"):
+                state["branch_created"] = True
+                return {"ref": f"refs/heads/{branch}"}
+            if endpoint.endswith("/pulls"):
+                state["pull_attempts"] += 1
+                if state["pull_attempts"] == 1:
+                    raise PublicationError("simulated PR API failure")
+                return {
+                    "html_url": "https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8"
+                }
+            self.fail(f"unexpected GitHub API endpoint: {endpoint}")
+
+        with (
+            mock.patch.object(publishing, "validate_submission"),
+            mock.patch.object(
+                publishing, "render_submission_bytes", return_value=PREPARED.submission_bytes
+            ),
+            mock.patch.object(publishing, "_prepare_change", return_value=PREPARED),
+            mock.patch.object(
+                publishing, "_current_upstream_sha", return_value=PREPARED.base_sha
+            ),
+            mock.patch.object(
+                publishing, "_verified_existing_pull_request", return_value=None
+            ),
+            mock.patch.object(
+                publishing,
+                "_ensure_target_repository",
+                return_value=publishing.UPSTREAM_REPOSITORY,
+            ),
+            mock.patch.object(publishing, "_try_gh_api", side_effect=try_api),
+            mock.patch.object(
+                publishing, "_create_blob", side_effect=create_blob
+            ) as blob_creator,
+            mock.patch.object(
+                publishing,
+                "_repository_blob_bytes",
+                side_effect=(PREPARED.submission_bytes, PREPARED.leaderboard_bytes),
+            ) as blob_reader,
+            mock.patch.object(publishing, "_gh_api", side_effect=api),
+        ):
+            with self.assertRaisesRegex(PublicationError, "public branch .* may remain"):
+                publish_submission(SUBMISSION, IDENTITY, b"private-literal\n")
+            result = publish_submission(SUBMISSION, IDENTITY, b"private-literal\n")
+
+        self.assertEqual(result.status, "opened")
+        self.assertEqual(result.branch, branch)
+        self.assertEqual(state["pull_attempts"], 2)
+        self.assertEqual(blob_creator.call_count, 2)
+        self.assertEqual(blob_reader.call_count, 2)
+        self.assertEqual(
+            sum(endpoint.endswith("/git/commits") for endpoint, _, _ in api_calls),
+            1,
+        )
+        self.assertEqual(
+            sum(endpoint.endswith("/git/refs") for endpoint, _, _ in api_calls),
+            1,
+        )
+        self.assertEqual(
+            sum(
+                endpoint.endswith("/git/trees") and method == "POST"
+                for endpoint, method, _ in api_calls
+            ),
+            1,
+        )
+
+    def test_retry_rejects_existing_branch_with_mismatched_tree(self) -> None:
+        branch = f"litb/submission-{SUBMISSION_ID}"
+        commit_sha = "5" * 40
+        pull_calls: list[object] = []
+        api_calls: list[tuple[str, str, object]] = []
+
+        def api(
+            endpoint: str,
+            *,
+            method: str = "GET",
+            payload: object = None,
+            error_message: str,
+        ) -> dict:
+            api_calls.append((endpoint, method, payload))
+            if endpoint.endswith(f"/git/commits/{commit_sha}"):
+                return {
+                    "sha": commit_sha,
+                    "message": f"data: submit benchmark {SUBMISSION_ID}",
+                    "tree": {"sha": "7" * 40},
+                    "parents": [{"sha": PREPARED.base_sha}],
+                }
+            if "/compare/" in endpoint:
+                return {
+                    "status": "ahead",
+                    "ahead_by": 1,
+                    "behind_by": 0,
+                    "total_commits": 1,
+                    "base_commit": {"sha": PREPARED.base_sha},
+                    "merge_base_commit": {"sha": PREPARED.base_sha},
+                    "commits": [{"sha": commit_sha}],
+                    "files": [
+                        {
+                            "status": "added",
+                            "filename": f"site/data/submissions/{SUBMISSION_ID}.json",
+                        },
+                        {
+                            "status": "modified",
+                            "filename": "site/data/leaderboard.json",
+                        },
+                    ],
+                }
+            if "/git/trees/" in endpoint:
+                return {
+                    "truncated": False,
+                    "tree": [
+                        {
+                            "path": f"site/data/submissions/{SUBMISSION_ID}.json",
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": "8" * 40,
+                        },
+                        {
+                            "path": "site/data/leaderboard.json",
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": "9" * 40,
+                        },
+                    ],
+                }
+            if endpoint.endswith("/pulls"):
+                pull_calls.append(payload)
+            self.fail(f"unexpected GitHub API endpoint: {endpoint}")
+
+        with (
+            mock.patch.object(publishing, "validate_submission"),
+            mock.patch.object(
+                publishing, "render_submission_bytes", return_value=PREPARED.submission_bytes
+            ),
+            mock.patch.object(publishing, "_prepare_change", return_value=PREPARED),
+            mock.patch.object(
+                publishing, "_current_upstream_sha", return_value=PREPARED.base_sha
+            ),
+            mock.patch.object(
+                publishing, "_verified_existing_pull_request", return_value=None
+            ),
+            mock.patch.object(
+                publishing,
+                "_ensure_target_repository",
+                return_value=publishing.UPSTREAM_REPOSITORY,
+            ),
+            mock.patch.object(
+                publishing,
+                "_try_gh_api",
+                return_value={
+                    "ref": f"refs/heads/{branch}",
+                    "object": {"type": "commit", "sha": commit_sha},
+                },
+            ),
+            mock.patch.object(publishing, "_create_blob") as blob_creator,
+            mock.patch.object(
+                publishing,
+                "_repository_blob_bytes",
+                side_effect=(b"corrupted", PREPARED.leaderboard_bytes),
+            ),
+            mock.patch.object(publishing, "_gh_api", side_effect=api),
+            self.assertRaisesRegex(PublicationError, "branch has unexpected content"),
+        ):
+            publish_submission(SUBMISSION, IDENTITY, b"private-literal\n")
+
+        self.assertEqual(pull_calls, [])
+        blob_creator.assert_not_called()
+        self.assertFalse(
+            any(method != "GET" for _, method, _ in api_calls),
+            api_calls,
+        )
+
     def test_existing_pull_request_bytes_must_match_prepared_payload(self) -> None:
         branch = f"litb/submission-{SUBMISSION_ID}"
         head_sha = "6" * 40
@@ -393,8 +642,14 @@ class PublishingTests(unittest.TestCase):
             repository = Path(temporary)
             payload = repository / "site" / "data" / "leaderboard.json"
             payload.parent.mkdir(parents=True)
-            payload.write_text("safe staged bytes\n", encoding="utf-8")
             subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "config", "core.autocrlf", "false"],
+                cwd=repository,
+                check=True,
+            )
+            staged_bytes = b"safe\r\nstaged\rbytes\n"
+            payload.write_bytes(staged_bytes)
             subprocess.run(["git", "add", "."], cwd=repository, check=True)
             payload.write_text("unsafe worktree bytes\n", encoding="utf-8")
 
@@ -402,7 +657,18 @@ class PublishingTests(unittest.TestCase):
                 repository, Path("site/data/leaderboard.json")
             )
 
-        self.assertEqual(staged, b"safe staged bytes\n")
+        self.assertEqual(staged, staged_bytes)
+
+    def test_staged_reader_preserves_missing_blob_error(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True)
+            with self.assertRaisesRegex(
+                PublicationError, "staged publication payload could not be read"
+            ):
+                publishing._read_staged_bytes(repository, Path("missing.json"))
 
 
 if __name__ == "__main__":

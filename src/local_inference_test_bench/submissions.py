@@ -270,11 +270,13 @@ def _validate_settings(value: Any, path: str, *, context_tokens: int) -> Mapping
             minimum=-_MAX_SAFE_INTEGER,
             maximum=_MAX_SAFE_INTEGER,
         )
-    if (
-        "reasoning_effort" in settings
-        and settings["reasoning_effort"] not in _REASONING_EFFORTS
-    ):
-        raise SubmissionError(f"{path}.reasoning_effort is unsupported")
+    if "reasoning_effort" in settings:
+        reasoning_effort = settings["reasoning_effort"]
+        if (
+            not isinstance(reasoning_effort, str)
+            or reasoning_effort not in _REASONING_EFFORTS
+        ):
+            raise SubmissionError(f"{path}.reasoning_effort is unsupported")
     return settings
 
 
@@ -304,9 +306,14 @@ def _validate_runtime_configuration(value: Any, path: str) -> Mapping[str, Any]:
             minimum=1,
             maximum=4096,
         )
-    if configuration["speculative_decoding"] not in _SPECULATIVE_DECODING_MODES:
+    speculative_decoding = configuration["speculative_decoding"]
+    if (
+        not isinstance(speculative_decoding, str)
+        or speculative_decoding not in _SPECULATIVE_DECODING_MODES
+    ):
         raise SubmissionError(f"{path}.speculative_decoding is unsupported")
-    if configuration["offload_mode"] not in _OFFLOAD_MODES:
+    offload_mode = configuration["offload_mode"]
+    if not isinstance(offload_mode, str) or offload_mode not in _OFFLOAD_MODES:
         raise SubmissionError(f"{path}.offload_mode is unsupported")
     return configuration
 

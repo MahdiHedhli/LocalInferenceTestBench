@@ -54,4 +54,6 @@ The only allowed tree entries are:
 - `existing_pull_request`: deterministic branch already has an open PR.
 - `already_published`: exact candidate already exists on canonical `main`.
 
-An existing deterministic branch without a PR is a collision and is never overwritten.
+An existing deterministic branch without a PR may be resumed only when its base parent, commit tree,
+two-file change, and payload bytes exactly match the freshly prepared result. Retry may then create
+only the missing pull request. Any mismatch is a collision and is never overwritten.

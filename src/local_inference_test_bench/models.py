@@ -98,7 +98,7 @@ class GenerationSettings:
             raise ManifestError("settings.seed must be an integer or null")
         if seed is not None and seed < -(2**63):
             raise ManifestError("settings.seed is below the supported minimum")
-        if reasoning_effort is not None and (
+        if "reasoning_effort" in value and (
             not isinstance(reasoning_effort, str)
             or reasoning_effort not in _REASONING_EFFORTS
         ):
