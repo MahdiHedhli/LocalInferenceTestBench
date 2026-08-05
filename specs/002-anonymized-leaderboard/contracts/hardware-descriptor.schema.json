@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hardware-descriptor.schema.json",
+  "title": "Local Inference Test Bench public environment descriptor",
+  "description": "A closed description of the hardware used for inference and its runtime. Direct machine identifiers, network data, unused inventory, and free-form notes are outside this contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "hardware",
+    "runtime"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "hardware": {
+      "$ref": "#/$defs/hardware"
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    }
+  },
+  "$defs": {
+    "publicText200": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u200E\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2066-\\u2069\\uD800-\\uDFFF]+$"
+    },
+    "publicText100": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u200E\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2066-\\u2069\\uD800-\\uDFFF]+$"
+    },
+    "accelerator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "model",
+        "count",
+        "memory_gb"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "integrated_gpu",
+            "discrete_gpu",
+            "neural_accelerator",
+            "other"
+          ]
+        },
+        "model": {
+          "$ref": "#/$defs/publicText200"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "memory_gb": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu",
+        "memory",
+        "accelerators",
+        "execution_mode"
+      ],
+      "properties": {
+        "cpu": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "model",
+            "logical_cores"
+          ],
+          "properties": {
+            "model": {
+              "$ref": "#/$defs/publicText200"
+            },
+            "logical_cores": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            }
+          }
+        },
+        "memory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "system_gb",
+            "architecture"
+          ],
+          "properties": {
+            "system_gb": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 1000000
+            },
+            "architecture": {
+              "enum": [
+                "shared",
+                "discrete",
+                "mixed",
+                "unknown"
+              ]
+            }
+          }
+        },
+        "accelerators": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/accelerator"
+          }
+        },
+        "execution_mode": {
+          "enum": [
+            "cpu_only",
+            "accelerator_only",
+            "hybrid",
+            "unknown"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "execution_mode": {
+                "const": "cpu_only"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "accelerators": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "execution_mode": {
+                "enum": [
+                  "accelerator_only",
+                  "hybrid"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "accelerators": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "memory": {
+                "properties": {
+                  "architecture": {
+                    "const": "shared"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "accelerators": {
+                "items": {
+                  "properties": {
+                    "memory_gb": {
+                      "const": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "memory": {
+                "properties": {
+                  "architecture": {
+                    "const": "discrete"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "accelerators": {
+                "items": {
+                  "properties": {
+                    "memory_gb": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "backend"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/publicText100"
+        },
+        "version": {
+          "$ref": "#/$defs/publicText100"
+        },
+        "backend": {
+          "$ref": "#/$defs/publicText100"
+        }
+      }
+    }
+  },
+  "$comment": "The Python validator also enforces one-decimal memory precision, rejects case-insensitive duplicate accelerator descriptions and public-data scanner findings, and checks file ignore and permission rules. Decimal precision is kept out of the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
+}

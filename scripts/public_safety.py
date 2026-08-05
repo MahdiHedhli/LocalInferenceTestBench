@@ -128,6 +128,11 @@ _MAC_COLON_OR_HYPHEN = re.compile(
 _MAC_DOTTED = re.compile(
     r"(?i)(?<![0-9a-f])(?:[0-9a-f]{4}\.){2}[0-9a-f]{4}(?![0-9a-f])"
 )
+_UUID_CANDIDATE = re.compile(
+    r"(?i)(?<![0-9a-f])"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    r"(?![0-9a-f])"
+)
 _POSIX_USER_PATH = re.compile(
     r"(?<![a-zA-Z0-9_.-])/(?:Users|home)/[a-zA-Z0-9._-]+(?=/|\b)"
 )
@@ -424,6 +429,8 @@ def _credential_value_is_safe(name: str, raw_value: str) -> bool:
         return True
     normalized_name = re.sub(r"[^a-z0-9]", "", name.casefold())
     normalized_value = re.sub(r"[^a-z0-9]", "", folded)
+    if normalized_name == "idtoken" and folded in {"read", "write", "none"}:
+        return True
     return normalized_value == normalized_name
 
 
@@ -469,6 +476,9 @@ def _scan_line(line: str, path: str, line_number: int, context: ScanContext) -> 
     if _MAC_COLON_OR_HYPHEN.search(line) or _MAC_DOTTED.search(line):
         yield Finding("mac-address", path, line_number)
 
+    if _UUID_CANDIDATE.search(line):
+        yield Finding("machine-identifier", path, line_number)
+
     if _POSIX_USER_PATH.search(line) or _ROOT_USER_PATH.search(line) or _WINDOWS_USER_PATH.search(line):
         yield Finding("absolute-user-path", path, line_number)
 
@@ -507,7 +517,9 @@ def _risky_path_rule(path: str) -> str | None:
     is_local_only = folded == ".local" or folded.startswith(".local/")
     if is_local_only and folded != ".local/privacy-denylist.example":
         return "local-configuration"
-    if folded in {"config/models.json"} or folded.endswith((".local.json", ".private.json")):
+    if folded in {"config/hardware.json", "config/models.json"} or folded.endswith(
+        (".local.json", ".private.json")
+    ):
         return "local-configuration"
     if (
         (
@@ -780,6 +792,7 @@ def _safe_output_path(path: str, context: ScanContext) -> str:
 
     safe = _MAC_COLON_OR_HYPHEN.sub("[redacted]", safe)
     safe = _MAC_DOTTED.sub("[redacted]", safe)
+    safe = _UUID_CANDIDATE.sub("[redacted]", safe)
     safe = _PRIVATE_HOST.sub("[redacted]", safe)
     safe = _POSIX_USER_PATH.sub("[redacted-path]", safe)
     safe = _ROOT_USER_PATH.sub("[redacted-path]", safe)

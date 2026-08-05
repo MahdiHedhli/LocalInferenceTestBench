@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Compare anonymized local language-model benchmark results.">
+    <meta name="referrer" content="no-referrer">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'self' https://github.com"
+    >
+    <title>LocalInferenceTestBench leaderboard</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#leaderboard">Skip to leaderboard</a>
+
+    <header class="site-header">
+      <a class="wordmark" href="./" aria-label="LocalInferenceTestBench home">
+        <span class="wordmark-mark" aria-hidden="true">LITB</span>
+        <span>LocalInferenceTestBench</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#leaderboard">Leaderboard</a>
+        <a href="https://github.com/MahdiHedhli/LocalInferenceTestBench">Guide and source</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">Local model case files</p>
+          <h1 id="page-title">Compare local models on the same practical tasks.</h1>
+          <p class="lede">
+            LocalInferenceTestBench runs a fixed set of checks against models served on local
+            hardware. Each result includes the hardware and runtime that produced it.
+          </p>
+        </div>
+        <div class="intro-actions">
+          <div class="panic-status" role="status" aria-label="System status: Don't Panic">
+            <span>System status</span>
+            <strong>DON'T PANIC</strong>
+            <small>Public data mode</small>
+          </div>
+          <a
+            class="button button-primary"
+            href="#submit"
+          >Submit a prepared result</a>
+          <a class="button button-secondary" href="https://github.com/MahdiHedhli/LocalInferenceTestBench#quick-start">
+            Run the test bench
+          </a>
+        </div>
+      </section>
+
+      <section id="leaderboard" class="leaderboard" aria-labelledby="leaderboard-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Community results</p>
+            <h2 id="leaderboard-title">Anonymized leaderboard</h2>
+            <p class="section-note">
+              Entries are community-submitted, schema-validated, and maintainer-reviewed. They are not
+              independently reproduced. Quality determines rank; speed is shown only as a
+              hardware-dependent observation.
+            </p>
+          </div>
+          <p class="updated" id="leaderboard-updated" aria-live="polite">Loading results...</p>
+        </div>
+
+        <form class="filters" id="leaderboard-filters" aria-label="Filter leaderboard results">
+          <div class="field field-search">
+            <label for="model-search">Find a model</label>
+            <input id="model-search" name="model" type="search" autocomplete="off" placeholder="Model name or source">
+          </div>
+          <div class="field">
+            <label for="hardware-filter">Hardware</label>
+            <select id="hardware-filter" name="hardware">
+              <option value="all">All hardware</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="sort-results">Sort by</label>
+            <select id="sort-results" name="sort">
+              <option value="semantic">Semantic score</option>
+              <option value="format">Format score</option>
+              <option value="throughput">Throughput</option>
+              <option value="latency">Lowest latency</option>
+              <option value="context">Declared context</option>
+            </select>
+          </div>
+        </form>
+
+        <div class="status-panel" id="leaderboard-status" role="status" aria-live="polite" hidden></div>
+
+        <div
+          class="table-shell"
+          id="leaderboard-table-shell"
+          role="region"
+          aria-label="Scrollable leaderboard results"
+          tabindex="0"
+          hidden
+        >
+          <table>
+            <caption class="visually-hidden">
+              Anonymized LocalInferenceTestBench standard-profile results. Quality ranks do not
+              change when the table is sorted.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Rank</th>
+                <th scope="col">Model</th>
+                <th scope="col">Profile</th>
+                <th scope="col">Hardware</th>
+                <th scope="col">
+                  <span class="metric-label">Semantic</span>
+                  <span class="metric-unit">score</span>
+                </th>
+                <th scope="col">
+                  <span class="metric-label">Format</span>
+                  <span class="metric-unit">score</span>
+                </th>
+                <th scope="col">
+                  <span class="metric-label">Throughput</span>
+                  <span class="metric-unit">tokens/s, hardware-dependent</span>
+                </th>
+                <th scope="col">
+                  <span class="metric-label">Latency</span>
+                  <span class="metric-unit">mean, hardware-dependent</span>
+                </th>
+                <th scope="col">Settings</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-body"></tbody>
+          </table>
+        </div>
+
+        <noscript>
+          <div class="status-panel">
+            JavaScript is required to load the static leaderboard data. No analytics or third-party
+            scripts are used.
+          </div>
+        </noscript>
+      </section>
+
+      <section id="submit" class="submit-panel" aria-labelledby="submit-title">
+        <div class="submit-copy">
+          <p class="eyebrow">Add a result</p>
+          <h2 id="submit-title">Review the evidence before you submit it.</h2>
+          <p>
+            Select a minimized submission file created by the test bench. This page checks its basic
+            shape and shows a model and hardware summary. It never accepts
+            a raw run report or sends the file anywhere.
+          </p>
+          <p class="submission-disclosure">
+            The JSON omits direct machine and contributor identifiers, but it does include exact
+            hardware and runtime details. Those details, especially alongside performance results,
+            can make a setup recognizable. Your GitHub account and pull request will also be public.
+          </p>
+        </div>
+        <div class="submission-tool" aria-labelledby="submission-tool-title">
+          <h3 id="submission-tool-title">Check a prepared submission</h3>
+          <p>Create one locally with the submission command, then select that minimized JSON file.</p>
+          <label class="file-label" for="submission-file">Prepared submission file</label>
+          <input id="submission-file" type="file" accept="application/json,.json">
+          <p class="file-help">JSON only, up to 256 KB. Your file stays in this browser.</p>
+          <div class="submission-status" id="submission-status" role="status" aria-live="polite">
+            No file selected.
+          </div>
+          <dl class="submission-preview" id="submission-preview" hidden>
+            <div>
+              <dt>Profile</dt>
+              <dd id="preview-profile"></dd>
+            </div>
+            <div>
+              <dt>Model</dt>
+              <dd id="preview-model"></dd>
+            </div>
+            <div>
+              <dt>Suite</dt>
+              <dd id="preview-suite"></dd>
+            </div>
+            <div>
+              <dt>Hardware</dt>
+              <dd id="preview-hardware"></dd>
+            </div>
+          </dl>
+          <div class="submission-actions">
+            <button class="button button-secondary" id="copy-submission" type="button" disabled>
+              Copy checked JSON
+            </button>
+            <button class="button button-secondary" id="download-submission" type="button" disabled>
+              Download checked copy
+            </button>
+            <a
+              class="button button-primary"
+              id="continue-submission"
+              href="https://github.com/MahdiHedhli/LocalInferenceTestBench/blob/main/CONTRIBUTING.md#submit-a-benchmark"
+              hidden
+            >Continue to the pull request guide</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>LocalInferenceTestBench is open source under the MIT License.</p>
+      <div>
+        <a href="https://github.com/MahdiHedhli/LocalInferenceTestBench/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/MahdiHedhli/LocalInferenceTestBench/blob/main/docs/security-and-privacy.md">Privacy guide</a>
+      </div>
+    </footer>
+  </body>
+</html>

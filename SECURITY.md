@@ -29,6 +29,7 @@ documents an equivalent host-side protection.
 ## Scope
 
 Reports about endpoint validation, secret/identifier scanning bypasses, unsafe persistence of model
-content, unintended tool execution, or generated-code execution are in scope. The behavior of a model
-under test and vulnerabilities in third-party inference runtimes should be reported to their respective
-maintainers unless this project creates or amplifies the issue.
+content, unintended tool execution, generated-code execution, leaderboard contract bypasses, or
+unsafe Pages rendering are in scope. The behavior of a model under test and vulnerabilities in
+third-party inference runtimes should be reported to their respective maintainers unless this project
+creates or amplifies the issue.

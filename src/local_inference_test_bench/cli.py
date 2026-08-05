@@ -12,6 +12,11 @@ from .models import ManifestError, load_manifest
 from .reporting import ReportError, write_report
 from .runner import BenchmarkRunner, RunnerError
 from .safety import SafetyError, load_credential
+from .submissions import (
+    SubmissionError,
+    prepare_submission_file,
+    write_submissions,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,6 +62,33 @@ def build_parser() -> argparse.ArgumentParser:
                 default=Path("artifacts"),
                 help="ignored local output directory (default: artifacts)",
             )
+    submission = subparsers.add_parser(
+        "prepare-submission",
+        help="create an identifier-minimized leaderboard candidate from a valid report",
+    )
+    submission.add_argument("--report", required=True, type=Path)
+    submission.add_argument(
+        "--hardware",
+        required=True,
+        type=Path,
+        help="ignored public hardware/runtime descriptor JSON",
+    )
+    submission.add_argument(
+        "--model",
+        dest="models",
+        action="append",
+        default=[],
+        help="source report model id to export; repeat to select more than one",
+    )
+    submission.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path(".local") / "leaderboard-submissions",
+        help=(
+            "owner-only ignored candidate directory "
+            "(default: .local/leaderboard-submissions)"
+        ),
+    )
     return parser
 
 
@@ -83,6 +115,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "prepare-submission":
+            submissions = prepare_submission_file(
+                args.report,
+                args.hardware,
+                tuple(args.models) or None,
+            )
+            paths = write_submissions(submissions, args.output_dir)
+            noun = "file" if len(paths) == 1 else "files"
+            print(f"submission ready: {len(paths)} {noun}")
+            return 0
         runner = _runner_from_args(args)
         if args.command == "check":
             statuses = runner.preflight()
@@ -100,6 +142,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (ClientError, RunnerError, ReportError) as error:
         print(f"run error: {error}", file=sys.stderr)
         return 1
+    except SubmissionError as error:
+        print(f"submission error: {error}", file=sys.stderr)
+        return 2
     except (ManifestError, SafetyError, ValueError) as error:
         print(f"configuration error: {error}", file=sys.stderr)
         return 2

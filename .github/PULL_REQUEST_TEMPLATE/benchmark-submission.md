@@ -1,0 +1,26 @@
+## Benchmark submission
+
+Submission ID:
+
+Model:
+
+Suite version: `1.0`
+
+## Contributor checks
+
+- [ ] I created this file with `litb prepare-submission` from a valid current-standard report.
+- [ ] I read the entire submitted JSON file.
+- [ ] The hardware descriptor lists the exact devices used for inference and no unused inventory.
+- [ ] The record contains no hostname, account, network value, serial number, inventory ID, device
+  UUID, local service label, or free-form note.
+- [ ] I understand that exact hardware and performance can make a setup recognizable.
+- [ ] I understand that this pull request and my GitHub account are public.
+- [ ] I regenerated `site/data/leaderboard.json` without editing it by hand.
+- [ ] `python3 scripts/build_leaderboard.py --check` passes.
+- [ ] `python3 -m unittest discover -s tests -v` passes.
+- [ ] `./scripts/public-check --full-tree --strict` passes.
+
+## Review notes
+
+Describe only contract or validation details. Do not paste raw model output, local paths, endpoint
+values, scanner matches, or other environment information.

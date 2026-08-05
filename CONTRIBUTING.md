@@ -26,8 +26,28 @@ that the scanner recognizes without creating a usable token.
 - Put runtime lifecycle or hardware collectors behind optional adapters.
 - Keep specialized model families and dynamic agent benchmarks under `docs/experiments/`.
 - Add tests for scoring, endpoint safety, manifest/schema changes, and output minimization.
-- Do not persist prompts, responses, reasoning, tool arguments, endpoint values, or machine inventory.
+- Do not persist prompts, responses, reasoning, tool arguments, endpoint values, or general machine
+  inventory. A reviewed leaderboard submission may contain only the closed public hardware fields.
 - Use standards-reserved examples and non-identifying fixture names.
+
+## Submit a benchmark
+
+Benchmark submissions use a public pull request. Before opening one, read
+[submitting a benchmark](docs/submitting-benchmarks.md) and the
+[security and privacy guide](docs/security-and-privacy.md).
+
+1. Run the current `standard` profile and confirm that the report is valid.
+2. Copy `config/hardware.example.json` to `.local/hardware.json`, restrict it to owner access, and
+   enter the exact hardware used for inference plus the serving runtime.
+3. Run `litb prepare-submission` and review the complete minimized JSON file.
+4. Copy that file to `site/data/submissions/<submission_id>.json`.
+5. Run `python3 scripts/build_leaderboard.py` and commit the regenerated dataset.
+6. Run the unit suite and `./scripts/public-check --full-tree --strict`.
+7. Open the pull request with the benchmark submission template.
+
+The submission JSON has no contributor field, but your GitHub account and pull request are public.
+Exact hardware and performance details can also make a setup recognizable. Do not submit a file you
+have not read in full.
 
 ## Pull requests
 

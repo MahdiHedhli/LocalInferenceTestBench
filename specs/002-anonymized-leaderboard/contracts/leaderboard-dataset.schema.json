@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "leaderboard-dataset.schema.json",
+  "title": "Local Inference Test Bench leaderboard dataset",
+  "description": "The deterministic static dataset built from accepted leaderboard submissions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "entry_count",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "entry_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rank",
+        "submission_id",
+        "suite_version",
+        "profile",
+        "hardware",
+        "runtime",
+        "model",
+        "settings",
+        "metrics"
+      ],
+      "properties": {
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "submission_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "suite_version": {
+          "const": "1.0"
+        },
+        "profile": {
+          "const": "standard"
+        },
+        "hardware": {
+          "$ref": "hardware-descriptor.schema.json#/$defs/hardware"
+        },
+        "runtime": {
+          "$ref": "hardware-descriptor.schema.json#/$defs/runtime"
+        },
+        "model": {
+          "$ref": "leaderboard-submission.schema.json#/$defs/model"
+        },
+        "settings": {
+          "$ref": "leaderboard-submission.schema.json#/$defs/settings"
+        },
+        "metrics": {
+          "$ref": "#/$defs/leaderboardMetrics"
+        }
+      }
+    },
+    "leaderboardMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_count",
+        "semantic_pass_count",
+        "exact_format_pass_count",
+        "scored_case_count",
+        "usage_coverage_cases",
+        "latency_ms_mean",
+        "completion_tokens_per_second",
+        "semantic_score_percent",
+        "exact_format_score_percent"
+      ],
+      "properties": {
+        "case_count": {
+          "const": 5
+        },
+        "semantic_pass_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "exact_format_pass_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "scored_case_count": {
+          "const": 5
+        },
+        "usage_coverage_cases": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "latency_ms_mean": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000000
+        },
+        "completion_tokens_per_second": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "semantic_score_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "exact_format_score_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "completion_tokens_per_second": {
+                "type": "number"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "usage_coverage_cases": {
+                "const": 5
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$comment": "The Python builder is authoritative for entry_count, derived percentages, one-decimal numeric precision, dense ranking, deterministic order, and the generated size limit. Decimal precision is kept out of the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
+}

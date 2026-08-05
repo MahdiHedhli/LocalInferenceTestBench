@@ -121,6 +121,7 @@ class PublicSafetyTest(unittest.TestCase):
         )
         local_paths = (
             ".local/models.json",
+            "config/hardware.json",
             "config/models.json",
             "config/models.local.json",
         )
@@ -136,6 +137,41 @@ class PublicSafetyTest(unittest.TestCase):
             self.assertIn("generated-artifact\t" + path + "\t1", completed.stdout)
         for path in local_paths:
             self.assertIn("local-configuration\t" + path + "\t1", completed.stdout)
+
+    def test_github_id_token_permission_accepts_only_exact_safe_values(self) -> None:
+        hyphenated = "id" + "-" + "token"
+        underscored = "id" + "_" + "token"
+        self.repository.write(
+            "workflow.yml",
+            "permissions:\n"
+            + f"  {hyphenated}: read\n"
+            + f"  {underscored}: write\n"
+            + f"  {hyphenated}: none\n",
+        )
+        self.repository.add("workflow.yml")
+
+        completed = self.repository.scan("--staged")
+
+        self.assertEqual(completed.returncode, 0, completed.stdout)
+
+    def test_github_id_token_permission_rejects_near_misses_and_other_token_keys(self) -> None:
+        hyphenated = "id" + "-" + "token"
+        other_key = "auth" + "-" + "token"
+        for index, (key, value) in enumerate(
+            (
+                (hyphenated, "writer"),
+                (hyphenated, "readwrite"),
+                (other_key, "write"),
+            )
+        ):
+            path = f"workflow-{index}.yml"
+            self.repository.write(path, f"{key}: {value}\n")
+            self.repository.add(path)
+
+        completed = self.repository.scan("--staged")
+
+        self.assertRules(completed, "credential-assignment")
+        self.assertEqual(len(completed.stdout.splitlines()), 3)
 
     def test_findings_are_deterministic_ordered_relative_and_redacted(self) -> None:
         first_private = "10" + ".9" + ".8" + ".7"
@@ -154,6 +190,19 @@ class PublicSafetyTest(unittest.TestCase):
         )
         self.assertNotIn(first_private, first.stdout)
         self.assertNotIn(second_private, first.stdout)
+
+    def test_device_uuid_is_rejected_and_redacted(self) -> None:
+        identifier = "-".join(
+            ("deadbeef", "0000", "0000", "0000", "000000000001")
+        )
+        relative_path = "captures/" + identifier + ".txt"
+        self.repository.write(relative_path, "clean\n")
+        self.repository.add(relative_path)
+
+        completed = self.repository.scan("--staged")
+
+        self.assertRules(completed, "machine-identifier")
+        self.assertNotIn(identifier, completed.stdout)
 
     def test_full_tree_scans_only_files_known_to_git(self) -> None:
         self.repository.write("tracked.txt", "clean\n")

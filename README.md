@@ -7,6 +7,14 @@ The project focuses on the part that is usually hardest to reproduce: model iden
 profiles, safe synthetic cases, semantic-versus-format scoring, validity, and evidence handling. It
 does not assume a GPU vendor, memory capacity, operating system, model family, or inference app.
 
+## Why I built this
+
+I built LocalInferenceTestBench to answer a practical question: how well do local models run on my
+own hardware when I give them the same set of tasks? Tokens per second matter, but they are only part
+of the answer. I also want to know whether a model returns clean structured data, writes code that
+holds up to static checks, handles a defensive analysis prompt, and respects a safe tool boundary.
+Running the same cases each time gives me a fairer picture of which model fits the work.
+
 ## What you get
 
 - a small Python reference runner for local OpenAI-compatible endpoints;
@@ -14,6 +22,8 @@ does not assume a GPU vendor, memory capacity, operating system, model family, o
   inert read-only tool selection, and an unapproved-change boundary;
 - versioned example manifests and JSON contracts for aggregate-only results;
 - a guide for comparable performance and quality testing across different systems;
+- a public, quality-ranked leaderboard with exact hardware and runtime context;
+- an identifier-minimized export path for reviewed community submissions;
 - optional experiments kept separate from the standard process;
 - a fail-closed local privacy gate, Git hooks, Gitleaks, and matching CI checks; and
 - a complete Spec Kit constitution, specification, plan, contracts, checklist, and task history.
@@ -58,6 +68,34 @@ restricted to aggregate-safe fields.
 
 See the full [operator guide](docs/guide.md) before comparing multiple models.
 
+## Public leaderboard
+
+The [GitHub Pages leaderboard](https://mahdihedhli.github.io/LocalInferenceTestBench/) puts the
+community results first. Quality rank uses semantic score, then exact-format score. Latency and
+throughput are shown with the hardware and runtime that produced them, but speed does not affect
+rank.
+
+Leaderboard records include exact CPU, memory, accelerator, execution-mode, and runtime details
+because performance without that context is not useful. They omit direct machine identifiers,
+source run IDs, timestamps, local model selectors, raw prompts, completions, reasoning, and tool
+arguments. Hardware plus performance can still make a setup recognizable, and the GitHub account
+used to open a submission pull request is public.
+
+To prepare a result from a valid standard run:
+
+```sh
+cp config/hardware.example.json .local/hardware.json
+chmod 600 .local/hardware.json
+
+litb prepare-submission \
+  --report artifacts/<run-record>.json \
+  --hardware .local/hardware.json \
+  --model <report-model-id>
+```
+
+Review the generated file before sharing it. The complete process is in
+[submitting a benchmark](docs/submitting-benchmarks.md).
+
 ## Method at a glance
 
 1. Define the workload decision and success conditions.
@@ -87,8 +125,8 @@ publication gate requires Gitleaks 8.30.1 or newer; then run:
 ./scripts/public-check --full-tree --strict
 ```
 
-The gate reports only a rule ID, file, and line—not the matched value. CI repeats generic privacy and
-secret scans, while GitHub secret scanning and push protection provide a remote backstop. Read
+The gate reports only a rule ID, file, and line. It never prints the matched value. CI repeats generic
+privacy and secret scans, while GitHub secret scanning and push protection provide a remote backstop. Read
 [security and privacy](docs/security-and-privacy.md) before publishing results.
 
 ## Standard versus experimental
@@ -102,8 +140,9 @@ or quick start.
 
 This repository was built with [GitHub Spec Kit](https://github.com/github/spec-kit) v0.16.0. The
 governing source of truth is the [project constitution](.specify/memory/constitution.md), followed by
-the [active feature specification](specs/001-local-inference-testbench/spec.md) and its plan,
-contracts, validation guide, and tasks.
+the [baseline specification](specs/001-local-inference-testbench/spec.md) and the
+[leaderboard specification](specs/002-anonymized-leaderboard/spec.md), with their plans, contracts,
+validation guides, and tasks.
 
 ## License
 

@@ -31,6 +31,7 @@ Thumbs.db
 .local/*
 !.local/privacy-denylist.example
 config/models.json
+config/hardware.json
 config/*.local.json
 config/*.private.json
 *.key

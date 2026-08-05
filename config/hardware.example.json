@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "hardware": {
+    "cpu": {
+      "model": "Public CPU model",
+      "logical_cores": 8
+    },
+    "memory": {
+      "system_gb": 16.0,
+      "architecture": "unknown"
+    },
+    "accelerators": [],
+    "execution_mode": "cpu_only"
+  },
+  "runtime": {
+    "name": "Public runtime name",
+    "version": "Public version",
+    "backend": "Public backend"
+  }
+}

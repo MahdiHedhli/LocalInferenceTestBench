@@ -18,7 +18,7 @@ tree, Git history, runtime artifact, or operational handoff was copied wholesale
 ## Material intentionally excluded
 
 - machine, account, network, and service identifiers;
-- hardware capacity and operating-system-specific collectors;
+- the source lab's hardware inventory, capacity, and operating-system-specific collectors;
 - private endpoints, credential locations, and observability configuration;
 - real model inventory, aliases, results, timestamps, and performance figures;
 - production-agent names, provider configuration, and operational runbooks;
@@ -27,3 +27,13 @@ tree, Git history, runtime artifact, or operational handoff was copied wholesale
 
 Specialized ideas were rewritten as optional experiments with only public upstream references and
 general safety requirements. They are not part of the baseline guide or runner.
+
+## Public leaderboard boundary
+
+Community leaderboard records may include exact hardware product details supplied through the
+closed public descriptor. This does not restore any hardware, runtime, result, or identifier from the
+source lab. No source lab report is included at launch.
+
+The accepted fields are limited to the CPU model and logical cores, system memory and architecture,
+accelerators used for inference, execution mode, and runtime name, version, and backend. Direct
+machine identifiers, unused inventory, private configuration, and free-form notes remain excluded.

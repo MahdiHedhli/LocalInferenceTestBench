@@ -10,6 +10,11 @@ This project assumes the repository will be public and the inference endpoint wi
 - raw prompts, completions, reasoning, tool arguments, traces, logs, or packet captures; and
 - real model-run artifacts copied from a private environment.
 
+A leaderboard submission is a narrow exception for reviewed public product details. Its closed
+contract permits the CPU model and logical cores, system memory and architecture, accelerators used
+for inference, execution mode, and runtime name, version, and backend. It does not permit a hostname,
+account, address, device UUID, serial number, inventory tag, unused device list, or free-form note.
+
 Examples use loopback, `example.com`, and standards-reserved documentation addresses. Local values
 belong in ignored files under `.local/` or in process environment variables.
 
@@ -33,8 +38,8 @@ line, including private project codenames, host labels, internal domains, and ot
 generic scanner cannot recognize. Do not put credentials in this file.
 
 Strict publication checks fail closed if the denylist is missing, empty, tracked, not covered by a
-Git ignore rule, or group/world-accessible. Findings report only rule, path, and line number—never the
-matching value. This makes a new clone explicitly establish its own environment boundary before
+Git ignore rule, or group/world-accessible. Findings report only rule, path, and line number. They
+never print the matched value. This makes a new clone establish its own environment boundary before
 publication.
 
 ## Credential handling
@@ -52,13 +57,34 @@ usage/performance, categorical routing, and boolean checks. They do not contain 
 derive those values or a reusable fingerprint of that text. A repeatability experiment may compare
 responses transiently and retain only a stability boolean.
 
+## Leaderboard submission boundary
+
+The leaderboard exporter accepts only a fully valid current-standard report. It combines one model
+result with a separate public environment descriptor and writes one candidate per model. The
+descriptor must be a regular, non-symlink file that Git ignores. It must be owner-only on systems
+that expose POSIX modes.
+
+The candidate removes the source run ID and time, manifest digest, local model selector, contributor,
+raw content, per-case timing, and per-case token counts. It keeps public model provenance, settings,
+exact hardware and runtime fields, categorical case outcomes, and rounded aggregate performance.
+The content digest detects changes and duplicates. It does not prove that the benchmark was run.
+
+The Pages file picker reads only an already-prepared candidate. Its shape check runs in the browser,
+does not upload the file, and is not a replacement for the Python validator, privacy gate, or review.
+
 Before deliberately publishing a result:
 
-1. export only fields permitted by the run-record schema;
-2. replace any local runtime selector with its public artifact identity;
-3. put the export in a clean temporary directory;
-4. run the full privacy and secret scans again; and
-5. have another person review the diff.
+1. put the exact public hardware and runtime details in `.local/hardware.json`;
+2. prepare the candidate with `litb prepare-submission`;
+3. read the entire candidate and decide whether its hardware and performance could identify the
+   setup more closely than intended;
+4. add only the candidate to `site/data/submissions/` and rebuild the leaderboard;
+5. run the full privacy and secret scans; and
+6. have another person review the diff.
+
+The pull request is public before continuous integration finishes. The candidate has no contributor
+field, but the submitting GitHub account remains visible. Accepted entries are self-reported,
+schema-validated, maintainer-reviewed, and not independently reproduced.
 
 ## If a leak is detected
 

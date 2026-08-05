@@ -52,6 +52,11 @@ status=0
 
 PYTHONPATH="$repo_root/src${PYTHONPATH:+:$PYTHONPATH}" \
     python3 -m unittest discover -s tests -v || status=1
+if [ "$mode" = "--staged" ]; then
+    python3 scripts/build_leaderboard.py --staged || status=1
+else
+    python3 scripts/build_leaderboard.py --check || status=1
+fi
 
 # Word splitting is intentional here: strict is either empty or one fixed flag.
 # shellcheck disable=SC2086
