@@ -601,7 +601,7 @@ def _verify_existing_publication_branch(
     reference: Mapping[str, Any],
     prepared: _PreparedChange,
     submission_id: str,
-) -> None:
+) -> str:
     target = reference.get("object")
     expected_ref = f"refs/heads/{branch}"
     if (
@@ -680,6 +680,22 @@ def _verify_existing_publication_branch(
         prepared,
         subject="publication branch",
     )
+    return commit_sha
+
+
+def _verify_branch_head(repository: str, branch: str, expected_sha: str) -> None:
+    reference = _gh_api(
+        f"repos/{repository}/git/ref/heads/{quote(branch, safe='/')}",
+        error_message="the publication branch could not be rechecked",
+    )
+    target = reference.get("object")
+    if (
+        reference.get("ref") != f"refs/heads/{branch}"
+        or not isinstance(target, dict)
+        or target.get("type") != "commit"
+        or target.get("sha") != expected_sha
+    ):
+        raise PublicationError("the publication branch changed before PR creation")
 
 
 def _existing_pull_request(
@@ -766,6 +782,8 @@ def _verified_existing_pull_request(
     identity: PublicationIdentity,
     branch: str,
     prepared: _PreparedChange,
+    *,
+    expected_head_sha: str | None = None,
 ) -> str | None:
     pull = _existing_pull_request(identity, branch)
     if pull is None:
@@ -789,6 +807,7 @@ def _verified_existing_pull_request(
         or head["repo"].get("full_name") != identity.target_repository
         or not isinstance(head.get("sha"), str)
         or _COMMIT_SHA.fullmatch(head["sha"]) is None
+        or (expected_head_sha is not None and head["sha"] != expected_head_sha)
     ):
         raise PublicationError("an existing deterministic pull request has unexpected identity")
     files = _gh_api_list(
@@ -875,7 +894,7 @@ def publish_submission(
     )
     candidate_path = f"site/data/submissions/{submission_id}.json"
     if existing_ref is not None:
-        _verify_existing_publication_branch(
+        expected_head_sha = _verify_existing_publication_branch(
             target,
             branch,
             existing_ref,
@@ -908,7 +927,7 @@ def publish_submission(
             error_message="the isolated publication tree could not be created",
         )
         tree_sha = tree.get("sha")
-        if not isinstance(tree_sha, str):
+        if not isinstance(tree_sha, str) or _COMMIT_SHA.fullmatch(tree_sha) is None:
             raise PublicationError("GitHub returned an invalid publication tree")
         commit = _gh_api(
             f"repos/{target}/git/commits",
@@ -921,7 +940,7 @@ def publish_submission(
             error_message="the isolated publication commit could not be created",
         )
         commit_sha = commit.get("sha")
-        if not isinstance(commit_sha, str):
+        if not isinstance(commit_sha, str) or _COMMIT_SHA.fullmatch(commit_sha) is None:
             raise PublicationError("GitHub returned an invalid publication commit")
         _gh_api(
             f"repos/{target}/git/refs",
@@ -929,9 +948,11 @@ def publish_submission(
             payload={"ref": f"refs/heads/{branch}", "sha": commit_sha},
             error_message="the public publication branch could not be created",
         )
+        expected_head_sha = commit_sha
     head_owner = target.split("/", 1)[0]
     try:
-        pull = _gh_api(
+        _verify_branch_head(target, branch, expected_head_sha)
+        _gh_api(
             f"repos/{UPSTREAM_REPOSITORY}/pulls",
             method="POST",
             payload={
@@ -943,13 +964,17 @@ def publish_submission(
             },
             error_message="the public pull request could not be opened",
         )
+        verified_url = _verified_existing_pull_request(
+            identity,
+            branch,
+            prepared,
+            expected_head_sha=expected_head_sha,
+        )
+        if verified_url is None:
+            raise PublicationError("the created pull request could not be verified")
     except PublicationError as error:
         raise PublicationError(
-            f"the PR could not be opened; public branch {target}:{branch} may remain"
+            f"the PR could not be opened or verified; public PR/branch "
+            f"{target}:{branch} may remain"
         ) from error
-    url = pull.get("html_url")
-    if not isinstance(url, str):
-        raise PublicationError(
-            f"the PR response was invalid; public branch {target}:{branch} may remain"
-        )
-    return PublicationResult(url, "opened", branch)
+    return PublicationResult(verified_url, "opened", branch)

@@ -209,6 +209,11 @@ class PublishingTests(unittest.TestCase):
                 return {"sha": "4" * 40}
             if endpoint.endswith("/git/commits"):
                 return {"sha": "5" * 40}
+            if "/git/ref/heads/" in endpoint:
+                return {
+                    "ref": f"refs/heads/litb/submission-{SUBMISSION_ID}",
+                    "object": {"type": "commit", "sha": "5" * 40},
+                }
             if endpoint.endswith("/pulls"):
                 return {
                     "html_url": "https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8"
@@ -225,8 +230,13 @@ class PublishingTests(unittest.TestCase):
                 publishing, "_current_upstream_sha", return_value=PREPARED.base_sha
             ),
             mock.patch.object(
-                publishing, "_verified_existing_pull_request", return_value=None
-            ),
+                publishing,
+                "_verified_existing_pull_request",
+                side_effect=(
+                    None,
+                    "https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8",
+                ),
+            ) as verifier,
             mock.patch.object(
                 publishing,
                 "_ensure_target_repository",
@@ -255,6 +265,97 @@ class PublishingTests(unittest.TestCase):
         pull_payload = next(payload for endpoint, _, payload in api_calls if endpoint.endswith("/pulls"))
         self.assertEqual(pull_payload["base"], "main")
         self.assertNotEqual(pull_payload["head"], "main")
+        self.assertEqual(verifier.call_count, 2)
+        self.assertEqual(
+            verifier.call_args_list[1].kwargs["expected_head_sha"],
+            "5" * 40,
+        )
+
+    def test_ref_mutation_before_pull_request_fails_closed(self) -> None:
+        branch = f"litb/submission-{SUBMISSION_ID}"
+        expected_sha = "5" * 40
+        pull_calls: list[object] = []
+
+        def api(
+            endpoint: str,
+            *,
+            method: str = "GET",
+            payload: object = None,
+            error_message: str,
+        ) -> dict:
+            if endpoint.endswith("/git/trees"):
+                return {"sha": "4" * 40}
+            if endpoint.endswith("/git/commits"):
+                return {"sha": expected_sha}
+            if endpoint.endswith("/git/refs"):
+                return {"ref": f"refs/heads/{branch}"}
+            if "/git/ref/heads/" in endpoint:
+                return {
+                    "ref": f"refs/heads/{branch}",
+                    "object": {"type": "commit", "sha": "6" * 40},
+                }
+            if endpoint.endswith("/pulls"):
+                pull_calls.append(payload)
+            self.fail(f"unexpected GitHub API endpoint: {endpoint}")
+
+        with (
+            mock.patch.object(publishing, "validate_submission"),
+            mock.patch.object(
+                publishing, "render_submission_bytes", return_value=PREPARED.submission_bytes
+            ),
+            mock.patch.object(publishing, "_prepare_change", return_value=PREPARED),
+            mock.patch.object(
+                publishing, "_current_upstream_sha", return_value=PREPARED.base_sha
+            ),
+            mock.patch.object(
+                publishing, "_verified_existing_pull_request", return_value=None
+            ) as verifier,
+            mock.patch.object(
+                publishing,
+                "_ensure_target_repository",
+                return_value=publishing.UPSTREAM_REPOSITORY,
+            ),
+            mock.patch.object(publishing, "_try_gh_api", return_value=None),
+            mock.patch.object(
+                publishing, "_create_blob", side_effect=("candidate-blob", "leaderboard-blob")
+            ),
+            mock.patch.object(publishing, "_gh_api", side_effect=api),
+            self.assertRaisesRegex(PublicationError, "public PR/branch .* may remain"),
+        ):
+            publish_submission(SUBMISSION, IDENTITY, b"private-literal\n")
+
+        self.assertEqual(pull_calls, [])
+        self.assertEqual(verifier.call_count, 1)
+
+    def test_created_pull_request_rejects_mutated_head_sha(self) -> None:
+        branch = f"litb/submission-{SUBMISSION_ID}"
+        pull = {
+            "html_url": "https://github.com/example/pull/7",
+            "number": 7,
+            "base": {
+                "ref": "main",
+                "sha": PREPARED.base_sha,
+                "repo": {"full_name": publishing.UPSTREAM_REPOSITORY},
+            },
+            "head": {
+                "ref": branch,
+                "sha": "6" * 40,
+                "repo": {"full_name": IDENTITY.target_repository},
+            },
+        }
+        with (
+            mock.patch.object(publishing, "_existing_pull_request", return_value=pull),
+            mock.patch.object(publishing, "_gh_api_list") as files,
+            self.assertRaisesRegex(PublicationError, "unexpected identity"),
+        ):
+            publishing._verified_existing_pull_request(
+                IDENTITY,
+                branch,
+                PREPARED,
+                expected_head_sha="5" * 40,
+            )
+
+        files.assert_not_called()
 
     def test_retry_resumes_after_branch_creation_when_pr_creation_failed(self) -> None:
         branch = f"litb/submission-{SUBMISSION_ID}"
@@ -337,6 +438,11 @@ class PublishingTests(unittest.TestCase):
             if endpoint.endswith("/git/refs"):
                 state["branch_created"] = True
                 return {"ref": f"refs/heads/{branch}"}
+            if "/git/ref/heads/" in endpoint:
+                return {
+                    "ref": f"refs/heads/{branch}",
+                    "object": {"type": "commit", "sha": commit_sha},
+                }
             if endpoint.endswith("/pulls"):
                 state["pull_attempts"] += 1
                 if state["pull_attempts"] == 1:
@@ -356,7 +462,13 @@ class PublishingTests(unittest.TestCase):
                 publishing, "_current_upstream_sha", return_value=PREPARED.base_sha
             ),
             mock.patch.object(
-                publishing, "_verified_existing_pull_request", return_value=None
+                publishing,
+                "_verified_existing_pull_request",
+                side_effect=(
+                    None,
+                    None,
+                    "https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8",
+                ),
             ),
             mock.patch.object(
                 publishing,
@@ -374,7 +486,7 @@ class PublishingTests(unittest.TestCase):
             ) as blob_reader,
             mock.patch.object(publishing, "_gh_api", side_effect=api),
         ):
-            with self.assertRaisesRegex(PublicationError, "public branch .* may remain"):
+            with self.assertRaisesRegex(PublicationError, "public PR/branch .* may remain"):
                 publish_submission(SUBMISSION, IDENTITY, b"private-literal\n")
             result = publish_submission(SUBMISSION, IDENTITY, b"private-literal\n")
 
