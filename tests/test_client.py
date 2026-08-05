@@ -46,8 +46,10 @@ class DeterministicStubHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(encoded)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(encoded)
+        self.close_connection = True
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path != "/v1/models":
@@ -163,6 +165,7 @@ class DeterministicStubHandler(BaseHTTPRequestHandler):
 class StubServer:
     def __enter__(self):
         self.server = ThreadingHTTPServer((LOOPBACK, 0), DeterministicStubHandler)
+        self.server.daemon_threads = True
         self.server.seen_authorization = None
         self.server.last_request = None
         self.server.omit_model_metadata = False
