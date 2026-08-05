@@ -266,15 +266,17 @@ def _runtime_literals() -> tuple[tuple[str, str], ...]:
     if username and username.casefold() not in GENERIC_ACCOUNT_NAMES:
         candidates.append(("current-username", username))
 
+    # getfqdn() can perform a blocking resolver lookup. The kernel-provided
+    # hostname is local, immediate, and sufficient for dynamic machine-name
+    # coverage; private DNS aliases belong in the required local denylist.
+    try:
+        value = socket.gethostname().strip().rstrip(".")
+    except OSError:
+        value = ""
     hostnames: set[str] = set()
-    for getter in (socket.gethostname, socket.getfqdn):
-        try:
-            value = getter().strip().rstrip(".")
-        except OSError:
-            value = ""
-        if value:
-            hostnames.add(value)
-            hostnames.add(value.split(".", 1)[0])
+    if value:
+        hostnames.add(value)
+        hostnames.add(value.split(".", 1)[0])
     for hostname in sorted(hostnames):
         if hostname.casefold() not in {"localhost", "localhost.localdomain"}:
             candidates.append(("current-hostname", hostname))

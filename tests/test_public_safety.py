@@ -4,11 +4,13 @@ import getpass
 import os
 from pathlib import Path
 import re
+import runpy
 import socket
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -471,6 +473,21 @@ class PublicSafetyTest(unittest.TestCase):
 
         self.assertRules(completed, "current-hostname")
         self.assertNotIn(hostname.casefold(), completed.stdout.casefold())
+
+    def test_runtime_identifier_collection_never_resolves_fqdn(self) -> None:
+        scanner = runpy.run_path(os.fspath(SCANNER))
+        with (
+            mock.patch.object(socket, "gethostname", return_value="host-label.example"),
+            mock.patch.object(
+                socket,
+                "getfqdn",
+                side_effect=AssertionError("resolver-backed lookup must not run"),
+            ),
+        ):
+            literals = scanner["_runtime_literals"]()
+
+        hostnames = {value for rule, value in literals if rule == "current-hostname"}
+        self.assertEqual(hostnames, {"host-label", "host-label.example"})
 
     def test_named_experiments_are_allowed_only_in_experiment_docs(self) -> None:
         names = ("op" + "ik", "poly" + "range")
