@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "suite_version": "1.0",
+  "credential_env": "LOCAL_INFERENCE_API_KEY",
+  "models": [
+    {
+      "id": "example-model-revision",
+      "display_name": "Example Model",
+      "source": "publisher/example-model",
+      "revision": "public-revision-id",
+      "precision": "runtime-declared",
+      "declared_context_tokens": 8192,
+      "runtime_model": "runtime-model-selector",
+      "settings": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_output_tokens": 512,
+        "seed": 0
+      }
+    }
+  ]
+}

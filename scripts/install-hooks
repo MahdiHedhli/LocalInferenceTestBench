@@ -1,0 +1,23 @@
+#!/bin/sh
+
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(git -C "$script_dir" rev-parse --show-toplevel)
+
+git -C "$repo_root" config core.hooksPath .githooks
+chmod +x \
+    "$repo_root/scripts/public_safety.py" \
+    "$repo_root/scripts/public-check" \
+    "$repo_root/scripts/install-hooks" \
+    "$repo_root/.githooks/pre-commit" \
+    "$repo_root/.githooks/pre-push"
+
+denylist="$repo_root/.local/privacy-denylist.txt"
+if [ ! -e "$denylist" ]; then
+    umask 077
+    cp "$repo_root/.local/privacy-denylist.example" "$denylist"
+    chmod 600 "$denylist"
+fi
+
+printf '%s\n' 'Git hooks installed; review .local/privacy-denylist.txt before publishing.'

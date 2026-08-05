@@ -1,0 +1,594 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:local-inference-test-bench:run-record:1.0",
+  "title": "Local Inference Test Bench Run Record",
+  "description": "A closed, minimized benchmark record. Raw prompts, responses, response fingerprints, reasoning, tool arguments, endpoints, credential data, environment content, and machine identifiers are not part of this contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "suite_version",
+    "run_id",
+    "created_at",
+    "profile",
+    "public_manifest_sha256",
+    "validity",
+    "deployment_authorization",
+    "models"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "suite_version": {
+      "const": "1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "profile": {
+      "enum": [
+        "smoke",
+        "standard"
+      ]
+    },
+    "public_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Digest of the canonical public manifest projection. credential_env and runtime_model are excluded."
+    },
+    "validity": {
+      "$ref": "#/$defs/validity"
+    },
+    "deployment_authorization": {
+      "const": false
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/modelResult"
+      }
+    }
+  },
+  "$defs": {
+    "publicText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "^[^\\u0000-\\u001F]+$"
+    },
+    "revisionText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\u0000-\\u001F]+$"
+    },
+    "validity": {
+      "enum": [
+        "valid",
+        "limited",
+        "invalid"
+      ]
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "temperature",
+        "top_p",
+        "max_output_tokens",
+        "seed"
+      ],
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "top_p": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": -9223372036854775808
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "display_name",
+        "source",
+        "precision",
+        "declared_context_tokens"
+      ],
+      "properties": {
+        "display_name": {
+          "$ref": "#/$defs/publicText"
+        },
+        "source": {
+          "$ref": "#/$defs/publicText"
+        },
+        "revision": {
+          "$ref": "#/$defs/revisionText"
+        },
+        "digest": {
+          "$ref": "#/$defs/revisionText"
+        },
+        "precision": {
+          "$ref": "#/$defs/publicText"
+        },
+        "declared_context_tokens": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "revision"
+          ],
+          "not": {
+            "required": [
+              "digest"
+            ]
+          }
+        },
+        {
+          "required": [
+            "digest"
+          ],
+          "not": {
+            "required": [
+              "revision"
+            ]
+          }
+        }
+      ]
+    },
+    "nullableTokenCount": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens"
+      ],
+      "properties": {
+        "prompt_tokens": {
+          "$ref": "#/$defs/nullableTokenCount"
+        },
+        "completion_tokens": {
+          "$ref": "#/$defs/nullableTokenCount"
+        },
+        "total_tokens": {
+          "$ref": "#/$defs/nullableTokenCount"
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_count",
+        "semantic_pass_count",
+        "exact_format_pass_count",
+        "scored_case_count",
+        "latency_ms_total",
+        "latency_ms_mean",
+        "usage_coverage_cases",
+        "prompt_tokens_total",
+        "completion_tokens_total",
+        "tokens_total",
+        "completion_tokens_per_second_weighted"
+      ],
+      "properties": {
+        "case_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "semantic_pass_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exact_format_pass_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scored_case_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latency_ms_total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "latency_ms_mean": {
+          "type": "number",
+          "minimum": 0
+        },
+        "usage_coverage_cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prompt_tokens_total": {
+          "$ref": "#/$defs/nullableTokenCount"
+        },
+        "completion_tokens_total": {
+          "$ref": "#/$defs/nullableTokenCount"
+        },
+        "tokens_total": {
+          "$ref": "#/$defs/nullableTokenCount"
+        },
+        "completion_tokens_per_second_weighted": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "$comment": "Implementations enforce arithmetic consistency with the cases array and require null token totals when usage coverage is incomplete."
+    },
+    "termination": {
+      "enum": [
+        "completed",
+        "tool_call",
+        "filtered",
+        "cancelled",
+        "output_budget",
+        "context_window",
+        "length_unknown",
+        "unknown",
+        "other",
+        "timeout",
+        "network_error",
+        "authentication",
+        "rate_limited",
+        "server_error",
+        "request_rejected",
+        "invalid_json",
+        "protocol_error",
+        "response_too_large",
+        "http_error",
+        "reasoning_only"
+      ]
+    },
+    "route": {
+      "enum": [
+        "direct_response",
+        "read_only_tool",
+        "safe_refusal",
+        "unsafe_mutation",
+        "unexpected_tool",
+        "unrecognized"
+      ]
+    },
+    "caseResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "semantic_success",
+        "exact_format",
+        "outcome",
+        "latency_ms",
+        "usage",
+        "termination",
+        "route",
+        "reasoning_present",
+        "completion_tokens_per_second"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
+        "semantic_success": {
+          "type": "boolean"
+        },
+        "exact_format": {
+          "type": "boolean"
+        },
+        "outcome": {
+          "enum": [
+            "pass",
+            "semantic_only",
+            "format_only",
+            "fail",
+            "not_scored"
+          ]
+        },
+        "latency_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "termination": {
+          "$ref": "#/$defs/termination"
+        },
+        "route": {
+          "$ref": "#/$defs/route"
+        },
+        "reasoning_present": {
+          "type": "boolean"
+        },
+        "completion_tokens_per_second": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "pass"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "semantic_success": {
+                "const": true
+              },
+              "exact_format": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "semantic_only"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "semantic_success": {
+                "const": true
+              },
+              "exact_format": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "format_only"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "semantic_success": {
+                "const": false
+              },
+              "exact_format": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "fail"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "semantic_success": {
+                "const": false
+              },
+              "exact_format": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "not_scored"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "semantic_success": {
+                "const": false
+              },
+              "exact_format": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "route": {
+                "const": "unsafe_mutation"
+              }
+            },
+            "required": [
+              "route"
+            ]
+          },
+          "then": {
+            "properties": {
+              "semantic_success": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "termination": {
+                "const": "reasoning_only"
+              }
+            },
+            "required": [
+              "termination"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reasoning_present": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "modelResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_id",
+        "provenance",
+        "settings",
+        "preflight",
+        "runtime_identity_match",
+        "validity",
+        "summary",
+        "cases"
+      ],
+      "properties": {
+        "model_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        },
+        "settings": {
+          "$ref": "#/$defs/settings"
+        },
+        "preflight": {
+          "enum": [
+            "verified",
+            "metadata_unavailable"
+          ]
+        },
+        "runtime_identity_match": {
+          "type": "boolean"
+        },
+        "validity": {
+          "$ref": "#/$defs/validity"
+        },
+        "summary": {
+          "$ref": "#/$defs/summary"
+        },
+        "cases": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/$defs/caseResult"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "preflight": {
+                "const": "metadata_unavailable"
+              }
+            },
+            "required": [
+              "preflight"
+            ]
+          },
+          "then": {
+            "properties": {
+              "runtime_identity_match": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "validity": {
+                "const": "valid"
+              }
+            },
+            "required": [
+              "validity"
+            ]
+          },
+          "then": {
+            "properties": {
+              "preflight": {
+                "const": "verified"
+              },
+              "runtime_identity_match": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

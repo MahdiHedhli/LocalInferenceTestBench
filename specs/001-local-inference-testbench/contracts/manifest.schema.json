@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:local-inference-test-bench:manifest:1.0",
+  "title": "Local Inference Test Bench Model Manifest",
+  "description": "A local collection of public model provenance, runtime selectors, and non-secret generation settings. Endpoint and credential values are intentionally not part of this contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "suite_version",
+    "models"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "suite_version": {
+      "const": "1.0"
+    },
+    "credential_env": {
+      "type": "string",
+      "pattern": "^[A-Z_][A-Z0-9_]{0,127}$",
+      "maxLength": 128,
+      "description": "Optional environment-variable name. A credential value is never valid here."
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/model"
+      },
+      "$comment": "Implementations also enforce uniqueness of model.id."
+    }
+  },
+  "$defs": {
+    "publicIdentifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "publicText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "^[^\\u0000-\\u001F]+$"
+    },
+    "revisionText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\u0000-\\u001F]+$"
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "temperature",
+        "top_p",
+        "max_output_tokens",
+        "seed"
+      ],
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "top_p": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": -9223372036854775808
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "display_name",
+        "source",
+        "precision",
+        "declared_context_tokens",
+        "runtime_model",
+        "settings"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/publicIdentifier"
+        },
+        "display_name": {
+          "$ref": "#/$defs/publicText"
+        },
+        "source": {
+          "$ref": "#/$defs/publicText"
+        },
+        "revision": {
+          "$ref": "#/$defs/revisionText"
+        },
+        "digest": {
+          "$ref": "#/$defs/revisionText"
+        },
+        "precision": {
+          "$ref": "#/$defs/publicText"
+        },
+        "declared_context_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "runtime_model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Local request selector, not an endpoint or absolute path. Keep the containing manifest ignored unless this value has passed publication review.",
+          "allOf": [
+            {
+              "not": {
+                "pattern": "://"
+              }
+            },
+            {
+              "not": {
+                "pattern": "^[\\\\/]"
+              }
+            },
+            {
+              "not": {
+                "pattern": "^[A-Za-z]:[\\\\/]"
+              }
+            }
+          ]
+        },
+        "settings": {
+          "$ref": "#/$defs/settings"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "revision"
+          ],
+          "not": {
+            "required": [
+              "digest"
+            ]
+          }
+        },
+        {
+          "required": [
+            "digest"
+          ],
+          "not": {
+            "required": [
+              "revision"
+            ]
+          }
+        }
+      ],
+      "$comment": "Implementations require max_output_tokens not to exceed declared_context_tokens."
+    }
+  }
+}

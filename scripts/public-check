@@ -1,0 +1,141 @@
+#!/bin/sh
+
+set -u
+
+EXPECTED_GITLEAKS_VERSION="8.30.1"
+mode=""
+strict=""
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --staged)
+            if [ -n "$mode" ]; then
+                printf '%s\t%s\t%s\n' argument-error scripts/public-check 1 >&2
+                exit 2
+            fi
+            mode="--staged"
+            ;;
+        --full-tree)
+            if [ -n "$mode" ]; then
+                printf '%s\t%s\t%s\n' argument-error scripts/public-check 1 >&2
+                exit 2
+            fi
+            mode="--full-tree"
+            ;;
+        --strict)
+            strict="--strict"
+            ;;
+        *)
+            printf '%s\t%s\t%s\n' argument-error scripts/public-check 1 >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+if [ -z "$mode" ]; then
+    printf '%s\t%s\t%s\n' argument-error scripts/public-check 1 >&2
+    exit 2
+fi
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 2
+repo_root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null) || {
+    printf '%s\t%s\t%s\n' repository-error . 1 >&2
+    exit 2
+}
+cd "$repo_root" || {
+    printf '%s\t%s\t%s\n' repository-error . 1 >&2
+    exit 2
+}
+
+status=0
+
+PYTHONPATH="$repo_root/src${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m unittest discover -s tests -v || status=1
+
+# Word splitting is intentional here: strict is either empty or one fixed flag.
+# shellcheck disable=SC2086
+python3 scripts/public_safety.py "$mode" $strict || status=1
+if [ "$mode" = "--full-tree" ]; then
+    # shellcheck disable=SC2086
+    python3 scripts/public_safety.py --history $strict || status=1
+fi
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    printf '%s\t%s\t%s\n' gitleaks-missing gitleaks 1 >&2
+    exit 1
+fi
+
+installed_version=$(gitleaks version 2>/dev/null) || installed_version=""
+saved_ifs=$IFS
+IFS=.
+# The minimum is fixed here; CI separately pins this exact release.
+# shellcheck disable=SC2086
+set -- $EXPECTED_GITLEAKS_VERSION
+minimum_major=$1
+minimum_minor=$2
+minimum_patch=$3
+# Word splitting is required to compare the three numeric release components.
+# shellcheck disable=SC2086
+set -- $installed_version
+IFS=$saved_ifs
+version_supported=true
+if [ "$#" -ne 3 ]; then
+    version_supported=false
+else
+    installed_major=$1
+    installed_minor=$2
+    installed_patch=$3
+    case "$installed_major$installed_minor$installed_patch" in
+        ""|*[!0-9]*) version_supported=false ;;
+    esac
+    if [ "$version_supported" = true ]; then
+        if [ "$installed_major" -lt "$minimum_major" ] || \
+            { [ "$installed_major" -eq "$minimum_major" ] && [ "$installed_minor" -lt "$minimum_minor" ]; } || \
+            { [ "$installed_major" -eq "$minimum_major" ] && [ "$installed_minor" -eq "$minimum_minor" ] && [ "$installed_patch" -lt "$minimum_patch" ]; }
+        then
+            version_supported=false
+        fi
+    fi
+fi
+if [ "$version_supported" != true ]; then
+    printf '%s\t%s\t%s\n' gitleaks-version gitleaks 1 >&2
+    exit 1
+fi
+
+umask 077
+report_template=$(mktemp "${TMPDIR:-/tmp}/local-inference-gitleaks.XXXXXX") || {
+    printf '%s\t%s\t%s\n' gitleaks-report-error gitleaks 1 >&2
+    exit 1
+}
+cleanup() {
+    rm -f -- "$report_template"
+}
+trap cleanup EXIT HUP INT TERM
+printf '%s\n' '{{range .}}{{.RuleID}}{{"\t"}}{{.File}}{{"\t"}}{{.StartLine}}{{"\n"}}{{end}}' \
+    > "$report_template"
+
+run_gitleaks() {
+    gitleaks "$@" \
+        --redact \
+        --no-banner \
+        --no-color \
+        --log-level error \
+        --report-format template \
+        --report-template "$report_template" \
+        --report-path -
+}
+
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    if [ "$mode" = "--staged" ]; then
+        run_gitleaks git --staged . || status=1
+    else
+        run_gitleaks git . || status=1
+    fi
+else
+    # Before the first commit there is no history to scan. Cover the complete
+    # initial publication directory, including files not yet added to Git.
+    run_gitleaks dir . || status=1
+fi
+
+exit "$status"

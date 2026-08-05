@@ -1,0 +1,320 @@
+"""Validated, non-secret configuration models for the reference runner."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import json
+from pathlib import Path
+import re
+from typing import Any, Mapping
+
+
+MANIFEST_SCHEMA_VERSION = "1.0"
+SUITE_VERSION = "1.0"
+_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
+_TOP_LEVEL_KEYS = {"schema_version", "suite_version", "credential_env", "models"}
+_MODEL_KEYS = {
+    "id",
+    "display_name",
+    "source",
+    "revision",
+    "digest",
+    "precision",
+    "declared_context_tokens",
+    "runtime_model",
+    "settings",
+}
+_SETTINGS_KEYS = {"temperature", "top_p", "max_output_tokens", "seed"}
+
+
+class ManifestError(ValueError):
+    """Raised when a model manifest violates the public configuration contract."""
+
+
+def _plain_string(value: Any, field: str, *, maximum: int = 500) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ManifestError(f"{field} must be a non-empty string")
+    result = value.strip()
+    if len(result) > maximum or any(ord(character) < 32 for character in result):
+        raise ManifestError(f"{field} contains unsupported characters or is too long")
+    return result
+
+
+def _reject_unknown(mapping: Mapping[str, Any], allowed: set[str], field: str) -> None:
+    unknown = sorted(set(mapping) - allowed)
+    if unknown:
+        raise ManifestError(f"{field} contains unsupported fields: {', '.join(unknown)}")
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationSettings:
+    """Portable generation settings shared by all baseline cases for a model."""
+
+    temperature: float = 0.0
+    top_p: float = 1.0
+    max_output_tokens: int = 512
+    seed: int | None = 0
+
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+        *,
+        declared_context_tokens: int,
+    ) -> "GenerationSettings":
+        if not isinstance(value, Mapping):
+            raise ManifestError("settings must be an object")
+        _reject_unknown(value, _SETTINGS_KEYS, "settings")
+        missing = sorted(_SETTINGS_KEYS - set(value))
+        if missing:
+            raise ManifestError(f"settings is missing required fields: {', '.join(missing)}")
+
+        temperature = value["temperature"]
+        top_p = value["top_p"]
+        maximum = value["max_output_tokens"]
+        seed = value["seed"]
+
+        if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
+            raise ManifestError("settings.temperature must be numeric")
+        if not 0.0 <= float(temperature) <= 2.0:
+            raise ManifestError("settings.temperature must be between 0 and 2")
+        if isinstance(top_p, bool) or not isinstance(top_p, (int, float)):
+            raise ManifestError("settings.top_p must be numeric")
+        if not 0.0 < float(top_p) <= 1.0:
+            raise ManifestError("settings.top_p must be greater than 0 and at most 1")
+        if isinstance(maximum, bool) or not isinstance(maximum, int) or maximum < 1:
+            raise ManifestError("settings.max_output_tokens must be a positive integer")
+        if maximum > declared_context_tokens:
+            raise ManifestError(
+                "settings.max_output_tokens cannot exceed declared_context_tokens"
+            )
+        if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
+            raise ManifestError("settings.seed must be an integer or null")
+        if seed is not None and seed < -(2**63):
+            raise ManifestError("settings.seed is below the supported minimum")
+
+        return cls(
+            temperature=float(temperature),
+            top_p=float(top_p),
+            max_output_tokens=maximum,
+            seed=seed,
+        )
+
+    def as_api_parameters(self) -> dict[str, int | float]:
+        """Return only non-secret OpenAI-compatible request parameters."""
+
+        parameters: dict[str, int | float] = {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_tokens": self.max_output_tokens,
+        }
+        if self.seed is not None:
+            parameters["seed"] = self.seed
+        return parameters
+
+    def as_report_data(self) -> dict[str, int | float | None]:
+        return {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_output_tokens": self.max_output_tokens,
+            "seed": self.seed,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ModelSpec:
+    """Public provenance and local selector for one model under test."""
+
+    id: str
+    display_name: str
+    source: str
+    revision_or_digest: str
+    provenance_kind: str
+    precision: str
+    declared_context_tokens: int
+    runtime_model: str
+    settings: GenerationSettings
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any], *, index: int) -> "ModelSpec":
+        if not isinstance(value, Mapping):
+            raise ManifestError(f"models[{index}] must be an object")
+        _reject_unknown(value, _MODEL_KEYS, f"models[{index}]")
+
+        model_id = _plain_string(value.get("id"), f"models[{index}].id", maximum=128)
+        if not _IDENTIFIER.fullmatch(model_id):
+            raise ManifestError(f"models[{index}].id must be a portable identifier")
+        display_name = _plain_string(
+            value.get("display_name"), f"models[{index}].display_name", maximum=500
+        )
+        source = _plain_string(value.get("source"), f"models[{index}].source")
+        precision = _plain_string(
+            value.get("precision"), f"models[{index}].precision", maximum=500
+        )
+
+        revision = value.get("revision")
+        digest = value.get("digest")
+        if (revision is None) == (digest is None):
+            raise ManifestError(
+                f"models[{index}] must provide exactly one of revision or digest"
+            )
+        if revision is not None:
+            provenance_kind = "revision"
+            revision_or_digest = _plain_string(
+                revision, f"models[{index}].revision", maximum=200
+            )
+        else:
+            provenance_kind = "digest"
+            revision_or_digest = _plain_string(
+                digest, f"models[{index}].digest", maximum=200
+            )
+
+        declared_context = value.get("declared_context_tokens")
+        if (
+            isinstance(declared_context, bool)
+            or not isinstance(declared_context, int)
+            or declared_context < 1
+        ):
+            raise ManifestError(
+                f"models[{index}].declared_context_tokens must be a positive integer"
+            )
+
+        runtime_model = _plain_string(
+            value.get("runtime_model"), f"models[{index}].runtime_model", maximum=500
+        )
+        if (
+            "://" in runtime_model
+            or runtime_model.startswith(("/", "\\"))
+            or re.match(r"^[A-Za-z]:[\\/]", runtime_model)
+        ):
+            raise ManifestError(
+                f"models[{index}].runtime_model must be a selector, not an endpoint or absolute path"
+            )
+
+        settings = GenerationSettings.from_mapping(
+            value.get("settings"),
+            declared_context_tokens=declared_context,
+        )
+        return cls(
+            id=model_id,
+            display_name=display_name,
+            source=source,
+            revision_or_digest=revision_or_digest,
+            provenance_kind=provenance_kind,
+            precision=precision,
+            declared_context_tokens=declared_context,
+            runtime_model=runtime_model,
+            settings=settings,
+        )
+
+    def provenance(self) -> dict[str, str | int]:
+        return {
+            "display_name": self.display_name,
+            "source": self.source,
+            self.provenance_kind: self.revision_or_digest,
+            "precision": self.precision,
+            "declared_context_tokens": self.declared_context_tokens,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Manifest:
+    """Validated model manifest. It intentionally contains no endpoint or secret value."""
+
+    schema_version: str
+    suite_version: str
+    credential_env: str | None
+    models: tuple[ModelSpec, ...]
+    public_sha256: str
+
+    def select(self, model_ids: tuple[str, ...] | None = None) -> tuple[ModelSpec, ...]:
+        if not model_ids:
+            return self.models
+        requested = set(model_ids)
+        selected = tuple(model for model in self.models if model.id in requested)
+        missing = sorted(requested - {model.id for model in selected})
+        if missing:
+            raise ManifestError(f"unknown model id(s): {', '.join(missing)}")
+        return selected
+
+
+def parse_manifest(data: Mapping[str, Any]) -> Manifest:
+    """Validate a decoded manifest without retaining its original content."""
+
+    if not isinstance(data, Mapping):
+        raise ManifestError("manifest root must be an object")
+    _reject_unknown(data, _TOP_LEVEL_KEYS, "manifest")
+    schema_version = data.get("schema_version")
+    if schema_version != MANIFEST_SCHEMA_VERSION:
+        raise ManifestError(f"schema_version must be {MANIFEST_SCHEMA_VERSION}")
+    suite_version = data.get("suite_version")
+    if suite_version != SUITE_VERSION:
+        raise ManifestError(f"suite_version must be {SUITE_VERSION}")
+
+    credential_env = data.get("credential_env")
+    if credential_env is not None:
+        if not isinstance(credential_env, str) or not _ENV_NAME.fullmatch(credential_env):
+            raise ManifestError("credential_env must be an uppercase environment variable name")
+
+    raw_models = data.get("models")
+    if not isinstance(raw_models, list) or not raw_models:
+        raise ManifestError("models must be a non-empty array")
+    models = tuple(
+        ModelSpec.from_mapping(raw_model, index=index)
+        for index, raw_model in enumerate(raw_models)
+    )
+    ids = [model.id for model in models]
+    if len(ids) != len(set(ids)):
+        raise ManifestError("model ids must be unique")
+    identities = [
+        (model.source, model.provenance_kind, model.revision_or_digest) for model in models
+    ]
+    if len(identities) != len(set(identities)):
+        raise ManifestError("model source/revision or source/digest identities must be unique")
+    public_projection = {
+        "schema_version": schema_version,
+        "suite_version": suite_version,
+        "models": [
+            {
+                "id": model.id,
+                "display_name": model.display_name,
+                "source": model.source,
+                model.provenance_kind: model.revision_or_digest,
+                "precision": model.precision,
+                "declared_context_tokens": model.declared_context_tokens,
+                "settings": model.settings.as_report_data(),
+            }
+            for model in models
+        ],
+    }
+    canonical_projection = json.dumps(
+        public_projection,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return Manifest(
+        schema_version=schema_version,
+        suite_version=suite_version,
+        credential_env=credential_env,
+        models=models,
+        public_sha256=hashlib.sha256(canonical_projection).hexdigest(),
+    )
+
+
+def load_manifest(path: str | Path) -> Manifest:
+    """Read and validate a UTF-8 JSON manifest."""
+
+    manifest_path = Path(path)
+    try:
+        payload = manifest_path.read_bytes()
+    except OSError as error:
+        raise ManifestError("manifest could not be read") from error
+    try:
+        decoded = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ManifestError("manifest must contain valid UTF-8 JSON") from error
+    return parse_manifest(decoded)

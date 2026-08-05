@@ -1,0 +1,24 @@
+#!/bin/sh
+
+set -u
+repo_root=$(git rev-parse --show-toplevel) || exit 2
+status=0
+
+# Git supplies every exact local object being pushed on standard input. Scan
+# each root even when it is not reachable from the current branch or refs.
+while read -r _local_ref local_object _remote_ref _remote_object; do
+    case "$local_object" in
+        ""|*[!0]*)
+            if [ -n "$local_object" ]; then
+                python3 "$repo_root/scripts/public_safety.py" \
+                    --history \
+                    --strict \
+                    --commit "$local_object" || status=1
+            fi
+            ;;
+        *) ;;
+    esac
+done
+
+"$repo_root/scripts/public-check" --full-tree --strict || status=1
+exit "$status"

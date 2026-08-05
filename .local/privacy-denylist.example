@@ -1,0 +1,10 @@
+# Copy this file to privacy-denylist.txt and keep that copy untracked.
+# Add one lab-specific literal per line. Matching is case-insensitive and
+# regex metacharacters have no special meaning. Blank lines and lines that
+# start with a number sign are ignored.
+#
+# Do not place credentials or secret values here. Use this for identifiers
+# such as local host aliases, inventory prefixes, account names, and site tags.
+# Replace these commented shapes with real local identifiers in the ignored copy:
+# lab-node-alias
+# inventory-prefix
