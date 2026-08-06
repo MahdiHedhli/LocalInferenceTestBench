@@ -79,7 +79,13 @@ setup and bounded adopted-descendant reaping are mandatory; macOS uses `kqueue` 
 unavailable and retains kill-before-reap ordering. The trusted adapter must
 remain synchronous and must not daemonize, change its session/process group, or deliberately escape.
 The snapshot directory must be owner-only and its backing filesystem writable and executable;
-`TMPDIR` may select an owner-controlled non-repository location. Windows uses the two-step exact-bound sidecar path. The process boundary is
+`TMPDIR` may select an owner-controlled non-repository location. The selected base is resolved and
+rejected before sampler-byte writes when filesystem markers identify an ordinary/linked worktree,
+Git directory, or bare repository; active repository-routing `GIT_*` state also fails closed. The
+ancestor chain is root/current-user owned, shared writes require sticky directories, and open
+directory descriptors bind creation and writes. Cleanup nonblockingly checks exact identity/type
+immediately before descriptor-relative removal; root/same-UID races remain outside the portable
+POSIX boundary. Windows uses the two-step exact-bound sidecar path. The process boundary is
 constrained by the CLI contract.
 
 New candidate bytes use public schema `1.1`. The source report's UTC creation time is reduced to

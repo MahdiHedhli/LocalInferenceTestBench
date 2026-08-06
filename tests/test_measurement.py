@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,7 @@ from local_inference_test_bench.measurement import (  # noqa: E402
     build_measurement_evidence,
     write_measurement_evidence,
 )
+from local_inference_test_bench import measurement as measurement_module  # noqa: E402
 from local_inference_test_bench import _measurement_supervisor as supervisor  # noqa: E402
 from local_inference_test_bench.submissions import (  # noqa: E402
     load_measurement_evidence_file,
@@ -165,8 +168,37 @@ def _wait_for_original_process_to_disappear(pid: int, identity: str | None) -> N
     raise AssertionError("measurement sampler descendant remained resident or zombie")
 
 
+def _wait_for_process_state(pid: int, prefix: str) -> str:
+    deadline = time.monotonic() + 5.0
+    state = ""
+    while time.monotonic() < deadline:
+        state = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "state="],
+            check=False,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if state.startswith(prefix):
+            return state
+        time.sleep(0.02)
+    raise AssertionError(f"process did not reach expected {prefix!r} state: {state!r}")
+
+
+def _wait_for_file(path: Path) -> None:
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        if path.is_file():
+            return
+        time.sleep(0.02)
+    raise AssertionError("measurement sampler descendant PID file was not created")
+
+
 @POSIX_SAMPLER_ONLY
 class MeasurementSupervisorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        supervisor._termination_requested = False
+        self.addCleanup(setattr, supervisor, "_termination_requested", False)
+
     def test_darwin_kqueue_fallback_observes_exit_without_waiting(self) -> None:
         process_id = 424242
         event = mock.Mock(ident=process_id, flags=0, fflags=0x80000000)
@@ -182,8 +214,6 @@ class MeasurementSupervisorTests(unittest.TestCase):
         darwin_select.KQ_EV_ONESHOT = 0x10
         darwin_select.KQ_EV_ERROR = 0x4000
         darwin_select.KQ_NOTE_EXIT = 0x80000000
-        supervisor._termination_requested = False
-
         with (
             mock.patch.object(supervisor.sys, "platform", "darwin"),
             mock.patch.object(supervisor.os, "waitid", None, create=True),
@@ -222,8 +252,6 @@ class MeasurementSupervisorTests(unittest.TestCase):
         darwin_select.KQ_EV_ONESHOT = 0x10
         darwin_select.KQ_EV_ERROR = 0x4000
         darwin_select.KQ_NOTE_EXIT = 0x80000000
-        supervisor._termination_requested = False
-
         with (
             mock.patch.object(supervisor.sys, "platform", "darwin"),
             mock.patch.object(supervisor.os, "waitid", None, create=True),
@@ -247,8 +275,6 @@ class MeasurementSupervisorTests(unittest.TestCase):
         darwin_select.KQ_EV_ONESHOT = 0x10
         darwin_select.KQ_EV_ERROR = 0x4000
         darwin_select.KQ_NOTE_EXIT = 0x80000000
-        supervisor._termination_requested = False
-
         with (
             mock.patch.object(supervisor.sys, "platform", "darwin"),
             mock.patch.object(supervisor.os, "waitid", None, create=True),
@@ -283,15 +309,8 @@ class MeasurementSupervisorTests(unittest.TestCase):
             ["/usr/bin/true"],
             start_new_session=True,
         )
-        supervisor._termination_requested = False
         try:
-            time.sleep(0.1)
-            state = subprocess.run(
-                ["ps", "-p", str(process.pid), "-o", "state="],
-                check=False,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
+            state = _wait_for_process_state(process.pid, "Z")
             self.assertTrue(state.startswith("Z"), state)
             self.assertIsNone(process.returncode)
             with mock.patch.object(supervisor.os, "waitid", None, create=True):
@@ -403,6 +422,17 @@ class MeasurementSupervisorTests(unittest.TestCase):
             0,
             0,
         )
+        self.assertEqual(fake_libc.prctl.restype, supervisor.ctypes.c_int)
+        self.assertEqual(
+            fake_libc.prctl.argtypes,
+            (
+                supervisor.ctypes.c_int,
+                supervisor.ctypes.c_ulong,
+                supervisor.ctypes.c_ulong,
+                supervisor.ctypes.c_ulong,
+                supervisor.ctypes.c_ulong,
+            ),
+        )
 
     def test_term_during_spawn_assignment_still_cleans_the_bound_process(self) -> None:
         process = mock.Mock(pid=424242, returncode=None)
@@ -473,6 +503,289 @@ class MeasurementSamplerTests(unittest.TestCase):
         if os.name != "nt":
             executable.chmod(0o700)
         return executable
+
+    @POSIX_SAMPLER_ONLY
+    def test_repository_backed_snapshot_directories_are_rejected_before_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "repository"
+            repository.mkdir()
+            (repository / ".git").mkdir()
+            ignored = repository / ".private-tmp"
+            ignored.mkdir()
+            (repository / ".gitignore").write_text(
+                ".private-tmp/\n",
+                encoding="utf-8",
+            )
+            linked_worktree = root / "linked-worktree"
+            linked_worktree.mkdir()
+            (linked_worktree / ".git").write_text(
+                "gitdir: ../repository/.git/worktrees/example\n",
+                encoding="utf-8",
+            )
+            bare_repository = root / "bare-repository"
+            bare_repository.mkdir()
+            (bare_repository / "HEAD").write_text(
+                "ref: refs/heads/main\n",
+                encoding="utf-8",
+            )
+            (bare_repository / "objects").mkdir()
+            (bare_repository / "refs").mkdir()
+
+            for temporary_base in (
+                repository,
+                ignored,
+                linked_worktree,
+                bare_repository,
+            ):
+                with self.subTest(temporary_base=temporary_base.name):
+                    with (
+                        mock.patch.object(
+                            measurement_module.tempfile,
+                            "tempdir",
+                            os.fspath(temporary_base),
+                        ),
+                        mock.patch.object(
+                            measurement_module.os,
+                            "open",
+                            wraps=os.open,
+                        ) as open_file,
+                        self.assertRaisesRegex(MeasurementError, "outside a repository"),
+                    ):
+                        with measurement_module._approved_adapter_snapshot(
+                            b"approved sampler bytes",
+                            hashlib.sha256(b"approved sampler bytes").hexdigest(),
+                            "",
+                        ):
+                            self.fail("repository-backed snapshot unexpectedly opened")
+
+                    open_file.assert_not_called()
+
+    @POSIX_SAMPLER_ONLY
+    def test_custom_nonrepository_snapshot_directory_remains_supported(self) -> None:
+        approved_bytes = b"approved sampler bytes"
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot_base = Path(temporary) / "private-executable-temp"
+            snapshot_base.mkdir(mode=0o700)
+            environment = {
+                key: value
+                for key, value in os.environ.items()
+                if key not in measurement_module._REPOSITORY_ROUTING_ENVIRONMENT_KEYS
+            }
+            environment["GIT_AUTHOR_NAME"] = "local-test"
+            environment["GIT_INDEX_FILE"] = "hook-managed-index"
+            with (
+                mock.patch.object(
+                    measurement_module.tempfile,
+                    "tempdir",
+                    os.fspath(snapshot_base),
+                ),
+                mock.patch.dict(os.environ, environment, clear=True),
+                measurement_module._approved_adapter_snapshot(
+                    approved_bytes,
+                    hashlib.sha256(approved_bytes).hexdigest(),
+                    "",
+                ) as (snapshot, identity),
+            ):
+                self.assertEqual(snapshot.parent.parent, snapshot_base.resolve())
+                self.assertEqual(identity.sha256, hashlib.sha256(approved_bytes).hexdigest())
+
+            self.assertEqual(list(snapshot_base.iterdir()), [])
+
+    @POSIX_SAMPLER_ONLY
+    def test_repository_routing_environment_is_rejected_before_snapshot_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            markerless_worktree = root / "markerless-worktree"
+            markerless_worktree.mkdir()
+            repository_data = root / "repository-data"
+            repository_data.mkdir()
+            with (
+                mock.patch.object(
+                    measurement_module.tempfile,
+                    "tempdir",
+                    os.fspath(markerless_worktree),
+                ),
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "GIT_DIR": os.fspath(repository_data),
+                        "GIT_WORK_TREE": os.fspath(markerless_worktree),
+                    },
+                    clear=True,
+                ),
+                mock.patch.object(
+                    measurement_module.os,
+                    "open",
+                    wraps=os.open,
+                ) as open_file,
+                self.assertRaisesRegex(MeasurementError, "Git routing"),
+            ):
+                with measurement_module._approved_adapter_snapshot(
+                    b"approved sampler bytes",
+                    hashlib.sha256(b"approved sampler bytes").hexdigest(),
+                    "",
+                ):
+                    self.fail("Git-routed snapshot unexpectedly opened")
+
+            open_file.assert_not_called()
+
+    @POSIX_SAMPLER_ONLY
+    def test_shared_nonsticky_snapshot_base_is_rejected_before_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            shared_base = Path(temporary) / "shared-temp"
+            shared_base.mkdir()
+            shared_base.chmod(0o777)
+            with (
+                mock.patch.object(
+                    measurement_module.tempfile,
+                    "tempdir",
+                    os.fspath(shared_base),
+                ),
+                mock.patch.object(
+                    measurement_module.os,
+                    "open",
+                    wraps=os.open,
+                ) as open_file,
+                self.assertRaisesRegex(MeasurementError, "owner-controlled"),
+            ):
+                with measurement_module._approved_adapter_snapshot(
+                    b"approved sampler bytes",
+                    hashlib.sha256(b"approved sampler bytes").hexdigest(),
+                    "",
+                ):
+                    self.fail("shared snapshot directory unexpectedly opened")
+
+            open_file.assert_not_called()
+
+    @POSIX_SAMPLER_ONLY
+    def test_snapshot_base_resolution_loop_is_categorical(self) -> None:
+        with (
+            mock.patch.object(
+                measurement_module.Path,
+                "resolve",
+                side_effect=RuntimeError("symlink loop"),
+            ),
+            self.assertRaisesRegex(MeasurementError, "could not be verified"),
+        ):
+            measurement_module._verified_snapshot_base()
+
+    @POSIX_SAMPLER_ONLY
+    def test_snapshot_write_is_descriptor_anchored_against_directory_swap(self) -> None:
+        approved_bytes = b"approved sampler bytes"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            snapshot_base = root / "private-executable-temp"
+            snapshot_base.mkdir(mode=0o700)
+            repository = root / "repository"
+            repository.mkdir()
+            (repository / ".git").mkdir()
+            orphan = root / "orphaned-snapshot-directory"
+            swapped_path: Path | None = None
+            real_open = os.open
+            swapped = False
+
+            def swap_before_snapshot_open(
+                path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                nonlocal swapped, swapped_path
+                if not swapped and path == "sampler" and dir_fd is not None:
+                    directories = list(snapshot_base.iterdir())
+                    self.assertEqual(len(directories), 1)
+                    swapped_path = directories[0]
+                    swapped_path.rename(orphan)
+                    swapped_path.symlink_to(repository, target_is_directory=True)
+                    swapped = True
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            try:
+                with (
+                    mock.patch.object(
+                        measurement_module.tempfile,
+                        "tempdir",
+                        os.fspath(snapshot_base),
+                    ),
+                    mock.patch.object(
+                        measurement_module.os,
+                        "open",
+                        side_effect=swap_before_snapshot_open,
+                    ),
+                    self.assertRaisesRegex(MeasurementError, "changed during verification"),
+                ):
+                    with measurement_module._approved_adapter_snapshot(
+                        approved_bytes,
+                        hashlib.sha256(approved_bytes).hexdigest(),
+                        "",
+                    ):
+                        self.fail("swapped snapshot directory unexpectedly executed")
+
+                self.assertTrue(swapped)
+                self.assertFalse((repository / "sampler").exists())
+                self.assertFalse((orphan / "sampler").exists())
+            finally:
+                if swapped_path is not None and swapped_path.is_symlink():
+                    swapped_path.unlink()
+                if orphan.is_dir():
+                    orphan.rmdir()
+
+    @POSIX_SAMPLER_ONLY
+    def test_snapshot_cleanup_refuses_hardlink_and_fifo_replacements(self) -> None:
+        approved_bytes = b"approved sampler bytes"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            snapshot_base = root / "private-executable-temp"
+            snapshot_base.mkdir(mode=0o700)
+
+            for replacement_kind in ("hardlink", "fifo"):
+                with self.subTest(replacement_kind=replacement_kind):
+                    replacement = root / f"replacement-{replacement_kind}"
+                    if replacement_kind == "hardlink":
+                        replacement.write_text("must remain unchanged", encoding="utf-8")
+                        replacement.chmod(0o644)
+                    snapshot: Path | None = None
+                    started = time.monotonic()
+                    with (
+                        mock.patch.object(
+                            measurement_module.tempfile,
+                            "tempdir",
+                            os.fspath(snapshot_base),
+                        ),
+                        self.assertRaisesRegex(MeasurementError, "removed safely"),
+                    ):
+                        with measurement_module._approved_adapter_snapshot(
+                            approved_bytes,
+                            hashlib.sha256(approved_bytes).hexdigest(),
+                            "",
+                        ) as (snapshot, _identity):
+                            snapshot.parent.chmod(0o700)
+                            snapshot.unlink()
+                            if replacement_kind == "hardlink":
+                                os.link(replacement, snapshot)
+                            else:
+                                os.mkfifo(snapshot, mode=0o644)
+                                snapshot.chmod(0o644)
+
+                    self.assertLess(time.monotonic() - started, 2.0)
+                    self.assertIsNotNone(snapshot)
+                    assert snapshot is not None
+                    metadata = snapshot.lstat()
+                    self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o644)
+                    if replacement_kind == "hardlink":
+                        self.assertTrue(stat.S_ISREG(metadata.st_mode))
+                        self.assertEqual(
+                            replacement.read_text(encoding="utf-8"),
+                            "must remain unchanged",
+                        )
+                        self.assertEqual(stat.S_IMODE(replacement.stat().st_mode), 0o644)
+                    else:
+                        self.assertTrue(stat.S_ISFIFO(metadata.st_mode))
+
+                    snapshot.unlink()
+                    snapshot.parent.rmdir()
 
     @POSIX_SAMPLER_ONLY
     def test_adapter_receives_exact_binding_without_process_secrets(self) -> None:
@@ -818,7 +1131,7 @@ class MeasurementSamplerTests(unittest.TestCase):
             sampler = LocalMeasurementSampler(executable)
             with (
                 mock.patch(
-                    "local_inference_test_bench.measurement.tempfile.TemporaryDirectory",
+                    "local_inference_test_bench.measurement._create_snapshot_directory",
                     side_effect=OSError("temporary directory unavailable"),
                 ),
                 self.assertRaisesRegex(MeasurementError, "snapshot could not be created"),
@@ -852,25 +1165,26 @@ class MeasurementSamplerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             executable = self._executable(Path(temporary))
             sampler = LocalMeasurementSampler(executable)
-            real_snapshot_directory = tempfile.TemporaryDirectory()
+            real_rmdir = os.rmdir
 
-            class CleanupFailure:
-                name = real_snapshot_directory.name
-
-                @staticmethod
-                def cleanup() -> None:
-                    real_snapshot_directory.cleanup()
-                    raise OSError("cleanup failed")
+            def remove_then_fail(
+                path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+                *,
+                dir_fd: int | None = None,
+            ) -> None:
+                real_rmdir(path, dir_fd=dir_fd)
+                raise OSError("cleanup failed")
 
             with (
-                mock.patch(
-                    "local_inference_test_bench.measurement.tempfile.TemporaryDirectory",
-                    return_value=CleanupFailure(),
-                ),
                 mock.patch.object(
                     subprocess,
                     "Popen",
                     side_effect=OSError("spawn failed"),
+                ),
+                mock.patch.object(
+                    measurement_module.os,
+                    "rmdir",
+                    side_effect=remove_then_fail,
                 ),
                 self.assertRaisesRegex(MeasurementError, "could not run safely") as raised,
             ):
@@ -881,6 +1195,11 @@ class MeasurementSamplerTests(unittest.TestCase):
                 )
 
         self.assertNotIn("removed safely", str(raised.exception))
+        self.assertIn(
+            "measurement sampler snapshot cleanup also failed; "
+            "temporary snapshot artifacts may remain",
+            getattr(raised.exception, "__notes__", []),
+        )
 
     @unittest.skipUnless(os.name == "nt", "Windows-specific fail-closed behavior")
     def test_windows_single_command_sampler_requires_safe_process_containment(self) -> None:
@@ -934,6 +1253,7 @@ class MeasurementSamplerTests(unittest.TestCase):
                         model_ids=MODEL_IDS,
                     )
 
+                _wait_for_file(pid_file)
                 descendant_pid = int(pid_file.read_text(encoding="utf-8"))
                 identity = _process_identity(descendant_pid)
                 _wait_for_original_process_to_disappear(descendant_pid, identity)

@@ -153,21 +153,31 @@ change describes a different candidate result.
 Before public schema `1.1` preparation, obtain categorical pre/post measurement evidence from a
 compatible local sampler or adapter. On POSIX, non-interactive single-command save/PR uses
 `--measurement-sampler <executable>`. The CLI allocates the run ID before endpoint access, invokes
-the adapter synchronously before the run and, only when that pre sample and the complete benchmark
-both return successfully, after the run. If benchmark execution raises, no post sample or public
+the adapter synchronously before the run and, only when that pre-sample and the complete benchmark
+both return successfully, after the run. If benchmark execution raises, no post-sample or public
 export is attempted. The CLI verifies the echoed run/model/phase
 binding, and atomically retains the closed sidecar at `--measurement-evidence`. The executable must
 be at most 16 MiB, regular, non-symlinked, and not group- or world-writable. Its approved bytes are
 copied into a private non-writable snapshot for execution while the source identity/content are
 rechecked for every launch. Adapter stdout is bounded strict JSON; stderr and inherited
 credentials are not captured or forwarded. A dedicated standard-library supervisor keeps the
-snapshot and its descendants in one process group, kills that group before reaping its leader, and
-on Linux adopts and reaps descendants. The sampler must remain synchronous: it must not daemonize,
+sampler process launched from the snapshot and its descendants in one process group, kills that
+group before reaping its leader, and on Linux fails closed unless child-subreaper setup succeeds,
+then adopts and boundedly reaps descendants. The sampler must remain synchronous: it must not daemonize,
 call `setsid`/`setpgid`, or otherwise deliberately escape the process group. Snapshot creation uses
 an owner-only directory under the system temporary location; on a host where its filesystem is
 mounted `noexec`, set `TMPDIR` to an owner-controlled, non-repository directory on a writable
 filesystem that permits execution. Do not relocate snapshots into a tracked or shared repository
-directory.
+directory; the CLI resolves the selected temporary base and rejects ordinary worktrees, linked
+worktrees, Git directories, bare repositories, and repository-routing `GIT_*` state before writing
+the approved bytes. Every resolved ancestor must be owned by root or the current user, and any
+shared-writable ancestor must use the sticky bit. Creation and writes use open directory descriptors
+so an untrusted different-UID path swap cannot redirect sampler bytes into a repository. Cleanup performs
+non-following, nonblocking exact-identity checks immediately before descriptor-relative removal.
+Root and same-UID adversaries are outside this boundary; portable POSIX cannot make final pathname
+removal identity-conditional, and those processes can already access the approved bytes. A handled
+cleanup failure, `SIGKILL`, or a host crash can leave the owner-only private snapshot until local or
+system temporary-file cleanup. The snapshot path and bytes remain local and are never published.
 Windows uses the separate exact-bound sidecar plus `prepare-submission` until equivalent safe
 process-tree containment is available.
 

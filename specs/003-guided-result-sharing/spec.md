@@ -172,7 +172,15 @@ generated leaderboard, fixed digest metadata, and fixed repository routing.
   non-symlinked, executable, not group/world-writable, and identity/content rechecked at launch.
   Only a private non-writable snapshot of approved bytes MAY execute. Its directory MUST be
   owner-only and its backing filesystem writable and executable; `TMPDIR` MAY select an
-  owner-controlled non-repository location when the default is `noexec`. Windows MUST fail this option
+  owner-controlled non-repository location when the default is `noexec`. Before writing approved
+  bytes, the CLI MUST resolve that base and reject ordinary/linked worktrees, Git directories, and
+  bare repositories from filesystem markers, and reject active repository-routing `GIT_*` state.
+  Every ancestor MUST be root/current-user owned, with the sticky bit required for shared writes.
+  Creation and sampler-byte writes MUST be anchored to directory file descriptors. Cleanup MUST use
+  non-following, nonblocking inspection, compare exact identity/type immediately before
+  descriptor-relative removal, and fail closed on a mismatch. The contract MUST disclose that
+  portable POSIX cannot make pathname removal atomically identity-conditional and does not contain
+  root or same-UID adversaries. Windows MUST fail this option
   closed and retain two-step exact-bound preparation. Missing, stale, malformed, oversized,
   timed-out, nonzero, or incomplete sampler output after the benchmark returns MUST preserve the
   completed private report and block export; a runner exception follows the existing

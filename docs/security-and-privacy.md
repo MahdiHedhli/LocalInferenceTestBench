@@ -82,13 +82,25 @@ a private non-writable snapshot of the approved bytes is executed. A dedicated, 
 standard-library supervisor owns that execution boundary. It terminates the adapter group before
 reaping its leader, avoiding a reused-PGID signal. Exit observation is non-reaping on every supported
 POSIX/Python combination (`waitid` where available and `kqueue` on older macOS Python), and on Linux
-the supervisor acts as a child subreaper and boundedly reaps adopted descendants. macOS uses the same
+the single-command path fails closed unless the supervisor becomes a child subreaper; only then does
+it boundedly reap adopted descendants. macOS uses the same
 kill-before-reap order and relies on the host init process for orphan reaping. Cleanup covers descendants that stay in the inherited process
 group; the trusted sampler must remain synchronous and must not daemonize, call `setsid`/`setpgid`, or
 deliberately escape it. Uninterruptible kernel tasks can only produce a bounded, categorical failure.
 The snapshot is created in an owner-only directory under the system temporary location; if that
 filesystem is `noexec`, set `TMPDIR` to an owner-controlled, non-repository directory on a writable
-filesystem that permits execution. Windows fails this single-command option closed and retains the two-step exact-bound
+filesystem that permits execution. The resolved base is rejected before approved bytes are written
+when it is inside an ordinary or linked worktree, a Git directory, or a bare repository, or when
+repository-routing `GIT_*` state is active. Its resolved ancestors must be root/current-user owned;
+shared-writable directories require the sticky bit. Directory-FD-anchored creation and writes
+prevent a different-UID checked-path swap from redirecting approved bytes. Cleanup performs non-following, nonblocking
+identity/type checks immediately before descriptor-relative removal. It does not claim atomic
+containment against root or same-UID races: portable POSIX offers no identity-conditional unlink,
+and such a process can already access the sampler bytes. If handled cleanup fails, the failure is
+surfaced but the owner-only private snapshot may remain until local or system temporary-file cleanup;
+`SIGKILL` or a host crash can leave the same artifact because cleanup cannot run. Its path and bytes
+remain local and are never published. Windows
+fails this single-command option closed and retains the two-step exact-bound
 sidecar path. A sampler failure after a completed run leaves the private report but blocks candidate
 creation. The CLI never fills a missing sample or derives clean from run validity.
 

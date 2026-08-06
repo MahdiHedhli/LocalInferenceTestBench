@@ -82,7 +82,12 @@ PGID, and observes leader exit without consuming its wait status (`waitid`, or `
 supported macOS Python). On Linux it fails closed unless it can adopt and boundedly reap descendants
 as a child subreaper. The sampler must remain synchronous and inside its inherited session/process group. The
 snapshot directory must be owner-only and its backing filesystem writable and executable; `TMPDIR`
-can select an owner-controlled non-repository location if the default is `noexec`. A post sample is attempted only after the pre sample and complete
+can select an owner-controlled non-repository location if the default is `noexec`. The resolved base
+is rejected before byte creation when filesystem markers identify an ordinary/linked worktree, Git
+directory, or bare repository; repository-routing `GIT_*` state also fails closed. Root/current-user
+ownership and sticky shared-write rules protect the ancestor chain. Directory-FD-anchored creation
+and writes close the different-UID redirection seam; cleanup nonblockingly rechecks identity/type immediately
+before descriptor-relative removal, with root/same-UID races explicitly outside the boundary. A post sample is attempted only after the pre sample and complete
 benchmark return successfully. A sampler failure is remembered while the benchmark continues; the private report is written before export fails. Static exact-bound
 sidecars remain supported by the separate two-step `prepare-submission` command.
 Windows fails the single-command option closed and uses that two-step path.

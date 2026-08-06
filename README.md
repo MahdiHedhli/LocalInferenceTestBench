@@ -104,14 +104,24 @@ litb run \
 Non-interactive `run --submission save` and `run --submission pr` require the sampler option; an
 already-produced static sidecar belongs to the two-step `prepare-submission` path. The adapter must
 be a regular non-symlink executable and must not be group- or world-writable. A dedicated
-standard-library supervisor keeps the approved snapshot and its descendants in one process group,
-terminates that group before reaping its leader, and on Linux adopts and reaps descendants so a
-conforming sampler does not leave zombies under a minimal PID 1. The sampler must stay synchronous
+standard-library supervisor keeps the sampler process launched from the approved snapshot and its
+descendants in one process group and terminates that group before reaping its leader. On Linux the
+single-command path fails closed unless child-subreaper setup succeeds; only then does it adopt and
+boundedly reap descendants so a conforming sampler does not leave zombies under a minimal PID 1.
+The sampler must stay synchronous
 and must not daemonize or deliberately escape that group; uninterruptible kernel tasks can only fail
 closed after a bounded wait. Snapshot creation uses an owner-only directory under the system
 temporary location; if its filesystem is mounted `noexec`, set `TMPDIR` to an owner-controlled,
-non-repository directory on a writable filesystem that permits execution. This cleanup boundary is
-currently POSIX-only. Windows users retain the two-step
+non-repository directory on a writable filesystem that permits execution. Repository-backed temp
+bases and repository-routing `GIT_*` state are rejected before approved sampler bytes are written.
+The resolved ancestor chain must be root/current-user owned; shared-writable directories require
+the sticky bit. Directory creation and sampler-byte writes are anchored to open directory
+descriptors. Cleanup uses non-following, nonblocking exact-identity checks immediately before
+descriptor-relative removal. A root or same-UID process is outside this containment boundary because
+it can race any portable POSIX pathname and already has access to the sampler bytes. A handled cleanup
+failure, `SIGKILL`, or a host crash can leave the owner-only private snapshot until local or system
+temporary-file cleanup; its path and bytes are never published. This cleanup boundary is currently
+POSIX-only. Windows users retain the two-step
 `prepare-submission` path.
 
 To automate the public contribution path, replace `save` with `pr`. The tool saves and displays the

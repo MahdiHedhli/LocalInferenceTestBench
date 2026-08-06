@@ -251,11 +251,22 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
   launch. Only a private non-writable snapshot of the approved bytes MAY execute. Its directory MUST
   be owner-only and its backing filesystem MUST be writable and permit execution; an operator MAY
   select an owner-controlled location through `TMPDIR`, but MUST NOT use a tracked or shared
-  repository directory. Windows MUST fail
+  repository directory. Before writing approved bytes, the runner MUST resolve the selected temp
+  base and reject an ordinary or linked worktree, Git directory, or bare repository using
+  filesystem repository markers, and MUST reject active repository-routing `GIT_*` state. Every
+  resolved ancestor MUST be owned by root or the current user; a group/world-writable ancestor MUST
+  have the sticky bit. Directory creation and sampler-byte writes MUST be anchored to open directory
+  descriptors. Cleanup MUST nonblockingly inspect without following links, compare the exact created
+  identity/type immediately before descriptor-relative removal, and fail closed on a mismatch. The
+  contract MUST state that portable POSIX cannot make pathname removal atomically
+  identity-conditional and does not contain root or same-UID adversaries. Windows MUST fail
   this option closed and retain the two-step exact-bound sidecar path. A sampler or evidence failure
   after the benchmark returns MUST leave the completed private report intact while blocking export;
   a runner exception follows the existing no-completed-report path. Missing samples and clean
-  conditions MUST never be synthesized. Static exact-bound sidecars remain supported by the separate
+  conditions MUST never be synthesized. Cleanup failure MUST be surfaced without masking a primary
+  failure. A handled cleanup failure, `SIGKILL`, or a host crash MAY leave the owner-only private
+  snapshot until local or system temporary-file cleanup; the snapshot path and bytes MUST never be
+  published. Static exact-bound sidecars remain supported by the separate
   two-step preparation command.
 
 ### Key Entities

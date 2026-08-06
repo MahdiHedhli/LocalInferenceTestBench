@@ -327,7 +327,7 @@ class PublishedContractTests(unittest.TestCase):
 
     def test_mixed_legacy_and_current_dataset_matches_transport_contracts(self) -> None:
         current = prepare_submission(valid_report(), public_environment())
-        legacy_path, legacy = legacy_submission_fixture()
+        _legacy_path, legacy = legacy_submission_fixture()
         self.assertEqual(legacy["schema_version"], "1.0")
 
         with tempfile.TemporaryDirectory() as temporary:

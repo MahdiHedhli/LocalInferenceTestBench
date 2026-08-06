@@ -346,7 +346,15 @@ requires child-subreaper setup and bounded adopted-descendant reaping; macOS use
 `waitid` is unavailable and retains the same kill-before-reap ordering. The trusted
 sampler is synchronous and does not daemonize, change session/process group, or deliberately escape.
 The snapshot directory must be owner-only and its backing filesystem writable and executable;
-`TMPDIR` may select an owner-controlled non-repository location. Windows retains the static exact-bound sidecar path
+`TMPDIR` may select an owner-controlled non-repository location. Before approved bytes are written,
+the resolved base is rejected when filesystem markers identify an ordinary or linked worktree, Git
+directory, or bare repository; active repository-routing `GIT_*` state also fails closed. The
+ancestor chain is root/current-user owned, shared writes require sticky directories, and
+directory-descriptor operations bind creation and writes. Cleanup uses non-following, nonblocking
+exact identity/type checks immediately before descriptor-relative removal; root/same-UID races are
+outside the portable POSIX boundary. A handled cleanup failure, `SIGKILL`, or host crash may leave
+the owner-only snapshot until local or system temporary-file cleanup; its path and bytes remain
+local and are never published. Windows retains the static exact-bound sidecar path
 until equivalent process-tree containment exists.
 
 ## Value object: Public measurement context

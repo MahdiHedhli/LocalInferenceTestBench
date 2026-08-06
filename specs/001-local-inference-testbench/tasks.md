@@ -453,11 +453,16 @@ categorical evidence and preserving the private report on optional sampler failu
   exact adapter binding, in-flight output bounds, executable safety, credential-free invocation,
   approved-byte snapshot execution, no-post behavior after a runner exception, Linux subreaper and
   zombie cleanup, Darwin `kqueue` non-reaping fallback, kill-before-reap/PID-reuse safety, POSIX
-  process-tree cleanup, Windows fail-closed behavior, atomic owner-only retention, and private-report
+  process-tree cleanup, marker and `GIT_*` repository-backed temp rejection, nonsticky shared-parent
+  rejection, descriptor-anchored path-swap resistance before sampler-byte writes, hard-link/FIFO
+  cleanup replacement rejection with bounded exact pre-removal checks, Windows fail-closed behavior,
+  atomic owner-only retention, and private-report
   preservation in `tests/test_runner.py`, `tests/test_measurement.py`, and `tests/test_cli.py`
 - [x] T077 Implement the POSIX synchronous adapter bridge, approved-byte snapshot, dedicated
   standard-library supervisor, Linux child-subreaper descendant reaping, Darwin `kqueue` observer,
-  kill-before-reap process-group cleanup, exact-bound evidence construction, atomic local retention,
+  kill-before-reap process-group cleanup, repository-routing/marker rejection, trusted ancestor
+  permissions, descriptor-anchored snapshot creation/write, non-following/nonblocking identity-checked
+  cleanup with an explicit same-UID limitation, exact-bound evidence construction, atomic local retention,
   Windows two-step fallback, and same-object export handoff in
   `src/local_inference_test_bench/measurement.py`, `_measurement_supervisor.py`, `runner.py`, and
   `cli.py`

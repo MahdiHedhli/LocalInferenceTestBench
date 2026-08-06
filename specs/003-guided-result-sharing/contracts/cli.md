@@ -45,7 +45,14 @@ bounded adopted-descendant reaping. Older supported macOS Python uses a `kqueue`
 `waitid` is unavailable.
 The sampler must stay synchronous and must not daemonize, change session/process group, or
 deliberately escape. The snapshot directory must be owner-only and its backing filesystem writable
-and executable; an owner-controlled non-repository `TMPDIR` can replace a `noexec` default. A runner exception produces no post sample or export. Any
+and executable; an owner-controlled non-repository `TMPDIR` can replace a `noexec` default. A
+resolved temp base with ordinary/linked worktree, Git-directory, or bare-repository filesystem
+markers is rejected before approved bytes are written, and active repository-routing `GIT_*` state
+also fails closed. Every ancestor must be root/current-user owned; shared writes require the sticky
+bit. Creation and writes are anchored to directory file descriptors. Cleanup nonblockingly inspects
+without following links, checks exact identity/type immediately before descriptor-relative removal,
+and fails closed on mismatch. Root and same-UID races are outside the portable POSIX boundary. A
+runner exception produces no post sample or export. Any
 sampler failure blocks export after preserving a completed private report.
 
 ## Exit status

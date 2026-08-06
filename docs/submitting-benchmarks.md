@@ -164,7 +164,9 @@ executes only a private non-writable snapshot of those approved bytes. The CLI
 invokes `pre` with a 30-second bound immediately before the complete benchmark run and invokes
 `post` immediately afterward only if `pre` succeeded and the complete benchmark returned
 successfully. If benchmark execution raises, no post sample is collected and no export is attempted.
-The adapter receives one compact JSON object on standard input:
+The adapter receives one compact JSON object on standard input. The `"schema_version": "1.0"`
+shown here versions the private sampler/evidence protocol; it is independent of the public
+leaderboard candidate schema `1.1`:
 
 ```json
 {
@@ -215,6 +217,12 @@ cgroup. An uninterruptible kernel task may outlive any signal, so the bridge rep
 categorical cleanup failure rather than waiting indefinitely. Snapshot creation uses an owner-only
 directory under the system temporary location. If its filesystem is mounted `noexec`, set `TMPDIR`
 to an owner-controlled, non-repository directory on a writable filesystem that permits execution.
+The CLI resolves that base and rejects ordinary worktrees, linked worktrees, Git directories, and
+bare repositories, plus repository-routing `GIT_*` state, before writing approved sampler bytes.
+All resolved ancestors must be root/current-user owned, with the sticky bit required for shared
+writes. Creation and writes are anchored to open directory descriptors. Cleanup uses non-following,
+nonblocking exact-identity checks immediately before descriptor-relative removal. Root and same-UID
+processes are outside this portable POSIX containment boundary and can already access the bytes.
 
 Timeout, nonzero exit, malformed/duplicate JSON, extra fields, mismatched bindings, file replacement,
 or incomplete samples fail closed after the private run report is saved. The owner-only sidecar is

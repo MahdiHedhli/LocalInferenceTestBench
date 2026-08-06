@@ -45,10 +45,14 @@
   binding, bounded capture, approved-byte snapshot execution, POSIX process-tree cleanup, Windows
   fail-closed behavior, credential-free invocation, no post after a runner exception, Linux
   subreaper/zombie cleanup, Darwin `kqueue` non-reaping fallback, kill-before-reap/PID-reuse safety,
-  atomic owner-only retention, and private-report preservation on sampler failure.
+  marker and `GIT_*` repository-backed temp rejection, nonsticky shared-parent rejection,
+  descriptor-anchored path-swap resistance before byte creation, bounded hard-link/FIFO cleanup
+  rejection, atomic owner-only retention, and private-report preservation on sampler failure.
 - [x] T022 Implement the POSIX synchronous local adapter bridge, approved-byte snapshot, dedicated
   standard-library supervisor, Linux child-subreaper descendant reaping, Darwin `kqueue` observer,
-  kill-before-reap cleanup, validated preallocated runner identity, Windows two-step fallback, and
+  kill-before-reap cleanup, filesystem-marker/repository-routing rejection, trusted ancestor modes,
+  descriptor-anchored snapshot creation/write, non-following/nonblocking identity-checked cleanup
+  with explicit same-UID limits, validated preallocated runner identity, Windows two-step fallback, and
   same-object post-run evidence handoff in `measurement.py`, `_measurement_supervisor.py`,
   `runner.py`, and `cli.py`.
 - [x] T023 Update the CLI contract, plan, research, data model, quickstart, README, and operator

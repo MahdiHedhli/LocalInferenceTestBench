@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import secrets
 import stat
 import subprocess
 import sys
@@ -35,7 +36,12 @@ _MAX_ADAPTER_REQUEST_BYTES = 256 * 1024
 _MAX_ADAPTER_EXECUTABLE_BYTES = 16 * 1024 * 1024
 _ADAPTER_TIMEOUT_SECONDS = 30.0
 _CLEANUP_TIMEOUT_SECONDS = 2.0
+_SNAPSHOT_DIRECTORY_ATTEMPTS = 32
 _SUPERVISOR_PATH = Path(__file__).with_name("_measurement_supervisor.py")
+_REPOSITORY_ROUTING_ENVIRONMENT_KEYS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+)
 _SAFE_ENVIRONMENT_KEYS = (
     "PATH",
     "HOME",
@@ -94,6 +100,320 @@ def _file_signature(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
         metadata.st_size,
         metadata.st_mtime_ns,
     )
+
+
+def _repository_marker_present(path: Path) -> bool:
+    """Detect ordinary worktrees and bare repositories without trusting Git env state."""
+
+    for candidate in (path, *path.parents):
+        bare_markers = (
+            candidate / "HEAD",
+            candidate / "objects",
+            candidate / "refs",
+        )
+        try:
+            (candidate / ".git").lstat()
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise MeasurementError(
+                "measurement sampler snapshot temporary location could not be verified"
+            ) from error
+        else:
+            return True
+
+        bare_marker_count = 0
+        for marker in bare_markers:
+            try:
+                marker.lstat()
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                raise MeasurementError(
+                    "measurement sampler snapshot temporary location could not be verified"
+                ) from error
+            bare_marker_count += 1
+        if bare_marker_count == len(bare_markers):
+            return True
+    return False
+
+
+def _directory_identity(metadata: os.stat_result) -> tuple[int, int]:
+    return metadata.st_dev, metadata.st_ino
+
+
+def _validate_snapshot_directory_chain(path: Path) -> None:
+    """Require every resolved ancestor to be root/current-user controlled."""
+
+    if not hasattr(os, "getuid"):
+        raise MeasurementError(
+            "measurement sampler snapshot temporary location could not be verified"
+        )
+    allowed_owners = {0, os.getuid()}
+    for candidate in (path, *path.parents):
+        try:
+            metadata = candidate.lstat()
+        except OSError as error:
+            raise MeasurementError(
+                "measurement sampler snapshot temporary location could not be verified"
+            ) from error
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise MeasurementError(
+                "measurement sampler snapshot temporary location could not be verified"
+            )
+        if metadata.st_uid not in allowed_owners:
+            raise MeasurementError(
+                "measurement sampler snapshot temporary location is not owner-controlled"
+            )
+        shared_writes = metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        if shared_writes and not metadata.st_mode & stat.S_ISVTX:
+            raise MeasurementError(
+                "measurement sampler snapshot temporary location is not owner-controlled"
+            )
+
+
+def _verified_snapshot_base() -> Path:
+    """Resolve the selected temporary base and reject repository-backed storage."""
+
+    if any(os.environ.get(key) for key in _REPOSITORY_ROUTING_ENVIRONMENT_KEYS):
+        raise MeasurementError(
+            "measurement sampler snapshot temporary location cannot use Git routing"
+        )
+
+    try:
+        base = Path(tempfile.gettempdir()).resolve(strict=True)
+        if not base.is_dir():
+            raise OSError("temporary base is not a directory")
+    except (OSError, RuntimeError) as error:
+        raise MeasurementError(
+            "measurement sampler snapshot temporary location could not be verified"
+        ) from error
+
+    if _repository_marker_present(base):
+        raise MeasurementError(
+            "measurement sampler snapshot temporary location must be outside a repository"
+        )
+    _validate_snapshot_directory_chain(base)
+    return base
+
+
+def _directory_open_flags() -> int:
+    required = (getattr(os, "O_DIRECTORY", 0), getattr(os, "O_NOFOLLOW", 0))
+    if not all(required):
+        raise MeasurementError(
+            "measurement sampler snapshot directory containment is unavailable"
+        )
+    return (
+        os.O_RDONLY
+        | required[0]
+        | required[1]
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+
+
+def _open_verified_directory(path: Path) -> tuple[int, tuple[int, int]]:
+    descriptor: int | None = None
+    try:
+        before = path.lstat()
+        descriptor = os.open(path, _directory_open_flags())
+        opened = os.fstat(descriptor)
+        after = path.lstat()
+    except OSError as error:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise MeasurementError(
+            "measurement sampler snapshot temporary location could not be verified"
+        ) from error
+    identities = {
+        _directory_identity(before),
+        _directory_identity(opened),
+        _directory_identity(after),
+    }
+    if (
+        len(identities) != 1
+        or stat.S_ISLNK(before.st_mode)
+        or not stat.S_ISDIR(before.st_mode)
+        or not stat.S_ISDIR(opened.st_mode)
+        or stat.S_ISLNK(after.st_mode)
+        or not stat.S_ISDIR(after.st_mode)
+    ):
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        raise MeasurementError(
+            "measurement sampler snapshot temporary location changed during verification"
+        )
+    return descriptor, _directory_identity(opened)
+
+
+def _create_snapshot_directory(base_descriptor: int) -> str:
+    for _ in range(_SNAPSHOT_DIRECTORY_ATTEMPTS):
+        name = f"litb-measurement-sampler-{secrets.token_hex(16)}"
+        try:
+            os.mkdir(name, mode=0o700, dir_fd=base_descriptor)
+        except FileExistsError:
+            continue
+        return name
+    raise MeasurementError("measurement sampler snapshot directory could not be allocated")
+
+
+def _verify_directory_entry(
+    base_descriptor: int,
+    name: str,
+    expected_identity: tuple[int, int],
+) -> os.stat_result:
+    try:
+        metadata = os.stat(
+            name,
+            dir_fd=base_descriptor,
+            follow_symlinks=False,
+        )
+    except OSError as error:
+        raise MeasurementError(
+            "measurement sampler snapshot temporary location changed during verification"
+        ) from error
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or _directory_identity(metadata) != expected_identity
+    ):
+        raise MeasurementError(
+            "measurement sampler snapshot temporary location changed during verification"
+        )
+    return metadata
+
+
+def _verify_directory_path(
+    path: Path,
+    expected_identity: tuple[int, int],
+) -> None:
+    try:
+        metadata = path.lstat()
+    except OSError as error:
+        raise MeasurementError(
+            "measurement sampler snapshot temporary location changed during verification"
+        ) from error
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or _directory_identity(metadata) != expected_identity
+    ):
+        raise MeasurementError(
+            "measurement sampler snapshot temporary location changed during verification"
+        )
+
+
+def _cleanup_snapshot_directory(
+    *,
+    base_descriptor: int | None,
+    directory_descriptor: int | None,
+    directory_name: str | None,
+    directory_identity: tuple[int, int] | None,
+    snapshot_name: str | None,
+    snapshot_identity: tuple[int, int] | None,
+) -> bool:
+    """Recheck identities immediately before descriptor-relative cleanup."""
+
+    cleaned = True
+    if directory_descriptor is not None:
+        try:
+            os.fchmod(directory_descriptor, 0o700)
+        except OSError:
+            cleaned = False
+        if snapshot_name is not None:
+            snapshot_descriptor: int | None = None
+            remove_snapshot = False
+            try:
+                initial_snapshot = os.stat(
+                    snapshot_name,
+                    dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+                if (
+                    snapshot_identity is None
+                    or not stat.S_ISREG(initial_snapshot.st_mode)
+                    or _directory_identity(initial_snapshot) != snapshot_identity
+                ):
+                    cleaned = False
+                else:
+                    snapshot_descriptor = os.open(
+                        snapshot_name,
+                        os.O_RDONLY
+                        | getattr(os, "O_NOFOLLOW", 0)
+                        | getattr(os, "O_NONBLOCK", 0),
+                        dir_fd=directory_descriptor,
+                    )
+                    snapshot_metadata = os.fstat(snapshot_descriptor)
+                    if (
+                        not stat.S_ISREG(snapshot_metadata.st_mode)
+                        or _directory_identity(snapshot_metadata) != snapshot_identity
+                    ):
+                        cleaned = False
+                    else:
+                        remove_snapshot = True
+                        os.fchmod(snapshot_descriptor, 0o600)
+            except FileNotFoundError:
+                if snapshot_identity is not None:
+                    cleaned = False
+            except OSError:
+                cleaned = False
+            finally:
+                if snapshot_descriptor is not None:
+                    try:
+                        os.close(snapshot_descriptor)
+                    except OSError:
+                        cleaned = False
+            if remove_snapshot:
+                try:
+                    current = os.stat(
+                        snapshot_name,
+                        dir_fd=directory_descriptor,
+                        follow_symlinks=False,
+                    )
+                    if (
+                        not stat.S_ISREG(current.st_mode)
+                        or _directory_identity(current) != snapshot_identity
+                    ):
+                        cleaned = False
+                    else:
+                        os.unlink(snapshot_name, dir_fd=directory_descriptor)
+                except OSError:
+                    cleaned = False
+        try:
+            os.close(directory_descriptor)
+        except OSError:
+            cleaned = False
+
+    if base_descriptor is not None and directory_name is not None:
+        try:
+            metadata = os.stat(
+                directory_name,
+                dir_fd=base_descriptor,
+                follow_symlinks=False,
+            )
+        except OSError:
+            cleaned = False
+        else:
+            if (
+                directory_identity is None
+                or not stat.S_ISDIR(metadata.st_mode)
+                or _directory_identity(metadata) != directory_identity
+            ):
+                cleaned = False
+            else:
+                try:
+                    os.rmdir(directory_name, dir_fd=base_descriptor)
+                except OSError:
+                    cleaned = False
+    if base_descriptor is not None:
+        try:
+            os.close(base_descriptor)
+        except OSError:
+            cleaned = False
+    return cleaned
 
 
 def _inspect_adapter(
@@ -212,34 +532,95 @@ def _approved_adapter_snapshot(
 ):
     """Materialize approved bytes in a private, non-writable execution directory."""
 
-    temporary: tempfile.TemporaryDirectory[str] | None = None
+    base_descriptor: int | None = None
+    directory_descriptor: int | None = None
+    directory_name: str | None = None
+    directory_identity: tuple[int, int] | None = None
     directory: Path | None = None
     snapshot: Path | None = None
+    snapshot_name: str | None = None
+    snapshot_entry_identity: tuple[int, int] | None = None
     descriptor: int | None = None
     operation_failed = False
     try:
-        temporary = tempfile.TemporaryDirectory(prefix="litb-measurement-sampler-")
-        directory = Path(temporary.name)
-        snapshot = directory / f"sampler{suffix}"
-        if os.name != "nt":
-            directory.chmod(0o700)
-        descriptor = os.open(
-            snapshot,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
-            0o500,
+        base = _verified_snapshot_base()
+        base_descriptor, _base_identity = _open_verified_directory(base)
+        directory_name = _create_snapshot_directory(base_descriptor)
+        created = os.stat(
+            directory_name,
+            dir_fd=base_descriptor,
+            follow_symlinks=False,
         )
+        if not stat.S_ISDIR(created.st_mode):
+            raise MeasurementError(
+                "measurement sampler snapshot directory could not be created safely"
+            )
+        directory_identity = _directory_identity(created)
+        directory_descriptor = os.open(
+            directory_name,
+            _directory_open_flags(),
+            dir_fd=base_descriptor,
+        )
+        opened_directory = os.fstat(directory_descriptor)
+        if (
+            not stat.S_ISDIR(opened_directory.st_mode)
+            or _directory_identity(opened_directory) != directory_identity
+        ):
+            raise MeasurementError(
+                "measurement sampler snapshot temporary location changed during verification"
+            )
+        os.fchmod(directory_descriptor, 0o700)
+        _verify_directory_entry(
+            base_descriptor,
+            directory_name,
+            directory_identity,
+        )
+        directory = base / directory_name
+        _verify_directory_path(directory, directory_identity)
+        if _repository_marker_present(directory):
+            raise MeasurementError(
+                "measurement sampler snapshot temporary location must be outside a repository"
+            )
+        snapshot_name = f"sampler{suffix}"
+        snapshot = directory / snapshot_name
+        _verify_directory_entry(
+            base_descriptor,
+            directory_name,
+            directory_identity,
+        )
+        _verify_directory_path(directory, directory_identity)
+        descriptor = os.open(
+            snapshot_name,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o500,
+            dir_fd=directory_descriptor,
+        )
+        snapshot_entry = os.fstat(descriptor)
+        if not stat.S_ISREG(snapshot_entry.st_mode):
+            raise MeasurementError(
+                "measurement sampler snapshot could not be created safely"
+            )
+        snapshot_entry_identity = _directory_identity(snapshot_entry)
         with os.fdopen(descriptor, "wb") as handle:
             descriptor = None
             handle.write(approved_bytes)
             handle.flush()
             os.fsync(handle.fileno())
-        if os.name != "nt":
-            snapshot.chmod(0o500)
+            os.fchmod(handle.fileno(), 0o500)
+        _verify_directory_entry(
+            base_descriptor,
+            directory_name,
+            directory_identity,
+        )
+        _verify_directory_path(directory, directory_identity)
         snapshot_identity = _inspect_adapter(snapshot).identity
         if snapshot_identity.sha256 != expected_digest:
             raise MeasurementError("measurement sampler snapshot could not be verified")
-        if os.name != "nt":
-            directory.chmod(0o500)
+        os.fchmod(directory_descriptor, 0o500)
         yield snapshot, snapshot_identity
     except MeasurementError:
         operation_failed = True
@@ -258,25 +639,26 @@ def _approved_adapter_snapshot(
                 os.close(descriptor)
             except OSError:
                 pass
-        if os.name != "nt":
-            if directory is not None:
-                try:
-                    directory.chmod(0o700)
-                except OSError:
-                    pass
-            if snapshot is not None:
-                try:
-                    snapshot.chmod(0o600)
-                except OSError:
-                    pass
-        if temporary is not None:
-            try:
-                temporary.cleanup()
-            except OSError as error:
-                if not operation_failed:
-                    raise MeasurementError(
-                        "measurement sampler snapshot could not be removed safely"
-                    ) from error
+        cleaned = _cleanup_snapshot_directory(
+            base_descriptor=base_descriptor,
+            directory_descriptor=directory_descriptor,
+            directory_name=directory_name,
+            directory_identity=directory_identity,
+            snapshot_name=snapshot_name,
+            snapshot_identity=snapshot_entry_identity,
+        )
+        if not cleaned:
+            if operation_failed:
+                active_error = sys.exception()
+                if active_error is not None:
+                    active_error.add_note(
+                        "measurement sampler snapshot cleanup also failed; "
+                        "temporary snapshot artifacts may remain"
+                    )
+            else:
+                raise MeasurementError(
+                    "measurement sampler snapshot could not be removed safely"
+                )
 
 
 def _strict_adapter_response(raw: bytes) -> dict[str, Any]:

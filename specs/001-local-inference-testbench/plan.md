@@ -320,7 +320,12 @@ older supported Python, retaining the same kill-before-reap order.
 The trusted sampler must remain synchronous and must not daemonize, create another session/process
 group, or deliberately escape the boundary. Snapshot storage is owner-only under the system
 temporary location; `TMPDIR` may select an owner-controlled, non-repository directory on a writable
-filesystem that permits execution when the default is `noexec`. Sampling failure is
+filesystem that permits execution when the default is `noexec`. The implementation resolves that
+base and rejects ordinary/linked worktrees, Git directories, and bare repositories before writing
+approved bytes, and rejects repository-routing `GIT_*` state. Root/current-user ownership and sticky
+shared-write rules protect the ancestor chain. Directory-FD creation and writes close the
+different-UID checked-path redirection seam; cleanup nonblockingly rechecks exact identity/type immediately before
+descriptor-relative removal. Root/same-UID races remain an explicit portable-POSIX limitation. Sampling failure is
 remembered while inference completes so the private report is still persisted; candidate creation
 then fails closed. A static exact-bound sidecar remains a valid input to the separate two-step
 `prepare-submission` flow.

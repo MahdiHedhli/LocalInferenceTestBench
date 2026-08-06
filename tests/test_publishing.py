@@ -37,6 +37,23 @@ PREPARED = publishing._PreparedChange(
 )
 
 
+def _pull_payload(branch: str, head_sha: str, *, number: int = 7) -> dict:
+    return {
+        "html_url": f"https://github.com/example/pull/{number}",
+        "number": number,
+        "base": {
+            "ref": "main",
+            "sha": PREPARED.base_sha,
+            "repo": {"full_name": publishing.UPSTREAM_REPOSITORY},
+        },
+        "head": {
+            "ref": branch,
+            "sha": head_sha,
+            "repo": {"full_name": IDENTITY.target_repository},
+        },
+    }
+
+
 class PublishingTests(unittest.TestCase):
     def test_pull_request_body_uses_the_validated_suite_version(self) -> None:
         body = publishing._pull_request_body("a" * 64, "9.0")
@@ -238,11 +255,13 @@ class PublishingTests(unittest.TestCase):
             mock.patch.object(
                 publishing,
                 "_verified_existing_pull_request",
-                side_effect=(
-                    None,
-                    "https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8",
-                ),
-            ) as verifier,
+                return_value=None,
+            ) as existing_verifier,
+            mock.patch.object(
+                publishing,
+                "_verified_created_pull_request",
+                return_value="https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8",
+            ) as created_verifier,
             mock.patch.object(
                 publishing,
                 "_ensure_target_repository",
@@ -271,9 +290,14 @@ class PublishingTests(unittest.TestCase):
         pull_payload = next(payload for endpoint, _, payload in api_calls if endpoint.endswith("/pulls"))
         self.assertEqual(pull_payload["base"], "main")
         self.assertNotEqual(pull_payload["head"], "main")
-        self.assertEqual(verifier.call_count, 2)
+        existing_verifier.assert_called_once_with(
+            IDENTITY,
+            f"litb/submission-{SUBMISSION_ID}",
+            PREPARED,
+        )
+        created_verifier.assert_called_once()
         self.assertEqual(
-            verifier.call_args_list[1].kwargs["expected_head_sha"],
+            created_verifier.call_args.kwargs["expected_head_sha"],
             "5" * 40,
         )
         self.assertEqual(
@@ -367,6 +391,78 @@ class PublishingTests(unittest.TestCase):
 
         files.assert_not_called()
 
+    def test_created_pull_request_rejects_transient_wrong_creation_head(self) -> None:
+        branch = f"litb/submission-{SUBMISSION_ID}"
+        created = _pull_payload(branch, "6" * 40)
+        with (
+            mock.patch.object(publishing, "_gh_api") as recheck,
+            mock.patch.object(publishing, "_verify_pull_request") as verifier,
+            self.assertRaisesRegex(PublicationError, "created pull request.*identity"),
+        ):
+            publishing._verified_created_pull_request(
+                IDENTITY,
+                branch,
+                PREPARED,
+                created,
+                expected_head_sha="5" * 40,
+            )
+
+        recheck.assert_not_called()
+        verifier.assert_not_called()
+
+    def test_created_pull_request_rechecks_exact_returned_number(self) -> None:
+        branch = f"litb/submission-{SUBMISSION_ID}"
+        created = _pull_payload(branch, "5" * 40)
+        rechecked = dict(created)
+        with (
+            mock.patch.object(publishing, "_gh_api", return_value=rechecked) as api,
+            mock.patch.object(
+                publishing,
+                "_verify_pull_request",
+                return_value="https://github.com/example/pull/7",
+            ) as verifier,
+        ):
+            observed = publishing._verified_created_pull_request(
+                IDENTITY,
+                branch,
+                PREPARED,
+                created,
+                expected_head_sha="5" * 40,
+            )
+
+        self.assertEqual(observed, "https://github.com/example/pull/7")
+        api.assert_called_once_with(
+            f"repos/{publishing.UPSTREAM_REPOSITORY}/pulls/7",
+            error_message="the created pull request could not be rechecked",
+        )
+        verifier.assert_called_once_with(
+            IDENTITY,
+            branch,
+            PREPARED,
+            rechecked,
+            expected_head_sha="5" * 40,
+            subject="the created pull request",
+        )
+
+    def test_created_pull_request_rejects_mismatched_rechecked_number(self) -> None:
+        branch = f"litb/submission-{SUBMISSION_ID}"
+        created = _pull_payload(branch, "5" * 40)
+        rechecked = dict(created, number=8)
+        with (
+            mock.patch.object(publishing, "_gh_api", return_value=rechecked),
+            mock.patch.object(publishing, "_verify_pull_request") as verifier,
+            self.assertRaisesRegex(PublicationError, "created pull request.*identity"),
+        ):
+            publishing._verified_created_pull_request(
+                IDENTITY,
+                branch,
+                PREPARED,
+                created,
+                expected_head_sha="5" * 40,
+            )
+
+        verifier.assert_not_called()
+
     def test_ref_mutation_during_pull_request_verification_fails_closed(self) -> None:
         branch = f"litb/submission-{SUBMISSION_ID}"
         expected_sha = "5" * 40
@@ -411,7 +507,12 @@ class PublishingTests(unittest.TestCase):
             mock.patch.object(
                 publishing,
                 "_verified_existing_pull_request",
-                side_effect=(None, "https://github.com/example/pull/7"),
+                return_value=None,
+            ),
+            mock.patch.object(
+                publishing,
+                "_verified_created_pull_request",
+                return_value="https://github.com/example/pull/7",
             ),
             mock.patch.object(
                 publishing,
@@ -537,11 +638,12 @@ class PublishingTests(unittest.TestCase):
             mock.patch.object(
                 publishing,
                 "_verified_existing_pull_request",
-                side_effect=(
-                    None,
-                    None,
-                    "https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8",
-                ),
+                side_effect=(None, None),
+            ),
+            mock.patch.object(
+                publishing,
+                "_verified_created_pull_request",
+                return_value="https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8",
             ),
             mock.patch.object(
                 publishing,

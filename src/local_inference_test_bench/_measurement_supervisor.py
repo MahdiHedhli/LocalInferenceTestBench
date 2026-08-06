@@ -42,7 +42,16 @@ def _enable_linux_subreaper() -> None:
         return
     try:
         libc = ctypes.CDLL(None, use_errno=True)
-        result = libc.prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
+        prctl = libc.prctl
+        prctl.argtypes = (
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        )
+        prctl.restype = ctypes.c_int
+        result = prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
     except (AttributeError, OSError) as error:
         raise _SupervisorError("Linux child subreaper is unavailable") from error
     if result != 0:
