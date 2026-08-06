@@ -17,41 +17,20 @@ REPOSITORY_FULL_NAME = "MahdiHedhli/LocalInferenceTestBench"
 REPOSITORY_ID = 1_324_333_809
 REPOSITORY_NODE_ID = "R_kgDOTu-68Q"
 DEFAULT_BRANCH = "main"
-CODEX_LOGIN = "chatgpt-codex-connector[bot]"
-CODEX_USER_ID = 199_175_422
-CODEX_APP_ID = 1_144_995
-CODEX_APP_SLUG = "chatgpt-codex-connector"
 GITHUB_ACTIONS_LOGIN = "github-actions[bot]"
 GITHUB_ACTIONS_USER_ID = 41_898_282
+GITHUB_ACTIONS_APP_SLUG = "github-actions"
 REVIEWER_LOGIN = "ernestpenfold-bot"
 REVIEWER_USER_ID = 275_105_272
 GITHUB_ACTIONS_APP_ID = 15_368
 
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-_PREFIX_SHA = re.compile(r"^[0-9a-f]{10}$")
 _SUBMISSION_BRANCH = re.compile(r"^litb/submission-([0-9a-f]{64})$")
 _NODE_ID = re.compile(r"^[A-Za-z0-9_=-]{4,200}$")
 _OUTPUT_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 _OUTPUT_VALUE = re.compile(r"^[A-Za-z0-9_./:=+-]{1,300}$")
-_CLEAN_OPENINGS = {
-    "Codex Review: Didn't find any major issues. :+1:",
-    "Codex Review: Didn't find any major issues. Already looking forward to the next diff.",
-    "Codex Review: Didn't find any major issues. Bravo.",
-}
-_REVIEWED_LINE = re.compile(r"^\*\*Reviewed commit:\*\* `(?P<prefix>[0-9a-f]{10})`$")
-_REVIEWED_MARKER = "**Reviewed commit:**"
 _REVIEW_STATES = frozenset(
     {"APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING"}
-)
-_CLEAN_FOOTER = (
-    "\n<details> <summary>ℹ️ About Codex in GitHub</summary>\n"
-    "<br/>\n\n"
-    "[Your team has set up Codex to review pull requests in this repo]"
-    "(https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you\n"
-    '- Open a pull request for review\n- Mark a draft as ready\n- Comment "@codex review".\n\n'
-    "If Codex has suggestions, it will comment; otherwise it will react with 👍.\n\n\n\n\n"
-    'Codex can also answer questions or update the PR. Try commenting "@codex address that feedback".\n'
-    "            \n</details>"
 )
 
 
@@ -60,9 +39,10 @@ class AutomationError(ValueError):
 
 
 @dataclass(frozen=True)
-class ReviewSignal:
+class RequestMarker:
     pull_request_number: int
-    reviewed_commit_prefix: str
+    base_sha: str
+    head_sha: str
     comment_id: int
     created_at: str
 
@@ -166,79 +146,19 @@ def _repository_is_exact(repository: Mapping[str, Any]) -> bool:
     )
 
 
-def _parse_codex_comment(comment_value: Any) -> tuple[int, str, datetime, str]:
-    comment = _object(comment_value, "comment")
-    comment_id = _integer(comment.get("id"), "comment.id")
-    user = _object(comment.get("user"), "comment.user")
-    if not _is_codex_identity(comment):
-        raise AutomationError("comment author identity is ineligible")
-    created_rendered, created_at = _timestamp(
-        comment.get("created_at"), "comment.created_at"
-    )
-    updated_rendered, _updated = _timestamp(comment.get("updated_at"), "comment.updated_at")
-    if updated_rendered != created_rendered:
-        raise AutomationError("edited review comments are ineligible")
-    body = _string(comment.get("body"), "comment.body", maximum=20_000)
-    if "\r" in body or body.count(_REVIEWED_MARKER) != 1:
-        raise AutomationError("review comment shape is ineligible")
-    opening, separator, remainder = body.partition("\n\n")
-    if not separator or opening not in _CLEAN_OPENINGS:
-        raise AutomationError("review comment is not a clean signal")
-    reviewed_line, line_break, footer = remainder.partition("\n")
-    reviewed_match = _REVIEWED_LINE.fullmatch(reviewed_line)
-    if reviewed_match is None or not line_break or footer != _CLEAN_FOOTER:
-        raise AutomationError("review comment footer is ineligible")
-    return comment_id, created_rendered, created_at, reviewed_match.group("prefix")
-
-
-def _is_codex_identity(comment: Mapping[str, Any]) -> bool:
-    user = comment.get("user")
-    app = comment.get("performed_via_github_app")
-    return (
-        isinstance(user, Mapping)
-        and user.get("id") == CODEX_USER_ID
-        and user.get("login") == CODEX_LOGIN
-        and user.get("type") == "Bot"
-        and isinstance(app, Mapping)
-        and app.get("id") == CODEX_APP_ID
-        and app.get("slug") == CODEX_APP_SLUG
-    )
-
-
-def parse_review_signal(event_value: Any) -> ReviewSignal:
-    """Accept only the immutable live Codex clean-comment shape."""
-
-    event = _object(event_value, "event")
-    if event.get("action") != "created":
-        raise AutomationError("review comment event action is ineligible")
-    repository = _object(event.get("repository"), "event.repository")
-    if not _repository_is_exact(repository) or repository.get("default_branch") != DEFAULT_BRANCH:
-        raise AutomationError("review comment repository is ineligible")
-    issue = _object(event.get("issue"), "event.issue")
-    number = _integer(issue.get("number"), "event.issue.number")
-    repository_url = f"https://api.github.com/repos/{REPOSITORY_FULL_NAME}"
-    pull_url = f"{repository_url}/pulls/{number}"
-    pull = _object(issue.get("pull_request"), "event.issue.pull_request")
-    if issue.get("repository_url") != repository_url or pull.get("url") != pull_url:
-        raise AutomationError("review comment is not attached to the expected pull request")
-    comment_id, created_at, _created, prefix = _parse_codex_comment(
-        event.get("comment")
-    )
-    return ReviewSignal(
-        pull_request_number=number,
-        reviewed_commit_prefix=prefix,
-        comment_id=comment_id,
-        created_at=created_at,
-    )
-
-
 def parse_pull_request(
     payload_value: Any,
     *,
     expected_number: int,
-    reviewed_commit_prefix: str,
+    expected_base_sha: str,
+    expected_head_sha: str,
 ) -> PullRequestState:
-    """Validate live PR identity and bind the clean signal to its current head."""
+    """Validate live PR identity against the trusted run's exact commits."""
+
+    if not _FULL_SHA.fullmatch(expected_base_sha) or not _FULL_SHA.fullmatch(
+        expected_head_sha
+    ):
+        raise AutomationError("expected pull request commit identity is malformed")
 
     payload = _object(payload_value, "pull_request")
     if payload.get("number") != expected_number:
@@ -261,17 +181,13 @@ def parse_pull_request(
     if base.get("ref") != DEFAULT_BRANCH or not _repository_is_exact(base_repository):
         raise AutomationError("pull request base is ineligible")
     base_sha = _string(base.get("sha"), "pull_request.base.sha", maximum=40)
-    if not _FULL_SHA.fullmatch(base_sha):
-        raise AutomationError("pull request base commit is malformed")
+    if not _FULL_SHA.fullmatch(base_sha) or base_sha != expected_base_sha:
+        raise AutomationError("pull request base commit changed")
     head = _object(payload.get("head"), "pull_request.head")
     _object(head.get("repo"), "pull_request.head.repo")
     head_sha = _string(head.get("sha"), "pull_request.head.sha", maximum=40)
-    if not _FULL_SHA.fullmatch(head_sha):
-        raise AutomationError("pull request head commit is malformed")
-    if not _PREFIX_SHA.fullmatch(reviewed_commit_prefix) or not head_sha.startswith(
-        reviewed_commit_prefix
-    ):
-        raise AutomationError("review signal does not match the current head")
+    if not _FULL_SHA.fullmatch(head_sha) or head_sha != expected_head_sha:
+        raise AutomationError("pull request head commit changed")
     head_ref = _string(head.get("ref"), "pull_request.head.ref", maximum=100)
     branch_match = _SUBMISSION_BRANCH.fullmatch(head_ref)
     if branch_match is None:
@@ -295,6 +211,14 @@ def _flatten_pages(value: Any, path: str) -> list[Any]:
     return flattened
 
 
+def _comments(value: Any) -> list[Any]:
+    """Accept either one direct issue-comment response or paginated pages."""
+
+    if isinstance(value, Mapping):
+        return [value]
+    return _flatten_pages(value, "comments")
+
+
 def _request_body(base_sha: str, head_sha: str) -> str:
     if not _FULL_SHA.fullmatch(base_sha) or not _FULL_SHA.fullmatch(head_sha):
         raise AutomationError("request commit identity is malformed")
@@ -305,81 +229,162 @@ def _request_body(base_sha: str, head_sha: str) -> str:
     )
 
 
-def _is_trusted_request(
-    comment: Mapping[str, Any],
+def _parse_request_marker(
+    comment_value: Any,
     *,
+    pull_request_number: int,
     base_sha: str,
     head_sha: str,
-) -> bool:
+) -> RequestMarker:
+    """Validate one live, unedited GitHub Actions audit marker."""
+
+    if (
+        isinstance(pull_request_number, bool)
+        or not isinstance(pull_request_number, int)
+        or pull_request_number <= 0
+    ):
+        raise AutomationError("request marker pull request number is malformed")
+    comment = _object(comment_value, "request_marker")
+    comment_id = _integer(comment.get("id"), "request_marker.id")
+    if comment.get("body") != _request_body(base_sha, head_sha):
+        raise AutomationError("request marker body is ineligible")
+    created_rendered, _created = _timestamp(
+        comment.get("created_at"), "request_marker.created_at"
+    )
+    updated_rendered, _updated = _timestamp(
+        comment.get("updated_at"), "request_marker.updated_at"
+    )
+    if created_rendered != updated_rendered:
+        raise AutomationError("edited request markers are ineligible")
+    issue_url = (
+        f"https://api.github.com/repos/{REPOSITORY_FULL_NAME}"
+        f"/issues/{pull_request_number}"
+    )
+    html_url = (
+        f"https://github.com/{REPOSITORY_FULL_NAME}/pull/{pull_request_number}"
+        f"#issuecomment-{comment_id}"
+    )
+    if comment.get("issue_url") != issue_url or comment.get("html_url") != html_url:
+        raise AutomationError("request marker is attached to an ineligible pull request")
     user = comment.get("user")
-    return (
-        comment.get("body") == _request_body(base_sha, head_sha)
-        and isinstance(user, Mapping)
+    app = comment.get("performed_via_github_app")
+    if not (
+        isinstance(user, Mapping)
         and user.get("id") == GITHUB_ACTIONS_USER_ID
         and user.get("login") == GITHUB_ACTIONS_LOGIN
         and user.get("type") == "Bot"
+        and isinstance(app, Mapping)
+        and app.get("id") == GITHUB_ACTIONS_APP_ID
+        and app.get("slug") == GITHUB_ACTIONS_APP_SLUG
+    ):
+        raise AutomationError("request marker actor identity is ineligible")
+    return RequestMarker(
+        pull_request_number=pull_request_number,
+        base_sha=base_sha,
+        head_sha=head_sha,
+        comment_id=comment_id,
+        created_at=created_rendered,
     )
 
 
-def review_request_exists(comment_pages: Any, *, base_sha: str, head_sha: str) -> bool:
-    """Return whether the trusted workflow already requested this exact head."""
-
-    comments = _flatten_pages(comment_pages, "comments")
-    for index, value in enumerate(comments):
-        comment = _object(value, f"comments[{index}]")
-        if _is_trusted_request(comment, base_sha=base_sha, head_sha=head_sha):
-            return True
-    return False
-
-
-def validate_comment_chain(
+def find_request_marker(
     comment_pages: Any,
     *,
-    signal: ReviewSignal,
+    pull_request_number: int,
     base_sha: str,
     head_sha: str,
-) -> None:
-    """Require a live unedited Codex reply after a trusted full-head request."""
+) -> RequestMarker | None:
+    """Return the sole trusted marker for an exact base/head, if present."""
 
-    comments = _flatten_pages(comment_pages, "comments")
-    live_matches: list[tuple[datetime, int]] = []
-    requests: list[tuple[datetime, int]] = []
-    codex_comments: list[tuple[datetime, int]] = []
+    comments = _comments(comment_pages)
+    expected_body = _request_body(base_sha, head_sha)
+    matches: list[RequestMarker] = []
+    seen_ids: set[int] = set()
     for index, value in enumerate(comments):
         comment = _object(value, f"comments[{index}]")
-        if comment.get("id") == signal.comment_id:
-            comment_id, created_rendered, created_at, prefix = _parse_codex_comment(
-                comment
+        comment_id = comment.get("id")
+        if isinstance(comment_id, int) and not isinstance(comment_id, bool):
+            if comment_id in seen_ids:
+                raise AutomationError("comment pagination contains a duplicate")
+            seen_ids.add(comment_id)
+        if comment.get("body") != expected_body:
+            continue
+        try:
+            marker = _parse_request_marker(
+                comment,
+                pull_request_number=pull_request_number,
+                base_sha=base_sha,
+                head_sha=head_sha,
             )
-            if (
-                comment_id != signal.comment_id
-                or created_rendered != signal.created_at
-                or prefix != signal.reviewed_commit_prefix
-            ):
-                raise AutomationError("live review comment changed")
-            live_matches.append((created_at, comment_id))
-        if _is_codex_identity(comment):
-            _codex_rendered, codex_time = _timestamp(
-                comment.get("created_at"), "codex_comment.created_at"
+        except AutomationError:
+            continue
+        matches.append(marker)
+    if len(matches) > 1:
+        raise AutomationError("multiple trusted request markers are ineligible")
+    return matches[0] if matches else None
+
+
+def review_request_exists(
+    comment_pages: Any,
+    *,
+    pull_request_number: int,
+    base_sha: str,
+    head_sha: str,
+) -> bool:
+    """Return whether the trusted workflow already requested this exact head."""
+
+    return (
+        find_request_marker(
+            comment_pages,
+            pull_request_number=pull_request_number,
+            base_sha=base_sha,
+            head_sha=head_sha,
+        )
+        is not None
+    )
+
+
+def validate_request_marker(
+    comment_pages: Any,
+    *,
+    pull_request_number: int,
+    marker_comment_id: int,
+    base_sha: str,
+    head_sha: str,
+) -> RequestMarker:
+    """Require the exact live marker returned by the trusted request job."""
+
+    if (
+        isinstance(marker_comment_id, bool)
+        or not isinstance(marker_comment_id, int)
+        or marker_comment_id <= 0
+    ):
+        raise AutomationError("request marker comment identity is malformed")
+    comments = _comments(comment_pages)
+    matches: list[RequestMarker] = []
+    for index, value in enumerate(comments):
+        comment = _object(value, f"comments[{index}]")
+        if comment.get("id") == marker_comment_id:
+            matches.append(
+                _parse_request_marker(
+                    comment,
+                    pull_request_number=pull_request_number,
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                )
             )
-            codex_id = _integer(comment.get("id"), "codex_comment.id")
-            codex_comments.append((codex_time, codex_id))
-        if _is_trusted_request(comment, base_sha=base_sha, head_sha=head_sha):
-            request_id = _integer(comment.get("id"), "request_comment.id")
-            _request_rendered, request_time = _timestamp(
-                comment.get("created_at"), "request_comment.created_at"
-            )
-            requests.append((request_time, request_id))
-    if len(live_matches) != 1:
-        raise AutomationError("live review comment could not be established")
-    clean_order = live_matches[0]
-    prior_requests = [request for request in requests if request < clean_order]
-    if not prior_requests:
-        raise AutomationError("trusted full-head review request is missing or stale")
-    active_request = max(prior_requests)
-    responses = [comment for comment in codex_comments if comment > active_request]
-    if not responses or max(responses) != clean_order:
-        raise AutomationError("review signal is not the latest Codex response")
+    if len(matches) != 1:
+        raise AutomationError("live request marker could not be established")
+    marker = matches[0]
+    canonical = find_request_marker(
+        comment_pages,
+        pull_request_number=pull_request_number,
+        base_sha=base_sha,
+        head_sha=head_sha,
+    )
+    if canonical is None or canonical.comment_id != marker_comment_id:
+        raise AutomationError("request marker identity is not canonical")
+    return marker
 
 
 def validate_review_threads(page_values: Any) -> int:
@@ -657,24 +662,23 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Validate trusted submission automation state.")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    signal = commands.add_parser("signal")
-    signal.add_argument("--event", type=Path, required=True)
-    signal.add_argument("--output", type=Path, required=True)
-
     pull = commands.add_parser("pull-request")
     pull.add_argument("--input", type=Path, required=True)
     pull.add_argument("--number", type=int, required=True)
-    pull.add_argument("--prefix", required=True)
+    pull.add_argument("--base", required=True)
+    pull.add_argument("--head", required=True)
     pull.add_argument("--output", type=Path, required=True)
 
     comments = commands.add_parser("comments")
     comments.add_argument("--input", type=Path, required=True)
-    comments.add_argument("--event", type=Path, required=True)
+    comments.add_argument("--number", type=int, required=True)
+    comments.add_argument("--comment-id", type=int, required=True)
     comments.add_argument("--base", required=True)
     comments.add_argument("--head", required=True)
 
     request = commands.add_parser("review-request")
     request.add_argument("--input", type=Path, required=True)
+    request.add_argument("--number", type=int, required=True)
     request.add_argument("--base", required=True)
     request.add_argument("--head", required=True)
     request.add_argument("--output", type=Path, required=True)
@@ -714,23 +718,12 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _run(args: argparse.Namespace) -> None:
-    if args.command == "signal":
-        signal = parse_review_signal(load_json(args.event))
-        _write_outputs(
-            args.output,
-            {
-                "pull_request_number": signal.pull_request_number,
-                "reviewed_commit_prefix": signal.reviewed_commit_prefix,
-                "comment_id": signal.comment_id,
-                "comment_created_at": signal.created_at,
-            },
-        )
-        return
     if args.command == "pull-request":
         state = parse_pull_request(
             load_json(args.input),
             expected_number=args.number,
-            reviewed_commit_prefix=args.prefix,
+            expected_base_sha=args.base,
+            expected_head_sha=args.head,
         )
         _write_outputs(
             args.output,
@@ -746,10 +739,10 @@ def _run(args: argparse.Namespace) -> None:
         )
         return
     if args.command == "comments":
-        signal = parse_review_signal(load_json(args.event))
-        validate_comment_chain(
+        validate_request_marker(
             load_json(args.input),
-            signal=signal,
+            pull_request_number=args.number,
+            marker_comment_id=args.comment_id,
             base_sha=args.base,
             head_sha=args.head,
         )
@@ -757,8 +750,9 @@ def _run(args: argparse.Namespace) -> None:
     if args.command == "review-request":
         if args.output.resolve() == args.body_output.resolve():
             raise AutomationError("review request outputs must be distinct")
-        exists = review_request_exists(
+        marker = find_request_marker(
             load_json(args.input),
+            pull_request_number=args.number,
             base_sha=args.base,
             head_sha=args.head,
         )
@@ -767,7 +761,10 @@ def _run(args: argparse.Namespace) -> None:
             _request_body(args.base, args.head),
             maximum_bytes=512,
         )
-        _write_outputs(args.output, {"exists": exists})
+        outputs: dict[str, str | int | bool] = {"exists": marker is not None}
+        if marker is not None:
+            outputs["marker_comment_id"] = marker.comment_id
+        _write_outputs(args.output, outputs)
         return
     if args.command == "threads":
         validate_review_threads(load_json(args.input))

@@ -16,13 +16,16 @@ concurrency:
 
 jobs:
   boundary:
-    name: Trusted benchmark boundary
+    name: Classify trusted benchmark change
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
       classification: ${{ steps.classify.outputs.classification }}
+      pull_request_number: ${{ steps.classify.outputs.pull_request_number }}
+      base_sha: ${{ steps.classify.outputs.base_sha }}
+      head_sha: ${{ steps.classify.outputs.head_sha }}
     steps:
       - name: Check out trusted base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,6 +46,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           expected_submission_id=""
@@ -69,10 +73,21 @@ jobs:
                 classification="benchmark-manual"
               fi
               ;;
-            "change boundary passed: general") classification="general" ;;
+            "change boundary passed: general")
+              if [ -n "${expected_submission_id}" ]; then
+                exit 1
+              fi
+              classification="general"
+              ;;
             *) exit 1 ;;
           esac
+          [[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
           echo "classification=${classification}" >> "${GITHUB_OUTPUT}"
+          echo "pull_request_number=${PR_NUMBER}" >> "${GITHUB_OUTPUT}"
+          echo "base_sha=${BASE_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "head_sha=${HEAD_SHA}" >> "${GITHUB_OUTPUT}"
 
   request-reviews:
     name: Request bounded benchmark review
@@ -85,6 +100,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    outputs:
+      marker_comment_id: ${{ steps.marker.outputs.marker_comment_id }}
     steps:
       - name: Check out trusted base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -92,12 +109,13 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
           persist-credentials: false
-      - name: Request Codex and CodeRabbit once for the exact base and head
+      - name: Request advisory review and establish the exact audit marker
+        id: marker
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ needs.boundary.outputs.base_sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ needs.boundary.outputs.head_sha }}
+          PR_NUMBER: ${{ needs.boundary.outputs.pull_request_number }}
         run: |
           set -euo pipefail
           [[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
@@ -111,14 +129,88 @@ jobs:
           request_body="${RUNNER_TEMP}/litb-review-request.txt"
           python3 scripts/trusted_submission_automation.py review-request \
             --input "${comments_file}" \
+            --number "${PR_NUMBER}" \
             --base "${BASE_SHA}" \
             --head "${HEAD_SHA}" \
             --output "${request_state}" \
             --body-output "${request_body}"
-          if grep -Fqx "exists=true" "${request_state}"; then
-            exit 0
+          if grep -Fqx "exists=false" "${request_state}"; then
+            gh api --silent --method POST \
+              "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments" \
+              --raw-field body="$(< "${request_body}")"
+          else
+            grep -Fqx "exists=true" "${request_state}"
           fi
-          grep -Fqx "exists=false" "${request_state}"
-          gh api --silent --method POST \
-            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments" \
-            --raw-field body="$(< "${request_body}")"
+          final_comments_file="${RUNNER_TEMP}/litb-comments-final.json"
+          gh api --paginate --slurp \
+            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments?per_page=100" \
+            > "${final_comments_file}"
+          python3 scripts/trusted_submission_automation.py review-request \
+            --input "${final_comments_file}" \
+            --number "${PR_NUMBER}" \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}" \
+            --output "${GITHUB_OUTPUT}" \
+            --body-output "${request_body}"
+          grep -Fqx "exists=true" "${GITHUB_OUTPUT}"
+          grep -Eq '^marker_comment_id=[1-9][0-9]*$' "${GITHUB_OUTPUT}"
+
+  trusted-auto-merge:
+    name: Run protected benchmark auto-merge
+    needs:
+      - boundary
+      - request-reviews
+    if: >-
+      needs.boundary.outputs.classification == 'benchmark-only' &&
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    uses: ./.github/workflows/trusted-benchmark-auto-merge.yml
+    with:
+      pull_request_number: ${{ needs.boundary.outputs.pull_request_number }}
+      base_sha: ${{ needs.boundary.outputs.base_sha }}
+      head_sha: ${{ needs.boundary.outputs.head_sha }}
+      marker_comment_id: ${{ needs.request-reviews.outputs.marker_comment_id }}
+    secrets:
+      reviewer_token: ${{ secrets.ERNEST_REVIEW_TOKEN }}
+
+  required-boundary:
+    name: Trusted benchmark boundary
+    if: always()
+    needs:
+      - boundary
+      - request-reviews
+      - trusted-auto-merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      AUTOMATION_RESULT: ${{ needs.trusted-auto-merge.result }}
+      BOUNDARY_RESULT: ${{ needs.boundary.result }}
+      CLASSIFICATION: ${{ needs.boundary.outputs.classification }}
+      IS_DRAFT: ${{ github.event.pull_request.draft }}
+      REQUEST_RESULT: ${{ needs.request-reviews.result }}
+    steps:
+      - name: Require the complete trusted lane for automated submissions
+        run: |
+          set -euo pipefail
+          test "${BOUNDARY_RESULT}" = "success"
+          case "${CLASSIFICATION}" in
+            benchmark-only)
+              if [ "${IS_DRAFT}" = "false" ]; then
+                test "${REQUEST_RESULT}" = "success"
+                test "${AUTOMATION_RESULT}" = "success"
+              else
+                test "${IS_DRAFT}" = "true"
+                test "${REQUEST_RESULT}" = "skipped"
+                test "${AUTOMATION_RESULT}" = "skipped"
+              fi
+              ;;
+            benchmark-manual|general)
+              test "${REQUEST_RESULT}" = "skipped"
+              test "${AUTOMATION_RESULT}" = "skipped"
+              ;;
+            *) exit 1 ;;
+          esac

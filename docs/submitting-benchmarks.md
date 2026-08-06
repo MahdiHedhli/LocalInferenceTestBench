@@ -201,28 +201,47 @@ only the inference path, and that you accept public display of the hardware, per
 pull request, and GitHub account.
 
 Trusted base code validates the exact two-file shape, ordinary file modes, schema, canonical digest,
-duplicate status, and byte-exact generated leaderboard before requesting Codex and CodeRabbit.
-After a same-head clean Codex signal, a separate trusted workflow repeats those checks, requires all
-review threads to be resolved, verifies the public app-bound protection summary and native review
-decision, arms native squash auto-merge, and adds an exact-head approval from the configured reviewer
-account. CodeRabbit is best-effort: a green
-rate-limit status is not an approval. Any finding, stale base/head, unresolved thread, malformed
-record, or failed required check leaves the pull request open for a maintainer.
+duplicate status, and byte-exact generated leaderboard before posting one fixed GitHub Actions audit
+marker bound to the full base and head SHAs. After that marker job succeeds, it directly invokes a
+local reusable workflow from the same trusted caller commit with the exact pull request number, full
+base SHA, full head SHA, and marker comment ID. The reusable workflow retrieves the exact live,
+unedited marker, verifies GitHub Actions user ID `41898282` and App ID `15368`, and independently
+repeats the complete content and repository-state validation before it may arm native squash
+auto-merge and add an exact-head approval from the configured reviewer account. The marker is audit
+evidence, not authorization by itself.
+
+The required `Trusted benchmark boundary` status is a final aggregator. It stays pending until the
+marker and reusable automation jobs complete successfully, so an interrupted partial run cannot
+leave an early green boundary that later combines with an unrelated approval. The
+`litb/submission-<submission-id>` namespace is reserved; a branch using it fails the boundary if its
+diff becomes general, mixed, or otherwise ineligible for the exact submission lane.
+
+Codex and CodeRabbit may review on a best-effort advisory basis, but automation does not wait for
+either service. A clean, absent, failed, skipped, or rate-limited response is not a merge signal.
+Repository-`GITHUB_TOKEN` comments do not start downstream `issue_comment` workflows, so a clean
+Codex comment is no longer the gate. Any finding expressed as a review thread or changes request in
+time for the final live revalidation, stale base/head, malformed record, or failed required check
+leaves the pull request open for a maintainer.
 
 GitHub may briefly report unknown mergeability; the workflow retries that state only for a bounded
 interval and otherwise leaves the PR open. An established `unstable` state may continue to native
 auto-merge, but it is not treated as a passed check. GitHub still waits for every configured required
 check. Administration-only protection settings are mandatory repository-operator prerequisites and
-are not claimed as per-run evidence by the read-only workflow.
+are not claimed as per-run evidence by the read-only workflow. The trusted caller explicitly maps
+repository secret `ERNEST_REVIEW_TOKEN` to the reusable workflow's `reviewer_token`; it never
+inherits secrets, and only the final mutation step binds that credential.
 
 Retries remain exact-head operations. If a partial automation run already left the configured
 reviewer approval on the current head, the workflow may reuse that approval and re-arm missing native
-auto-merge only after every authorization check runs again. A dismissed approval, change request, or
-approval for another head cannot be reused.
+auto-merge only after every authorization check runs again and while the final required boundary
+remains pending. That pending context prevents the retry from becoming an already-clean approved PR.
+A dismissed approval, change request, or approval for another head cannot be reused.
 
 Published entries remain self-reported, schema-validated, and not independently reproduced. Bot
-review, the automated reviewer-account approval, and a content digest are policy gates—not evidence
-that a benchmark run occurred or an independent substantive reproduction. Quality rank uses
+review, the Actions audit marker, automated reviewer-account approval, and a content digest are
+publication-policy evidence—not evidence that a benchmark run occurred or an independent
+substantive reproduction. Deterministic validation proves schema conformance and integrity of the
+published bytes, not provenance. Quality rank uses
 semantic score first and exact-format score second. Latency and throughput are shown with their
 hardware context but never affect rank.
 
