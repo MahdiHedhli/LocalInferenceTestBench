@@ -4,6 +4,7 @@ import copy
 from contextlib import redirect_stdout
 import hashlib
 import io
+import inspect
 import json
 import os
 from pathlib import Path
@@ -320,6 +321,20 @@ def materialize_model_descriptor_fixture(builder: dict) -> str:
 
 
 class SubmissionTests(unittest.TestCase):
+    def test_prepare_submission_file_preserves_model_selection_positionally(self) -> None:
+        parameters = inspect.signature(
+            submissions_module.prepare_submission_file
+        ).parameters
+
+        self.assertEqual(
+            parameters["model_ids"].kind,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+        self.assertEqual(
+            parameters["measurement_evidence_path"].kind,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+
     def test_prepare_cli_defaults_to_an_ignored_local_output_directory(self) -> None:
         parser = cli_module.build_parser()
         args = parser.parse_args(

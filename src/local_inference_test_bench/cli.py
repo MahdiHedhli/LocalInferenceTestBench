@@ -360,8 +360,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             submissions = prepare_submission_file(
                 args.report,
                 args.hardware,
-                args.measurement_evidence,
                 tuple(args.models) or None,
+                measurement_evidence_path=args.measurement_evidence,
             )
             paths = write_submissions(submissions, args.output_dir)
             noun = "file" if len(paths) == 1 else "files"

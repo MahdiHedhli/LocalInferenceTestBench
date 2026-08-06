@@ -1183,8 +1183,9 @@ def load_json_object(
 def prepare_submission_file(
     path: str | Path,
     descriptor_path: str | Path,
-    measurement_evidence_path: str | Path,
     model_ids: tuple[str, ...] | None = None,
+    *,
+    measurement_evidence_path: str | Path,
 ) -> tuple[dict[str, Any], ...]:
     """Load a private run report and return one public record per selected model."""
 
