@@ -141,9 +141,13 @@ Before any reviewer credential is bound, trusted code rechecks the live PR, cont
 publicly observable app-bound required checks, native review decision, review states, complete
 paginated thread set, exact marker, and exact base/head. GitHub enforces the repository's remaining
 configured protections. The workflow does not claim per-run visibility into administration-only
-settings; stale-review dismissal, last-push approval, conversation resolution, linear history, admin
-enforcement, and force-push/deletion prohibitions are mandatory operator prerequisites. The caller
-explicitly maps repository secret `ERNEST_REVIEW_TOKEN` to the local reusable workflow's
+settings; the read-only Actions identity may omit `allow_auto_merge` even when native auto-merge is
+enabled. Native auto-merge, stale-review dismissal, last-push approval, conversation resolution,
+linear history, admin enforcement, and force-push/deletion prohibitions are mandatory operator
+prerequisites. After the narrowly scoped reviewer credential is bound, the workflow requires an
+authoritative `allow_auto_merge: true` response immediately before each possible mutation. If native
+auto-merge is disabled or cannot be confirmed there, the final required boundary remains failed.
+The caller explicitly maps repository secret `ERNEST_REVIEW_TOKEN` to the local reusable workflow's
 `reviewer_token`; `secrets: inherit` is forbidden, and the credential is bound only in the final
 mutation step. The workflow arms native squash auto-merge with a full-head guard and fixed
 digest-derived commit metadata before adding a full-head approval. It freshly requires the live
