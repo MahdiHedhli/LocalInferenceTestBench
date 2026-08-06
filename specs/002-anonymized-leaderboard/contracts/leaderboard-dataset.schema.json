@@ -109,6 +109,12 @@
       "additionalProperties": false,
       "required": [
         "rank",
+        "facet_id",
+        "config_cell",
+        "corroboration",
+        "score_intervals",
+        "performance_distribution",
+        "plausibility",
         "submission_schema_version",
         "submission_id",
         "suite_version",
@@ -126,6 +132,27 @@
         "rank": {
           "type": "integer",
           "minimum": 1
+        },
+        "facet_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "config_cell": {
+          "$ref": "#/$defs/configCell"
+        },
+        "corroboration": {
+          "$ref": "#/$defs/corroboration"
+        },
+        "score_intervals": {
+          "$ref": "#/$defs/scoreIntervals"
+        },
+        "performance_distribution": {
+          "$ref": "#/$defs/performanceDistribution"
+        },
+        "plausibility": {
+          "$ref": "#/$defs/plausibility"
         },
         "submission_schema_version": {
           "enum": [
@@ -293,6 +320,276 @@
           }
         }
       ]
+    },
+    "configCell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key_version",
+        "selection_version",
+        "digest"
+      ],
+      "properties": {
+        "key_version": {
+          "const": "1.0"
+        },
+        "selection_version": {
+          "const": "1.0"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "validityCorroboration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "earliest_period",
+        "latest_period"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "earliest_period": {
+          "oneOf": [
+            {
+              "$ref": "leaderboard-submission.schema.json#/$defs/measurementPeriod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latest_period": {
+          "oneOf": [
+            {
+              "$ref": "leaderboard-submission.schema.json#/$defs/measurementPeriod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "corroboration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accepted_record_count",
+        "by_validity"
+      ],
+      "properties": {
+        "accepted_record_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "by_validity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "clean",
+            "nonquiescent",
+            "degraded_midrun",
+            "legacy_unreported"
+          ],
+          "properties": {
+            "clean": {
+              "$ref": "#/$defs/validityCorroboration"
+            },
+            "nonquiescent": {
+              "$ref": "#/$defs/validityCorroboration"
+            },
+            "degraded_midrun": {
+              "$ref": "#/$defs/validityCorroboration"
+            },
+            "legacy_unreported": {
+              "$ref": "#/$defs/validityCorroboration"
+            }
+          }
+        }
+      }
+    },
+    "wilsonInterval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lower_percent",
+        "upper_percent"
+      ],
+      "properties": {
+        "lower_percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "upper_percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "scoreIntervals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "semantic",
+        "exact_format"
+      ],
+      "properties": {
+        "method": {
+          "const": "wilson_95"
+        },
+        "semantic": {
+          "$ref": "#/$defs/wilsonInterval"
+        },
+        "exact_format": {
+          "$ref": "#/$defs/wilsonInterval"
+        }
+      }
+    },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sample_count",
+        "median",
+        "minimum",
+        "maximum"
+      ],
+      "properties": {
+        "sample_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "median": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000000000
+        },
+        "minimum": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000000000
+        },
+        "maximum": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1000000000
+        }
+      }
+    },
+    "performanceDistribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "latency_ms_mean",
+        "completion_tokens_per_second"
+      ],
+      "properties": {
+        "latency_ms_mean": {
+          "$ref": "#/$defs/distribution"
+        },
+        "completion_tokens_per_second": {
+          "$ref": "#/$defs/distribution"
+        }
+      }
+    },
+    "plausibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_version",
+        "status",
+        "basis",
+        "evaluated_record_count",
+        "outside_envelope_record_count",
+        "signals"
+      ],
+      "properties": {
+        "policy_version": {
+          "const": "1.0"
+        },
+        "status": {
+          "enum": [
+            "within_envelope",
+            "caution",
+            "not_evaluated"
+          ]
+        },
+        "basis": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "hardware_class",
+            "model_size_bucket",
+            "model_size_basis"
+          ],
+          "properties": {
+            "hardware_class": {
+              "enum": [
+                "cpu_only",
+                "shared_accelerator",
+                "discrete_accelerator",
+                "mixed_accelerator",
+                "unknown"
+              ]
+            },
+            "model_size_bucket": {
+              "enum": [
+                "under_4b",
+                "4b_to_under_14b",
+                "14b_to_under_35b",
+                "35b_to_under_70b",
+                "70b_and_above",
+                "unknown"
+              ]
+            },
+            "model_size_basis": {
+              "enum": [
+                "active_billions",
+                "total_billions",
+                "unknown"
+              ]
+            }
+          }
+        },
+        "evaluated_record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outside_envelope_record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "signals": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "latency_below_envelope",
+              "throughput_above_envelope"
+            ]
+          }
+        }
+      }
     },
     "legacyLeaderboardMetrics": {
       "type": "object",
@@ -475,5 +772,5 @@
       ]
     }
   },
-  "$comment": "The logical 1.0 branch preserves the original unannotated monolith byte contract. A logical 1.1 dataset requires every row to declare its source submission schema: retained 1.0 rows use legacy_unreported with null measurement evidence, while 1.1 rows carry measured categorical validity. The Python builder is authoritative for entry_count, registry resolution, arithmetic, one-decimal precision, deterministic ordering, dense ranks, and bounded transport partitioning."
+  "$comment": "The logical 1.0 branch preserves the original unannotated monolith byte contract. A logical 1.1 dataset projects one bounded config cell with one score-neutral representative. Python and browser validators enforce config/corroboration arithmetic, representative Wilson bounds, distributions, plausibility relationships, deterministic transitive rank bands, registry resolution, numeric precision, and bounded transport partitioning. Original digest-named accepted records remain the append-only source of truth."
 }
