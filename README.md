@@ -1,4 +1,4 @@
-# LocalInferenceTestBench
+# Local Inference Test Bench
 
 A hardware-agnostic, privacy-conscious process and reference runner for evaluating language models on
 your own inference endpoint.
