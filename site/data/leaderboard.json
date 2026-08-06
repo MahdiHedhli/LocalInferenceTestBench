@@ -242,8 +242,68 @@
       },
       "submission_id": "7fae46e3d4df5f0c66ab6e0a1c499465e20bd5b83c11c8fcb664d0034a25665a",
       "suite_version": "1.0"
+    },
+    {
+      "hardware": {
+        "accelerators": [
+          {
+            "count": 1,
+            "kind": "integrated_gpu",
+            "memory_gb": null,
+            "model": "Apple M1 Ultra 64-core GPU"
+          }
+        ],
+        "cpu": {
+          "logical_cores": 20,
+          "model": "Apple M1 Ultra"
+        },
+        "execution_mode": "unknown",
+        "memory": {
+          "architecture": "shared",
+          "system_gb": 128.0
+        }
+      },
+      "metrics": {
+        "case_count": 5,
+        "completion_tokens_per_second": 51.3,
+        "exact_format_pass_count": 3,
+        "exact_format_score_percent": 60.0,
+        "latency_ms_mean": 6799.4,
+        "scored_case_count": 5,
+        "semantic_pass_count": 4,
+        "semantic_score_percent": 80.0,
+        "usage_coverage_cases": 5
+      },
+      "model": {
+        "declared_context_tokens": 262144,
+        "digest": "sha256-manifest-v1:87d21b07ad0fca3882a588e39d80ea89812e78f47894f3da71d4cc4e04ed4a44",
+        "display_name": "Ornith 1.0 35B MLX 6-bit",
+        "precision": "MLX 6-bit",
+        "source": "mlx-community/Ornith-1.0-35B-6bit"
+      },
+      "profile": "standard",
+      "rank": 3,
+      "runtime": {
+        "backend": "MLX LLM 1.11.0 / Apple Metal",
+        "name": "LM Studio",
+        "version": "0.4.20+1"
+      },
+      "runtime_configuration": {
+        "concurrent_requests": 1,
+        "context_window_tokens": 262144,
+        "offload_mode": "not_applicable",
+        "speculative_decoding": "disabled"
+      },
+      "settings": {
+        "max_output_tokens": 4096,
+        "seed": 0,
+        "temperature": 0.0,
+        "top_p": 1.0
+      },
+      "submission_id": "be027fa1719f3382e4a5c4c6428cedf832a6706692932347a7c6b030bfd82331",
+      "suite_version": "1.0"
     }
   ],
-  "entry_count": 4,
+  "entry_count": 5,
   "schema_version": "1.0"
 }
