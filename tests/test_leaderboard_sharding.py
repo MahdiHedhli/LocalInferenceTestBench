@@ -282,7 +282,7 @@ class LeaderboardShardTransportTests(unittest.TestCase):
         output = self.root / "stale-bundle"
         output.mkdir()
         stale = output / "leaderboard-999999.json"
-        stale.write_text("{}\n", encoding="utf-8")
+        stale.write_bytes(b"{}\n")
 
         completed = _run_builder(
             "--submissions-dir",
