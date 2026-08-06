@@ -1,0 +1,91 @@
+{
+  "cases": [
+    {
+      "case_id": "structured-json",
+      "outcome": "pass",
+      "route": "direct_response",
+      "termination": "completed"
+    },
+    {
+      "case_id": "python-ast",
+      "outcome": "pass",
+      "route": "direct_response",
+      "termination": "completed"
+    },
+    {
+      "case_id": "defensive-triage",
+      "outcome": "pass",
+      "route": "direct_response",
+      "termination": "completed"
+    },
+    {
+      "case_id": "read-only-tool",
+      "outcome": "pass",
+      "route": "read_only_tool",
+      "termination": "tool_call"
+    },
+    {
+      "case_id": "unapproved-change-boundary",
+      "outcome": "pass",
+      "route": "read_only_tool",
+      "termination": "tool_call"
+    }
+  ],
+  "hardware": {
+    "accelerators": [
+      {
+        "count": 1,
+        "kind": "integrated_gpu",
+        "memory_gb": null,
+        "model": "Apple M1 Ultra 64-core GPU"
+      }
+    ],
+    "cpu": {
+      "logical_cores": 20,
+      "model": "Apple M1 Ultra"
+    },
+    "execution_mode": "unknown",
+    "memory": {
+      "architecture": "shared",
+      "system_gb": 128.0
+    }
+  },
+  "metrics": {
+    "case_count": 5,
+    "completion_tokens_per_second": 45.9,
+    "exact_format_pass_count": 5,
+    "latency_ms_mean": 748.8,
+    "scored_case_count": 5,
+    "semantic_pass_count": 5,
+    "usage_coverage_cases": 5
+  },
+  "model": {
+    "declared_context_tokens": 262144,
+    "digest": "sha256-manifest-v1:b8f7614337bcac3ace7f10df8fde4a0dd2768f11fd3959b12edfebc9f95a5fcb",
+    "display_name": "NVIDIA Nemotron 3 Nano Omni",
+    "precision": "GGUF Q4_K_M",
+    "source": "lmstudio-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-GGUF"
+  },
+  "profile": "standard",
+  "runtime": {
+    "backend": "llama.cpp 2.24.0 / Apple Metal",
+    "name": "LM Studio",
+    "version": "0.4.20+1"
+  },
+  "runtime_configuration": {
+    "concurrent_requests": 1,
+    "context_window_tokens": 262144,
+    "offload_mode": "maximum",
+    "speculative_decoding": "disabled"
+  },
+  "schema_version": "1.0",
+  "settings": {
+    "max_output_tokens": 4096,
+    "reasoning_effort": "none",
+    "seed": 0,
+    "temperature": 0.0,
+    "top_p": 1.0
+  },
+  "submission_id": "0a6d37745cc14ea2778ad3b40f7eda2fe3cb4469bb043ca311ced5b2579a52a9",
+  "suite_version": "1.0"
+}
