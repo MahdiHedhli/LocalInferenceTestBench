@@ -122,6 +122,7 @@ printf '%s\n' '{{range .}}{{.RuleID}}{{"\t"}}{{.File}}{{"\t"}}{{.StartLine}}{{"\
 
 run_gitleaks() {
     gitleaks "$@" \
+        --ignore-gitleaks-allow \
         --redact \
         --no-banner \
         --no-color \

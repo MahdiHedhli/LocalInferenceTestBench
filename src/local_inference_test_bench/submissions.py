@@ -15,7 +15,12 @@ import tempfile
 from typing import Any, Mapping
 
 from .reporting import ReportError, _walk_safe, validate_report
-from .safety import SafetyError, secure_directory, validate_env_file
+from .safety import (
+    SafetyError,
+    secure_directory,
+    validate_env_file,
+    validate_ignored_destination,
+)
 
 
 SUBMISSION_SCHEMA_VERSION = "1.0"
@@ -86,6 +91,9 @@ _DESCRIPTOR_IDENTIFIER_LABEL = re.compile(
 _URL_OR_EMAIL = re.compile(
     r"(?i)(?:\b[a-z][a-z0-9+.-]*://|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})"
 )
+_SCANNER_SUPPRESSION_MARKER = re.compile(
+    r"(?i)\b" + "git" + r"leaks\s*:\s*allow\b"
+)
 _MAX_SUBMISSION_BYTES = 256 * 1024
 _MAX_DATASET_BYTES = 2 * 1024 * 1024
 _MAX_SAFE_INTEGER = 9_007_199_254_740_991
@@ -97,6 +105,9 @@ _ACCELERATOR_KINDS = {
     "other",
 }
 _EXECUTION_MODES = {"cpu_only", "accelerator_only", "hybrid", "unknown"}
+_SPECULATIVE_DECODING_MODES = {"enabled", "disabled", "unknown"}
+_OFFLOAD_MODES = {"none", "partial", "maximum", "not_applicable", "unknown"}
+_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 
 class SubmissionError(ValueError):
@@ -105,6 +116,20 @@ class SubmissionError(ValueError):
 
 def _object(value: Any, keys: set[str], path: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping) or set(value) != keys:
+        raise SubmissionError(f"{path} has an unsupported object contract")
+    return value
+
+
+def _object_with_optional(
+    value: Any,
+    required: set[str],
+    optional: set[str],
+    path: str,
+) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise SubmissionError(f"{path} has an unsupported object contract")
+    keys = set(value)
+    if not required.issubset(keys) or not keys.issubset(required | optional):
         raise SubmissionError(f"{path} has an unsupported object contract")
     return value
 
@@ -129,6 +154,8 @@ def _text(value: Any, path: str, *, maximum: int = 500) -> str:
         or any(unsafe_control(character) for character in value)
     ):
         raise SubmissionError(f"{path} must be bounded public text")
+    if _SCANNER_SUPPRESSION_MARKER.search(value):
+        raise SubmissionError(f"{path} contains a prohibited scanner suppression marker")
     return value
 
 
@@ -218,9 +245,10 @@ def _validate_model(value: Any, path: str) -> Mapping[str, Any]:
 
 
 def _validate_settings(value: Any, path: str, *, context_tokens: int) -> Mapping[str, Any]:
-    settings = _object(
+    settings = _object_with_optional(
         value,
         {"temperature", "top_p", "max_output_tokens", "seed"},
+        {"reasoning_effort"},
         path,
     )
     temperature = _number(
@@ -242,13 +270,63 @@ def _validate_settings(value: Any, path: str, *, context_tokens: int) -> Mapping
             minimum=-_MAX_SAFE_INTEGER,
             maximum=_MAX_SAFE_INTEGER,
         )
+    if "reasoning_effort" in settings:
+        reasoning_effort = settings["reasoning_effort"]
+        if (
+            not isinstance(reasoning_effort, str)
+            or reasoning_effort not in _REASONING_EFFORTS
+        ):
+            raise SubmissionError(f"{path}.reasoning_effort is unsupported")
     return settings
+
+
+def _validate_runtime_configuration(value: Any, path: str) -> Mapping[str, Any]:
+    configuration = _object(
+        value,
+        {
+            "context_window_tokens",
+            "concurrent_requests",
+            "speculative_decoding",
+            "offload_mode",
+        },
+        path,
+    )
+    context_window = configuration["context_window_tokens"]
+    if context_window is not None:
+        _integer(
+            context_window,
+            f"{path}.context_window_tokens",
+            minimum=1,
+        )
+    concurrent_requests = configuration["concurrent_requests"]
+    if concurrent_requests is not None:
+        _integer(
+            concurrent_requests,
+            f"{path}.concurrent_requests",
+            minimum=1,
+            maximum=4096,
+        )
+    speculative_decoding = configuration["speculative_decoding"]
+    if (
+        not isinstance(speculative_decoding, str)
+        or speculative_decoding not in _SPECULATIVE_DECODING_MODES
+    ):
+        raise SubmissionError(f"{path}.speculative_decoding is unsupported")
+    offload_mode = configuration["offload_mode"]
+    if not isinstance(offload_mode, str) or offload_mode not in _OFFLOAD_MODES:
+        raise SubmissionError(f"{path}.offload_mode is unsupported")
+    return configuration
 
 
 def validate_public_environment(value: Mapping[str, Any]) -> None:
     """Validate the closed, intentionally public hardware/runtime descriptor."""
 
-    descriptor = _object(value, {"schema_version", "hardware", "runtime"}, "descriptor")
+    descriptor = _object_with_optional(
+        value,
+        {"schema_version", "hardware", "runtime"},
+        {"runtime_configuration"},
+        "descriptor",
+    )
     if descriptor["schema_version"] != "1.0":
         raise SubmissionError("descriptor schema version is unsupported")
     hardware = _object(
@@ -335,6 +413,11 @@ def validate_public_environment(value: Mapping[str, Any]) -> None:
     _descriptor_text(runtime["name"], "descriptor.runtime.name", maximum=100)
     _descriptor_text(runtime["version"], "descriptor.runtime.version", maximum=100)
     _descriptor_text(runtime["backend"], "descriptor.runtime.backend", maximum=100)
+    if "runtime_configuration" in descriptor:
+        _validate_runtime_configuration(
+            descriptor["runtime_configuration"],
+            "descriptor.runtime_configuration",
+        )
     try:
         _walk_safe(descriptor)
     except ReportError as error:
@@ -531,6 +614,10 @@ def prepare_submissions(
                 ),
             },
         }
+        if "runtime_configuration" in public_environment:
+            payload["runtime_configuration"] = copy.deepcopy(
+                public_environment["runtime_configuration"]
+            )
         payload = _normalize_submission_payload(payload)
         submission = {"submission_id": _submission_digest(payload), **payload}
         validate_submission(submission)
@@ -558,7 +645,7 @@ def prepare_submission(
 def validate_submission(submission: Mapping[str, Any]) -> None:
     """Validate the closed public contract and its content-derived identifier."""
 
-    submission = _object(
+    submission = _object_with_optional(
         submission,
         {
             "schema_version",
@@ -572,6 +659,7 @@ def validate_submission(submission: Mapping[str, Any]) -> None:
             "cases",
             "metrics",
         },
+        {"runtime_configuration"},
         "submission",
     )
     if submission["schema_version"] != SUBMISSION_SCHEMA_VERSION:
@@ -581,13 +669,16 @@ def validate_submission(submission: Mapping[str, Any]) -> None:
     profile = submission["profile"]
     if profile != "standard":
         raise SubmissionError("submission profile must be standard")
-    validate_public_environment(
-        {
-            "schema_version": "1.0",
-            "hardware": submission["hardware"],
-            "runtime": submission["runtime"],
-        }
-    )
+    public_environment = {
+        "schema_version": "1.0",
+        "hardware": submission["hardware"],
+        "runtime": submission["runtime"],
+    }
+    if "runtime_configuration" in submission:
+        public_environment["runtime_configuration"] = submission[
+            "runtime_configuration"
+        ]
+    validate_public_environment(public_environment)
     submission_id = submission["submission_id"]
     if not isinstance(submission_id, str) or not _HEX_DIGEST.fullmatch(submission_id):
         raise SubmissionError("submission_id must be a lowercase SHA-256 digest")
@@ -598,6 +689,17 @@ def validate_submission(submission: Mapping[str, Any]) -> None:
         "submission.settings",
         context_tokens=context_tokens,
     )
+    if "runtime_configuration" in submission:
+        configured_context = submission["runtime_configuration"][
+            "context_window_tokens"
+        ]
+        if (
+            configured_context is not None
+            and submission["settings"]["max_output_tokens"] > configured_context
+        ):
+            raise SubmissionError(
+                "submission.settings.max_output_tokens exceeds the configured context window"
+            )
     cases = _validate_cases(submission["cases"], "submission.cases")
     _validate_metrics(submission["metrics"], "submission.metrics", cases=cases)
 
@@ -675,29 +777,108 @@ def load_public_environment_file(path: str | Path) -> dict[str, Any]:
     return descriptor
 
 
-def write_submission(submission: Mapping[str, Any], output_dir: str | Path) -> Path:
-    """Write one owner-only public candidate without replacing an existing file."""
+def load_saved_submission(path: str | Path) -> dict[str, Any]:
+    """Load an exact owner-only candidate that is ignored when inside a worktree."""
+
+    try:
+        approved_path = validate_env_file(path)
+    except SafetyError as error:
+        raise SubmissionError(
+            "saved candidate must be regular, owner-only, and Git-ignored"
+        ) from error
+    submission = load_json_object(approved_path)
+    validate_submission(submission)
+    submission_id = submission["submission_id"]
+    if approved_path.name != f"{submission_id}.json":
+        raise SubmissionError("saved candidate filename must match submission_id")
+    try:
+        existing = approved_path.read_bytes()
+    except OSError as error:
+        raise SubmissionError("saved candidate could not be read") from error
+    if existing != render_submission_bytes(submission):
+        raise SubmissionError("saved candidate bytes are not canonical")
+    return submission
+
+
+def render_submission_bytes(submission: Mapping[str, Any]) -> bytes:
+    """Render the exact public bytes used for local saving and publication."""
 
     validate_submission(submission)
     try:
+        rendered = json.dumps(
+            submission,
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as error:
+        raise SubmissionError("submission is not strict JSON") from error
+    encoded = (rendered + "\n").encode("utf-8")
+    if len(encoded) > _MAX_SUBMISSION_BYTES:
+        raise SubmissionError("submission exceeds the public size limit")
+    return encoded
+
+
+def write_submission(submission: Mapping[str, Any], output_dir: str | Path) -> Path:
+    """Write one owner-only public candidate without replacing an existing file."""
+
+    rendered = render_submission_bytes(submission)
+    try:
+        validate_ignored_destination(
+            Path(output_dir) / f"{submission['submission_id']}.json"
+        )
         directory = secure_directory(output_dir)
         path = directory / f"{submission['submission_id']}.json"
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
         descriptor = os.open(path, flags, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(
-                submission,
-                handle,
-                indent=2,
-                sort_keys=True,
-                ensure_ascii=True,
-                allow_nan=False,
-            )
-            handle.write("\n")
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(rendered)
     except (OSError, SafetyError) as error:
         raise SubmissionError("submission could not be written securely") from error
+    return path
+
+
+def ensure_submission(submission: Mapping[str, Any], output_dir: str | Path) -> Path:
+    """Save a candidate once, treating an exact secure existing file as success."""
+
+    rendered = render_submission_bytes(submission)
+    try:
+        validate_ignored_destination(
+            Path(output_dir) / f"{submission['submission_id']}.json"
+        )
+        directory = secure_directory(output_dir)
+        path = directory / f"{submission['submission_id']}.json"
+    except (OSError, SafetyError) as error:
+        raise SubmissionError("submission destination could not be inspected") from error
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        try:
+            return write_submission(submission, output_dir)
+        except SubmissionError as write_error:
+            # Another process may have won the O_EXCL race with the same bytes.
+            try:
+                metadata = path.lstat()
+            except OSError:
+                raise write_error
+    except OSError as error:
+        raise SubmissionError("submission destination could not be inspected") from error
+    if path.is_symlink() or not path.is_file():
+        raise SubmissionError("submission destination is not a regular file")
+    if os.name != "nt":
+        if metadata.st_mode & 0o077:
+            raise SubmissionError("existing submission must be owner-only")
+        if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+            raise SubmissionError("existing submission must be owned by the current user")
+    try:
+        existing = path.read_bytes()
+    except OSError as error:
+        raise SubmissionError("existing submission could not be read") from error
+    if existing != rendered:
+        raise SubmissionError("submission destination already contains different content")
     return path
 
 
@@ -713,6 +894,17 @@ def write_submissions(
     for submission in submissions:
         paths.append(write_submission(submission, output_dir))
     return tuple(paths)
+
+
+def ensure_submissions(
+    submissions: tuple[Mapping[str, Any], ...],
+    output_dir: str | Path,
+) -> tuple[Path, ...]:
+    """Idempotently save a batch of already-separated public records."""
+
+    if not submissions:
+        raise SubmissionError("no submissions were prepared")
+    return tuple(ensure_submission(submission, output_dir) for submission in submissions)
 
 
 def _score_percent(count: int, total: int) -> float:
@@ -763,18 +955,21 @@ def build_leaderboard(submissions_dir: str | Path) -> dict[str, Any]:
         leaderboard_metrics["exact_format_score_percent"] = _score_percent(
             metrics["exact_format_pass_count"], case_count
         )
-        rows.append(
-            {
-                "submission_id": submission_id,
-                "suite_version": submission["suite_version"],
-                "profile": submission["profile"],
-                "hardware": copy.deepcopy(normalized_submission["hardware"]),
-                "runtime": copy.deepcopy(normalized_submission["runtime"]),
-                "model": copy.deepcopy(normalized_submission["model"]),
-                "settings": copy.deepcopy(normalized_submission["settings"]),
-                "metrics": leaderboard_metrics,
-            }
-        )
+        row = {
+            "submission_id": submission_id,
+            "suite_version": submission["suite_version"],
+            "profile": submission["profile"],
+            "hardware": copy.deepcopy(normalized_submission["hardware"]),
+            "runtime": copy.deepcopy(normalized_submission["runtime"]),
+            "model": copy.deepcopy(normalized_submission["model"]),
+            "settings": copy.deepcopy(normalized_submission["settings"]),
+            "metrics": leaderboard_metrics,
+        }
+        if "runtime_configuration" in normalized_submission:
+            row["runtime_configuration"] = copy.deepcopy(
+                normalized_submission["runtime_configuration"]
+            )
+        rows.append(row)
 
     rows.sort(
         key=lambda row: (

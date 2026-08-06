@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Compare anonymized local language-model benchmark results.">
+    <meta name="description" content="Compare identifier-minimized local language-model benchmark results.">
     <meta name="referrer" content="no-referrer">
     <meta
       http-equiv="Content-Security-Policy"
@@ -57,7 +57,7 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">Community results</p>
-            <h2 id="leaderboard-title">Anonymized leaderboard</h2>
+            <h2 id="leaderboard-title">Identifier-minimized leaderboard</h2>
             <p class="section-note">
               Entries are community-submitted, schema-validated, and maintainer-reviewed. They are not
               independently reproduced. Quality determines rank; speed is shown only as a
@@ -102,7 +102,7 @@
         >
           <table>
             <caption class="visually-hidden">
-              Anonymized LocalInferenceTestBench standard-profile results. Quality ranks do not
+              Identifier-minimized LocalInferenceTestBench standard-profile results. Quality ranks do not
               change when the table is sorted.
             </caption>
             <thead>
@@ -147,19 +147,26 @@
           <p class="eyebrow">Add a result</p>
           <h2 id="submit-title">Review the evidence before you submit it.</h2>
           <p>
-            Select a minimized submission file created by the test bench. This page checks its basic
-            shape and shows a model and hardware summary. It never accepts
-            a raw run report or sends the file anywhere.
+            A valid standard run can now save identifier-minimized JSON or open the reviewed GitHub
+            pull request for you. Choose the public option at the end of the run, inspect the complete
+            record, and confirm it. You can still select a saved file here for a browser-only check.
+            This page never accepts a raw report or sends the file anywhere.
           </p>
           <p class="submission-disclosure">
             The JSON omits direct machine and contributor identifiers, but it does include exact
-            hardware and runtime details. Those details, especially alongside performance results,
-            can make a setup recognizable. Your GitHub account and pull request will also be public.
+            hardware, runtime, and any reported runtime-configuration details. Those details,
+            especially alongside performance results, can make a setup recognizable. Your GitHub
+            account and pull request will also be public.
           </p>
         </div>
         <div class="submission-tool" aria-labelledby="submission-tool-title">
           <h3 id="submission-tool-title">Check a prepared submission</h3>
-          <p>Create one locally with the submission command, then select that minimized JSON file.</p>
+          <p>
+            The fastest route is
+            <code>litb run --profile standard --submission pr --submission-model &lt;report-model-id&gt;</code>.
+            The model option may be omitted for a single-model run. To stop at a local file, choose
+            <code>--submission save</code>, then select that JSON here.
+          </p>
           <label class="file-label" for="submission-file">Prepared submission file</label>
           <input id="submission-file" type="file" accept="application/json,.json">
           <p class="file-help">JSON only, up to 256 KB. Your file stays in this browser.</p>

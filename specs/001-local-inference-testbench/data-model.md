@@ -56,11 +56,17 @@ are ephemeral command inputs and are not manifest properties.
 | top_p | number | yes | Greater than zero and at most one |
 | max_output_tokens | integer | yes | Positive and explicit |
 | seed | integer or null | yes | Null when unsupported; a value is not proof of determinism |
+| reasoning_effort | enum | no | `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`; sent and reported only when explicit |
 
 Validation:
 
 - schema_version and suite_version MUST be versions supported by the runner.
 - Exactly one of revision and digest MUST be present for every model.
+- A multi-shard `sha256-manifest-v1:<hex>` digest identifies a path-free checksum manifest: SHA-256
+  over bytewise basename-sorted UTF-8 lines of
+  `basename<TAB>provider-sha256<LF>` for all weight shards. It is valid only when every expected
+  completed-download checksum exists, basenames are unique, and local sizes match provider metadata;
+  it MUST NOT be described as an independent full-weight rehash.
 - Model IDs MUST be unique and models MUST contain at least one entry.
 - Endpoint and credential values are not legal manifest properties.
 - credential_env MUST be a syntactically valid environment-variable name.
