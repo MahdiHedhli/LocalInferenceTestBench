@@ -13,23 +13,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from trusted_submission_automation import (  # noqa: E402
     AutomationError,
-    CODEX_APP_ID,
-    CODEX_APP_SLUG,
-    CODEX_USER_ID,
+    GITHUB_ACTIONS_APP_ID,
+    GITHUB_ACTIONS_APP_SLUG,
     GITHUB_ACTIONS_USER_ID,
     REPOSITORY_FULL_NAME,
     REPOSITORY_ID,
     REPOSITORY_NODE_ID,
     REVIEWER_LOGIN,
     REVIEWER_USER_ID,
-    ReviewSignal,
     exact_approval_exists,
+    find_request_marker,
     parse_pull_request,
-    parse_review_signal,
     review_request_exists,
-    validate_comment_chain,
     validate_branch_protection,
     validate_repository_settings,
+    validate_request_marker,
     validate_review_threads,
     validate_reviewer_identity,
     validate_review_states,
@@ -41,56 +39,6 @@ from trusted_submission_automation import (  # noqa: E402
 HEAD_SHA = "a" * 40
 BASE_SHA = "b" * 40
 SUBMISSION_ID = "c" * 64
-REVIEW_PREFIX = HEAD_SHA[:10]
-
-
-def clean_body(prefix: str = REVIEW_PREFIX) -> str:
-    return (
-        "Codex Review: Didn't find any major issues. Bravo.\n\n"
-        f"**Reviewed commit:** `{prefix}`\n\n"
-        "<details> <summary>ℹ️ About Codex in GitHub</summary>\n"
-        "<br/>\n\n"
-        "[Your team has set up Codex to review pull requests in this repo]"
-        "(https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you\n"
-        '- Open a pull request for review\n- Mark a draft as ready\n- Comment "@codex review".\n\n'
-        "If Codex has suggestions, it will comment; otherwise it will react with 👍.\n\n\n\n\n"
-        'Codex can also answer questions or update the PR. Try commenting "@codex address that feedback".\n'
-        "            \n</details>"
-    )
-
-
-def event_fixture() -> dict[str, object]:
-    return {
-        "action": "created",
-        "repository": {
-            "id": REPOSITORY_ID,
-            "node_id": REPOSITORY_NODE_ID,
-            "full_name": REPOSITORY_FULL_NAME,
-            "default_branch": "main",
-        },
-        "issue": {
-            "number": 42,
-            "repository_url": f"https://api.github.com/repos/{REPOSITORY_FULL_NAME}",
-            "pull_request": {
-                "url": f"https://api.github.com/repos/{REPOSITORY_FULL_NAME}/pulls/42"
-            },
-        },
-        "comment": {
-            "id": 9001,
-            "body": clean_body(),
-            "created_at": "2026-08-06T12:01:00Z",
-            "updated_at": "2026-08-06T12:01:00Z",
-            "user": {
-                "id": CODEX_USER_ID,
-                "login": "chatgpt-codex-connector[bot]",
-                "type": "Bot",
-            },
-            "performed_via_github_app": {
-                "id": CODEX_APP_ID,
-                "slug": CODEX_APP_SLUG,
-            },
-        },
-    }
 
 
 def pull_fixture() -> dict[str, object]:
@@ -119,18 +67,38 @@ def pull_fixture() -> dict[str, object]:
     }
 
 
-def request_comment(created_at: str = "2026-08-06T12:00:00Z") -> dict[str, object]:
+def request_comment(
+    *,
+    comment_id: int = 8001,
+    pull_request_number: int = 42,
+    base_sha: str = BASE_SHA,
+    head_sha: str = HEAD_SHA,
+    created_at: str = "2026-08-06T12:00:00Z",
+) -> dict[str, object]:
     return {
-        "id": 8001,
+        "id": comment_id,
         "body": (
             "@codex review\n@coderabbitai review\n\n"
-            f"<!-- litb-review-request:base={BASE_SHA};head={HEAD_SHA} -->"
+            f"<!-- litb-review-request:base={base_sha};head={head_sha} -->"
         ),
         "created_at": created_at,
+        "updated_at": created_at,
+        "issue_url": (
+            f"https://api.github.com/repos/{REPOSITORY_FULL_NAME}"
+            f"/issues/{pull_request_number}"
+        ),
+        "html_url": (
+            f"https://github.com/{REPOSITORY_FULL_NAME}/pull/{pull_request_number}"
+            f"#issuecomment-{comment_id}"
+        ),
         "user": {
             "id": GITHUB_ACTIONS_USER_ID,
             "login": "github-actions[bot]",
             "type": "Bot",
+        },
+        "performed_via_github_app": {
+            "id": GITHUB_ACTIONS_APP_ID,
+            "slug": GITHUB_ACTIONS_APP_SLUG,
         },
     }
 
@@ -155,95 +123,20 @@ def protection_fixture() -> dict[str, object]:
     }
 
 
-class ReviewSignalTests(unittest.TestCase):
-    def test_exact_codex_clean_comment_is_accepted(self) -> None:
-        signal = parse_review_signal(event_fixture())
-
-        self.assertEqual(signal.pull_request_number, 42)
-        self.assertEqual(signal.reviewed_commit_prefix, REVIEW_PREFIX)
-        self.assertEqual(signal.comment_id, 9001)
-
-    def test_variable_plain_ascii_clean_suffix_is_accepted(self) -> None:
-        event = event_fixture()
-        event["comment"]["body"] = clean_body().replace(
-            "Bravo.", "Already looking forward to the next diff."
-        )
-
-        self.assertEqual(parse_review_signal(event).reviewed_commit_prefix, REVIEW_PREFIX)
-
-    def test_spoofed_bot_identity_or_app_is_rejected(self) -> None:
-        mutations = (
-            ("login", "chatgpt-codex-connector"),
-            ("id", CODEX_USER_ID + 1),
-            ("type", "User"),
-        )
-        for key, value in mutations:
-            with self.subTest(key=key):
-                event = event_fixture()
-                event["comment"]["user"][key] = value
-                with self.assertRaises(AutomationError):
-                    parse_review_signal(event)
-
-        for key, value in (("id", CODEX_APP_ID + 1), ("slug", "lookalike")):
-            with self.subTest(app_key=key):
-                event = event_fixture()
-                event["comment"]["performed_via_github_app"][key] = value
-                with self.assertRaises(AutomationError):
-                    parse_review_signal(event)
-
-    def test_wrong_repository_action_or_issue_kind_is_rejected(self) -> None:
-        fixtures = []
-        wrong_repository = event_fixture()
-        wrong_repository["repository"]["id"] = REPOSITORY_ID + 1
-        fixtures.append(wrong_repository)
-        edited = event_fixture()
-        edited["action"] = "edited"
-        fixtures.append(edited)
-        issue_only = event_fixture()
-        del issue_only["issue"]["pull_request"]
-        fixtures.append(issue_only)
-
-        for event in fixtures:
-            with self.subTest(event=event):
-                with self.assertRaises(AutomationError):
-                    parse_review_signal(event)
-
-    def test_findings_malformed_markers_and_uppercase_prefix_are_rejected(self) -> None:
-        bodies = (
-            "### 💡 Codex Review\n\nP1 finding",
-            clean_body().replace("Didn't find any major issues", "Found an issue"),
-            clean_body().replace("Bravo.", "However P1 vulnerability remains!"),
-            clean_body().replace(
-                "Codex can also answer questions",
-                "P0 exploit remains. Codex can also answer questions",
-            ),
-            clean_body().replace(REVIEW_PREFIX, REVIEW_PREFIX.upper()),
-            clean_body() + f"\n**Reviewed commit:** `{REVIEW_PREFIX}`",
-            clean_body().replace("\n\n**Reviewed", "\n**Reviewed"),
-            clean_body().split("\n\n<details>", 1)[0],
-            clean_body().split("\n<details>", 1)[0] + "P1 follow-up finding",
-        )
-        for body in bodies:
-            with self.subTest(body=body[:60]):
-                event = event_fixture()
-                event["comment"]["body"] = body
-                with self.assertRaises(AutomationError):
-                    parse_review_signal(event)
-
-
 class PullRequestAuthorizationTests(unittest.TestCase):
     def test_current_open_submission_pull_request_is_accepted(self) -> None:
         state = parse_pull_request(
             pull_fixture(),
             expected_number=42,
-            reviewed_commit_prefix=REVIEW_PREFIX,
+            expected_base_sha=BASE_SHA,
+            expected_head_sha=HEAD_SHA,
         )
 
         self.assertEqual(state.base_sha, BASE_SHA)
         self.assertEqual(state.head_sha, HEAD_SHA)
         self.assertEqual(state.submission_id, SUBMISSION_ID)
 
-    def test_stale_prefix_draft_wrong_base_and_self_review_are_rejected(self) -> None:
+    def test_stale_commit_draft_wrong_base_and_self_review_are_rejected(self) -> None:
         fixtures = []
         stale = pull_fixture()
         stale["head"]["sha"] = "d" * 40
@@ -264,7 +157,34 @@ class PullRequestAuthorizationTests(unittest.TestCase):
                     parse_pull_request(
                         payload,
                         expected_number=42,
-                        reviewed_commit_prefix=REVIEW_PREFIX,
+                        expected_base_sha=BASE_SHA,
+                        expected_head_sha=HEAD_SHA,
+                    )
+
+    def test_matching_ten_character_prefix_does_not_authorize_another_head(self) -> None:
+        collision = HEAD_SHA[:10] + "d" * 30
+
+        with self.assertRaisesRegex(AutomationError, "head commit changed"):
+            parse_pull_request(
+                pull_fixture(),
+                expected_number=42,
+                expected_base_sha=BASE_SHA,
+                expected_head_sha=collision,
+            )
+
+    def test_expected_commits_must_be_full_lowercase_shas(self) -> None:
+        for base_sha, head_sha in (
+            (BASE_SHA[:-1], HEAD_SHA),
+            (BASE_SHA, HEAD_SHA.upper()),
+            ("not-a-commit", HEAD_SHA),
+        ):
+            with self.subTest(base_sha=base_sha, head_sha=head_sha):
+                with self.assertRaisesRegex(AutomationError, "identity is malformed"):
+                    parse_pull_request(
+                        pull_fixture(),
+                        expected_number=42,
+                        expected_base_sha=base_sha,
+                        expected_head_sha=head_sha,
                     )
 
     def test_non_submission_branch_is_rejected(self) -> None:
@@ -275,7 +195,8 @@ class PullRequestAuthorizationTests(unittest.TestCase):
             parse_pull_request(
                 payload,
                 expected_number=42,
-                reviewed_commit_prefix=REVIEW_PREFIX,
+                expected_base_sha=BASE_SHA,
+                expected_head_sha=HEAD_SHA,
             )
 
     def test_unstable_mergeable_state_is_eligible_but_unsafe_states_are_rejected(self) -> None:
@@ -285,7 +206,8 @@ class PullRequestAuthorizationTests(unittest.TestCase):
             parse_pull_request(
                 payload,
                 expected_number=42,
-                reviewed_commit_prefix=REVIEW_PREFIX,
+                expected_base_sha=BASE_SHA,
+                expected_head_sha=HEAD_SHA,
             ).head_sha,
             HEAD_SHA,
         )
@@ -298,24 +220,51 @@ class PullRequestAuthorizationTests(unittest.TestCase):
                     parse_pull_request(
                         payload,
                         expected_number=42,
-                        reviewed_commit_prefix=REVIEW_PREFIX,
+                        expected_base_sha=BASE_SHA,
+                        expected_head_sha=HEAD_SHA,
                     )
 
 
-class ReviewStateTests(unittest.TestCase):
-    def test_request_marker_and_live_clean_comment_form_a_valid_chain(self) -> None:
-        signal = parse_review_signal(event_fixture())
-        comments = [[request_comment(), copy.deepcopy(event_fixture()["comment"])]]
+class RequestMarkerTests(unittest.TestCase):
+    def test_exact_live_unedited_actions_marker_is_accepted(self) -> None:
+        marker = request_comment()
 
-        validate_comment_chain(
-            comments,
-            signal=signal,
+        state = validate_request_marker(
+            marker,
+            pull_request_number=42,
+            marker_comment_id=8001,
             base_sha=BASE_SHA,
             head_sha=HEAD_SHA,
         )
+        self.assertEqual(state.comment_id, 8001)
         self.assertTrue(
-            review_request_exists(comments, base_sha=BASE_SHA, head_sha=HEAD_SHA)
+            review_request_exists(
+                [[marker]],
+                pull_request_number=42,
+                base_sha=BASE_SHA,
+                head_sha=HEAD_SHA,
+            )
         )
+
+    def test_direct_and_paginated_marker_inputs_are_equivalent(self) -> None:
+        marker = request_comment(created_at="2026-08-06T12:00:00.500Z")
+
+        direct = validate_request_marker(
+            marker,
+            pull_request_number=42,
+            marker_comment_id=8001,
+            base_sha=BASE_SHA,
+            head_sha=HEAD_SHA,
+        )
+        paginated = validate_request_marker(
+            [[marker]],
+            pull_request_number=42,
+            marker_comment_id=8001,
+            base_sha=BASE_SHA,
+            head_sha=HEAD_SHA,
+        )
+
+        self.assertEqual(direct, paginated)
 
     def test_review_request_cli_writes_canonical_bounded_body_and_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -336,6 +285,8 @@ class ReviewStateTests(unittest.TestCase):
                     "review-request",
                     "--input",
                     str(comments),
+                    "--number",
+                    "42",
                     "--base",
                     BASE_SHA,
                     "--head",
@@ -355,103 +306,175 @@ class ReviewStateTests(unittest.TestCase):
             self.assertEqual(body.read_text(encoding="utf-8"), request_comment()["body"])
             self.assertLessEqual(body.stat().st_size, 512)
 
-    def test_comment_chain_orders_mixed_timestamp_precision_chronologically(self) -> None:
-        whole_second_event = event_fixture()
-        whole_second_signal = parse_review_signal(whole_second_event)
-        validate_comment_chain(
-            [[
-                request_comment("2026-08-06T12:00:00.500Z"),
-                whole_second_event["comment"],
-            ]],
-            signal=whole_second_signal,
-            base_sha=BASE_SHA,
-            head_sha=HEAD_SHA,
-        )
+    def test_review_request_cli_returns_the_existing_marker_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            comments = root / "comments.json"
+            state = root / "state.env"
+            body = root / "body.txt"
+            comments.write_text(json.dumps([[request_comment()]]), encoding="utf-8")
 
-        event = event_fixture()
-        event["comment"]["created_at"] = "2026-08-06T12:00:00.500Z"
-        event["comment"]["updated_at"] = "2026-08-06T12:00:00.500Z"
-        signal = parse_review_signal(event)
-
-        validate_comment_chain(
-            [[request_comment("2026-08-06T12:00:00Z"), event["comment"]]],
-            signal=signal,
-            base_sha=BASE_SHA,
-            head_sha=HEAD_SHA,
-        )
-
-        with self.assertRaisesRegex(AutomationError, "missing or stale"):
-            validate_comment_chain(
-                [[
-                    request_comment("2026-08-06T12:01:00.500Z"),
-                    whole_second_event["comment"],
-                ]],
-                signal=whole_second_signal,
-                base_sha=BASE_SHA,
-                head_sha=HEAD_SHA,
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(
+                        Path(__file__).resolve().parents[1]
+                        / "scripts"
+                        / "trusted_submission_automation.py"
+                    ),
+                    "review-request",
+                    "--input",
+                    str(comments),
+                    "--number",
+                    "42",
+                    "--base",
+                    BASE_SHA,
+                    "--head",
+                    HEAD_SHA,
+                    "--output",
+                    str(state),
+                    "--body-output",
+                    str(body),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
             )
 
-    def test_contributor_marker_missing_marker_and_marker_after_review_are_rejected(self) -> None:
-        signal = parse_review_signal(event_fixture())
-        contributor_marker = request_comment()
-        contributor_marker["user"] = {
-            "id": 71,
-            "login": "benchmark-contributor",
-            "type": "User",
-        }
-        late_marker = request_comment("2026-08-06T12:02:00Z")
-        wrong_base_marker = request_comment()
-        wrong_base_marker["body"] = wrong_base_marker["body"].replace(BASE_SHA, "d" * 40)
-        clean = copy.deepcopy(event_fixture()["comment"])
-        for comments in (
-            [[contributor_marker, clean]],
-            [[clean]],
-            [[late_marker, clean]],
-            [[wrong_base_marker, clean]],
-        ):
-            with self.subTest(comments=comments):
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(
+                state.read_text(encoding="utf-8"),
+                "exists=true\nmarker_comment_id=8001\n",
+            )
+
+    def test_cross_pull_and_stale_head_markers_are_rejected(self) -> None:
+        for pull_request_number, head_sha in ((43, HEAD_SHA), (42, "d" * 40)):
+            with self.subTest(
+                pull_request_number=pull_request_number,
+                head_sha=head_sha,
+            ):
                 with self.assertRaises(AutomationError):
-                    validate_comment_chain(
-                        comments,
-                        signal=signal,
+                    validate_request_marker(
+                        request_comment(),
+                        pull_request_number=pull_request_number,
+                        marker_comment_id=8001,
+                        base_sha=BASE_SHA,
+                        head_sha=head_sha,
+                    )
+
+    def test_marker_requires_positive_numeric_call_inputs(self) -> None:
+        for pull_request_number, marker_comment_id in (
+            (0, 8001),
+            (True, 8001),
+            (42, 0),
+            (42, True),
+        ):
+            with self.subTest(
+                pull_request_number=pull_request_number,
+                marker_comment_id=marker_comment_id,
+            ):
+                with self.assertRaises(AutomationError):
+                    validate_request_marker(
+                        request_comment(),
+                        pull_request_number=pull_request_number,
+                        marker_comment_id=marker_comment_id,
                         base_sha=BASE_SHA,
                         head_sha=HEAD_SHA,
                     )
 
-    def test_selected_clean_signal_must_be_the_latest_codex_response(self) -> None:
-        signal = parse_review_signal(event_fixture())
-        clean = copy.deepcopy(event_fixture()["comment"])
-        later_finding = copy.deepcopy(clean)
-        later_finding.update(
-            {
-                "id": 9002,
-                "body": "### Codex Review\n\nP1 issue remains.",
-                "created_at": "2026-08-06T12:02:00Z",
-                "updated_at": "2026-08-06T12:02:00Z",
-            }
-        )
-        with self.assertRaisesRegex(AutomationError, "latest Codex"):
-            validate_comment_chain(
-                [[request_comment(), clean, later_finding]],
-                signal=signal,
+    def test_marker_identity_body_timestamp_url_and_id_mutations_fail_closed(self) -> None:
+        mutations = []
+        for container, key, value in (
+            ("user", "id", GITHUB_ACTIONS_USER_ID + 1),
+            ("user", "login", "github-actions"),
+            ("user", "type", "User"),
+            ("performed_via_github_app", "id", GITHUB_ACTIONS_APP_ID + 1),
+            ("performed_via_github_app", "slug", "lookalike"),
+        ):
+            marker = request_comment()
+            marker[container][key] = value
+            mutations.append(marker)
+        edited = request_comment()
+        edited["updated_at"] = "2026-08-06T12:01:00Z"
+        mutations.append(edited)
+        wrong_issue = request_comment()
+        wrong_issue["issue_url"] = wrong_issue["issue_url"].replace("/42", "/43")
+        mutations.append(wrong_issue)
+        wrong_html = request_comment()
+        wrong_html["html_url"] = wrong_html["html_url"].replace("/pull/42", "/pull/43")
+        mutations.append(wrong_html)
+        wrong_body = request_comment()
+        wrong_body["body"] = wrong_body["body"].replace(BASE_SHA, "d" * 40)
+        mutations.append(wrong_body)
+
+        for marker in mutations:
+            with self.subTest(marker=marker):
+                with self.assertRaises(AutomationError):
+                    validate_request_marker(
+                        marker,
+                        pull_request_number=42,
+                        marker_comment_id=8001,
+                        base_sha=BASE_SHA,
+                        head_sha=HEAD_SHA,
+                    )
+
+        for marker_id, comments in ((8002, [[request_comment()]]), (8001, [[]])):
+            with self.subTest(marker_id=marker_id):
+                with self.assertRaises(AutomationError):
+                    validate_request_marker(
+                        comments,
+                        pull_request_number=42,
+                        marker_comment_id=marker_id,
+                        base_sha=BASE_SHA,
+                        head_sha=HEAD_SHA,
+                    )
+
+    def test_duplicate_valid_markers_and_duplicate_comment_ids_are_rejected(self) -> None:
+        second = request_comment(comment_id=8002)
+        with self.assertRaisesRegex(AutomationError, "multiple"):
+            find_request_marker(
+                [[request_comment(), second]],
+                pull_request_number=42,
+                base_sha=BASE_SHA,
+                head_sha=HEAD_SHA,
+            )
+        with self.assertRaisesRegex(AutomationError, "duplicate"):
+            find_request_marker(
+                [[request_comment(), request_comment()]],
+                pull_request_number=42,
                 base_sha=BASE_SHA,
                 head_sha=HEAD_SHA,
             )
 
-        earlier_finding = copy.deepcopy(later_finding)
-        earlier_finding.update(
-            {
-                "id": 8999,
-                "created_at": "2026-08-06T12:00:30Z",
-                "updated_at": "2026-08-06T12:00:30Z",
-            }
+    def test_contributor_spoof_and_advisory_bot_prose_do_not_authorize(self) -> None:
+        contributor = request_comment()
+        contributor["user"] = {"id": 71, "login": "contributor", "type": "User"}
+        self.assertIsNone(
+            find_request_marker(
+                [[contributor]],
+                pull_request_number=42,
+                base_sha=BASE_SHA,
+                head_sha=HEAD_SHA,
+            )
         )
-        validate_comment_chain(
-            [[request_comment(), earlier_finding, clean]],
-            signal=signal,
+
+        advisory = {
+            "id": 9001,
+            "body": "Codex unavailable; CodeRabbit rate limit reached; P1 text is advisory.",
+            "user": {"id": 99, "login": "review-service[bot]", "type": "Bot"},
+        }
+        marker = validate_request_marker(
+            [[advisory, request_comment()]],
+            pull_request_number=42,
+            marker_comment_id=8001,
             base_sha=BASE_SHA,
             head_sha=HEAD_SHA,
         )
+        self.assertEqual(marker.comment_id, 8001)
+        self.assertEqual(marker.head_sha, HEAD_SHA)
+
+
+class ReviewStateTests(unittest.TestCase):
 
     def test_unresolved_or_truncated_review_threads_are_rejected(self) -> None:
         empty_page = {
