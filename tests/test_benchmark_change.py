@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 
 
@@ -9,8 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from validate_benchmark_change import (  # noqa: E402
     ChangeError,
+    validate_benchmark_content,
     validate_benchmark_modes,
     validate_changes,
+    validate_expected_submission,
 )
 
 
@@ -26,6 +31,24 @@ class BenchmarkChangeBoundaryTests(unittest.TestCase):
                 [("R100", "docs/old.md"), ("R100", "docs/new.md")]
             )
         )
+
+    def test_required_benchmark_lane_rejects_a_general_change(self) -> None:
+        with self.assertRaisesRegex(ChangeError, "benchmark-only"):
+            validate_changes([("M", "README.md")], require_benchmark=True)
+
+    def test_required_benchmark_lane_accepts_the_exact_two_file_change(self) -> None:
+        self.assertTrue(
+            validate_changes(
+                [("A", SUBMISSION), ("M", LEADERBOARD)],
+                require_benchmark=True,
+            )
+        )
+
+    def test_submission_branch_digest_must_match_the_added_filename(self) -> None:
+        changes = [("A", SUBMISSION), ("M", LEADERBOARD)]
+        validate_expected_submission(changes, "a" * 64)
+        with self.assertRaisesRegex(ChangeError, "branch identifier"):
+            validate_expected_submission(changes, "b" * 64)
 
     def test_one_append_only_record_and_generated_data_is_accepted(self) -> None:
         self.assertTrue(validate_changes([("A", SUBMISSION), ("M", LEADERBOARD)]))
@@ -82,7 +105,10 @@ class BenchmarkChangeBoundaryTests(unittest.TestCase):
             'git show "${BASE_SHA}:scripts/validate_benchmark_change.py"',
             workflow,
         )
-        self.assertIn('python3 - --base "${BASE_SHA}" --head "${HEAD_SHA}"', workflow)
+        self.assertIn("python3 - \\", workflow)
+        self.assertIn('--base "${BASE_SHA}"', workflow)
+        self.assertIn('--head "${HEAD_SHA}"', workflow)
+        self.assertIn("--check-content", workflow)
         self.assertNotIn("python3 scripts/validate_benchmark_change.py", workflow)
         self.assertNotIn("pull_request_target:", (
             Path(__file__).resolve().parents[1]
@@ -92,9 +118,6 @@ class BenchmarkChangeBoundaryTests(unittest.TestCase):
         ).read_text(encoding="utf-8"))
 
     def test_benchmark_files_must_not_be_executable(self) -> None:
-        import subprocess
-        import tempfile
-
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             submission = root / SUBMISSION
@@ -148,6 +171,71 @@ class BenchmarkChangeBoundaryTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ChangeError, "100644"):
                 validate_benchmark_modes(root, "HEAD")
+
+    def test_trusted_content_check_uses_base_code_and_byte_exact_data(self) -> None:
+        project = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(project / "site" / "data", root / "site" / "data")
+            subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "--quiet",
+                    "-m",
+                    "fixture",
+                ],
+                cwd=root,
+                check=True,
+            )
+
+            validate_benchmark_content(root, "HEAD", project)
+
+            (root / LEADERBOARD).write_text("{}\n", encoding="utf-8")
+            subprocess.run(["git", "add", LEADERBOARD], cwd=root, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "--quiet",
+                    "-m",
+                    "stale",
+                ],
+                cwd=root,
+                check=True,
+            )
+            with self.assertRaisesRegex(ChangeError, "trusted validation"):
+                validate_benchmark_content(root, "HEAD", project)
+
+            (root / LEADERBOARD).write_bytes(b" " * ((4 * 1024 * 1024) + 1))
+            subprocess.run(["git", "add", LEADERBOARD], cwd=root, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "--quiet",
+                    "-m",
+                    "oversized",
+                ],
+                cwd=root,
+                check=True,
+            )
+            with self.assertRaisesRegex(ChangeError, "size limit"):
+                validate_benchmark_content(root, "HEAD", project)
 
 
 if __name__ == "__main__":

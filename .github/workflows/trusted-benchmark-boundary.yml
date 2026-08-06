@@ -8,14 +8,21 @@ on:
       - reopened
       - ready_for_review
 
-permissions:
-  contents: read
+permissions: {}
+
+concurrency:
+  group: trusted-benchmark-boundary-${{ github.repository_id }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   boundary:
     name: Trusted benchmark boundary
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      classification: ${{ steps.classify.outputs.classification }}
     steps:
       - name: Check out trusted base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,9 +38,101 @@ jobs:
           git fetch --no-tags --depth=1 origin "pull/${PR_NUMBER}/head"
           test "$(git rev-parse FETCH_HEAD)" = "${HEAD_SHA}"
       - name: Run trusted base checker
+        id: classify
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          git show "${BASE_SHA}:scripts/validate_benchmark_change.py" |
-            python3 - --base "${BASE_SHA}" --head "${HEAD_SHA}"
+          set -euo pipefail
+          expected_submission_id=""
+          validator_args=(
+            --base "${BASE_SHA}"
+            --head "${HEAD_SHA}"
+            --check-content
+            --trusted-root "${GITHUB_WORKSPACE}"
+          )
+          if [[ "${HEAD_REF}" =~ ^litb/submission-([0-9a-f]{64})$ ]]; then
+            expected_submission_id="${BASH_REMATCH[1]}"
+            validator_args+=(--expected-submission-id "${expected_submission_id}")
+          fi
+          result="$(
+            git show "${BASE_SHA}:scripts/validate_benchmark_change.py" |
+              python3 - \
+                "${validator_args[@]}"
+          )"
+          case "${result}" in
+            "change boundary passed: benchmark-only")
+              if [ -n "${expected_submission_id}" ]; then
+                classification="benchmark-only"
+              else
+                classification="benchmark-manual"
+              fi
+              ;;
+            "change boundary passed: general") classification="general" ;;
+            *) exit 1 ;;
+          esac
+          echo "classification=${classification}" >> "${GITHUB_OUTPUT}"
+
+  request-reviews:
+    name: Request bounded benchmark review
+    needs: boundary
+    if: >-
+      needs.boundary.outputs.classification == 'benchmark-only' &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Request Codex and CodeRabbit once for the exact base and head
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          [[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
+          comments_file="${RUNNER_TEMP}/litb-comments.json"
+          gh api --paginate --slurp \
+            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments?per_page=100" \
+            > "${comments_file}"
+          exists="$(python3 - "${comments_file}" "${BASE_SHA}" "${HEAD_SHA}" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          source = Path(sys.argv[1])
+          if not source.is_file() or source.stat().st_size > 8 * 1024 * 1024:
+              raise SystemExit(1)
+          pages = json.loads(source.read_text(encoding="utf-8"))
+          body = (
+              "@codex review\n@coderabbitai review\n\n"
+              f"<!-- litb-review-request:base={sys.argv[2]};head={sys.argv[3]} -->"
+          )
+          matches = [
+              comment
+              for page in pages
+              if isinstance(page, list)
+              for comment in page
+              if isinstance(comment, dict)
+              and comment.get("body") == body
+              and isinstance(comment.get("user"), dict)
+              and comment["user"].get("id") == 41898282
+              and comment["user"].get("login") == "github-actions[bot]"
+              and comment["user"].get("type") == "Bot"
+          ]
+          print("true" if matches else "false")
+          PY
+          )"
+          if [ "${exists}" = "true" ]; then
+            exit 0
+          fi
+          [ "${exists}" = "false" ]
+          request_body="$(printf '@codex review\n@coderabbitai review\n\n<!-- litb-review-request:base=%s;head=%s -->' "${BASE_SHA}" "${HEAD_SHA}")"
+          gh api --silent --method POST \
+            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments" \
+            --raw-field body="${request_body}"
