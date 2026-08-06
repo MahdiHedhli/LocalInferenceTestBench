@@ -59,6 +59,27 @@ usage/performance, categorical routing, and boolean checks. They do not contain 
 derive those values or a reusable fingerprint of that text. A repeatability experiment may compare
 responses transiently and retain only a stability boolean.
 
+### Failure issue drafts
+
+The optional interactive failure-reporting path has a separate, narrower public boundary. It can
+render only a versioned closed execution diagnostic: bench/profile/suite version, one structured
+phase and category, coarse OS/Python/architecture/hardware classes, and the already-public runtime
+name/version/backend from a valid owner-only ignored descriptor. A missing or invalid descriptor
+becomes `unknown` and never replaces the original failure.
+
+The draft cannot contain model identity or selectors, case IDs, prompts, completions, reasoning,
+tool arguments, exception text or causes, tracebacks, logs, endpoints, credentials, environment
+values, paths, host/user/process inventory, raw hardware or telemetry, run/submission IDs, precise
+time, free-text notes, or hashes of excluded data.
+
+No GitHub request occurs on Enter, EOF, decline, non-TTY execution, an ineligible failure, or
+`--failure-report none`. After the complete preview and disclosure, one ASCII `y` or `Y`, with only
+surrounding ASCII whitespace ignored, calls the standard-library browser helper once with a fixed
+GitHub `issues/new` URL. That navigation itself transmits the query to GitHub and may retain it in
+browser, proxy, network, or service logs. It does not create an issue; the operator's authenticated
+account and GitHub Submit action form the separate public boundary. No PAT, GitHub CLI, Issues API,
+shell, local draft file, or automatic submission is used.
+
 Execution validity and measurement validity are separate. The run report's `valid`, `limited`, or
 `invalid` state describes endpoint, identity, request, and classification integrity. Public schema
 `1.1` preparation additionally requires an ignored owner-only measurement-evidence sidecar produced

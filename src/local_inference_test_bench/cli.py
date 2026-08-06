@@ -7,8 +7,16 @@ import json
 from pathlib import Path
 import sys
 from typing import Sequence
+import webbrowser
 
 from .client import ClientError, OpenAICompatibleClient
+from .failure_reporting import (
+    ELIGIBLE_FAILURE_CATEGORIES,
+    FailureSignal,
+    build_failure_draft,
+    build_issue_url,
+    detect_report_failure,
+)
 from .measurement import (
     LocalMeasurementSampler,
     MeasurementError,
@@ -87,6 +95,15 @@ def build_parser() -> argparse.ArgumentParser:
                 help=(
                     "post-run result action; ask prompts only for an eligible interactive "
                     "standard run (default: ask)"
+                ),
+            )
+            command.add_argument(
+                "--failure-report",
+                choices=("ask", "none"),
+                default="ask",
+                help=(
+                    "offer a sanitized GitHub issue draft after an eligible interactive "
+                    "execution failure (default: ask)"
                 ),
             )
             command.add_argument(
@@ -242,6 +259,134 @@ def _prompt_hardware_path(default: Path) -> Path:
     except EOFError:
         value = ""
     return Path(value) if value else default
+
+
+def _runner_failure_signal(error: RunnerError) -> FailureSignal | None:
+    category = error.diagnostic_category
+    phase = error.diagnostic_phase
+    if (
+        not isinstance(category, str)
+        or category not in ELIGIBLE_FAILURE_CATEGORIES
+        or not isinstance(phase, str)
+    ):
+        return None
+    try:
+        return FailureSignal(phase=phase, failure_category=category)
+    except ValueError:
+        return None
+
+
+def _offer_failure_issue_unchecked(
+    signal: FailureSignal,
+    *,
+    args: argparse.Namespace,
+    profile: str,
+    suite_version: str,
+) -> None:
+    """Preview and optionally open one sanitized issue draft without changing status."""
+
+    if getattr(args, "failure_report", "none") != "ask" or not _interactive_terminal():
+        return
+    public_environment = None
+    try:
+        public_environment = load_public_environment_file(args.hardware)
+    except Exception:
+        # Descriptor access is best effort. Never surface a path or validation detail here.
+        public_environment = None
+    try:
+        draft = build_failure_draft(
+            signal,
+            profile=profile,
+            suite_version=suite_version,
+            public_environment=public_environment,
+        )
+        issue_url = build_issue_url(draft)
+    except Exception:
+        print(
+            "failure report unavailable: sanitized draft validation failed",
+            file=sys.stderr,
+        )
+        return
+
+    print("\nOptional compatibility report (this is not a model score):")
+    print(json.dumps(draft, indent=2, sort_keys=True, ensure_ascii=True))
+    print("\nExcluded from this draft:")
+    print(
+        "  logs, exception text, prompts, responses, tool arguments, endpoints, "
+        "credentials, paths, host identifiers, model identifiers, and precise timestamps"
+    )
+    print("\nTransmission disclosure:")
+    print(
+        "  Opening the composer transmits this draft to GitHub immediately and may retain "
+        "it in browser or network history."
+    )
+    print(
+        "  This does not create an issue; GitHub Submit is the separate public-posting "
+        "confirmation."
+    )
+    try:
+        choice = input("Open this sanitized draft in GitHub? [y/N] ")
+    except (EOFError, KeyboardInterrupt):
+        return
+    if choice.strip(" \t\r\n\f\v") not in {"y", "Y"}:
+        return
+    try:
+        opened = webbrowser.open_new_tab(issue_url)
+    except Exception:
+        opened = False
+    if opened:
+        print("GitHub issue composer opened; no issue exists until you select Submit.")
+    else:
+        print(
+            "failure report handoff not confirmed; transmission status is unknown",
+            file=sys.stderr,
+        )
+
+
+def _offer_failure_issue(
+    signal: FailureSignal,
+    *,
+    args: argparse.Namespace,
+    profile: str,
+    suite_version: str,
+) -> None:
+    """Contain every optional preview, terminal, and browser handoff failure."""
+
+    try:
+        _offer_failure_issue_unchecked(
+            signal,
+            args=args,
+            profile=profile,
+            suite_version=suite_version,
+        )
+    except (Exception, KeyboardInterrupt):
+        try:
+            print(
+                "failure report unavailable: interactive handoff failed",
+                file=sys.stderr,
+            )
+        except (Exception, KeyboardInterrupt):
+            pass
+
+
+def _invoke_failure_offer(
+    signal: FailureSignal,
+    *,
+    args: argparse.Namespace,
+    profile: str,
+    suite_version: str,
+) -> None:
+    """Keep the caller's benchmark status authoritative even if the offer regresses."""
+
+    try:
+        _offer_failure_issue(
+            signal,
+            args=args,
+            profile=profile,
+            suite_version=suite_version,
+        )
+    except (Exception, KeyboardInterrupt):
+        pass
 
 
 def _choose_public_submission(
@@ -409,11 +554,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             except MeasurementError as error:
                 measurement_error = error
-        report = (
-            runner.run(run_identity=run_identity)
-            if run_identity is not None
-            else runner.run()
-        )
+        try:
+            report = (
+                runner.run(run_identity=run_identity)
+                if run_identity is not None
+                else runner.run()
+            )
+        except (ClientError, RunnerError):
+            raise
+        except Exception:
+            # This boundary is intentionally narrow and never retains exception detail.
+            raise RunnerError(
+                "unexpected internal failure",
+                diagnostic_category="internal_harness_error",
+                diagnostic_phase="runner_internal",
+            ) from None
         if sampler is not None and run_identity is not None and pre_sample is not None:
             try:
                 post_sample = sampler.sample(
@@ -426,6 +581,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         path = write_report(report, args.artifacts_dir)
         print(f"run complete: {path.name}")
         run_status = 0 if report["validity"] != "invalid" else 1
+        try:
+            failure_signal = detect_report_failure(report)
+        except Exception:
+            failure_signal = None
+        if failure_signal is not None:
+            _invoke_failure_offer(
+                failure_signal,
+                args=args,
+                profile=str(report.get("profile", args.profile)),
+                suite_version=str(report.get("suite_version", "1.0")),
+            )
         action = args.submission
         interactive = _interactive_terminal()
         eligible = _eligible_public_report(report)
@@ -476,6 +642,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except (ClientError, RunnerError, ReportError) as error:
         print(f"run error: {error}", file=sys.stderr)
+        if args.command == "run" and isinstance(error, RunnerError):
+            try:
+                failure_signal = _runner_failure_signal(error)
+            except Exception:
+                failure_signal = None
+            if failure_signal is not None:
+                _invoke_failure_offer(
+                    failure_signal,
+                    args=args,
+                    profile=args.profile,
+                    suite_version="1.0",
+                )
         return 1
     except SubmissionError as error:
         print(f"submission error: {error}", file=sys.stderr)

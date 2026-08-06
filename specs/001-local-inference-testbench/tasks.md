@@ -439,7 +439,7 @@ cases or adding capability views.
   canonical digest recomputation, and visible-ASCII/reviewer-neutral public descriptors—and add
   shared parity, source-run binding/bounds, migration, suite-registry, `not_applicable`, month,
   categorical-validity, punctuation-boundary, and unchanged-monolith regressions
-- [ ] T075 Run the complete cross-platform, deterministic-build, browser-safety, privacy, history,
+- [x] T075 Run the complete cross-platform, deterministic-build, browser-safety, privacy, history,
   secret, exact-boundary, and hosted Pages validation before merging Stage 3
 
 ---
@@ -481,3 +481,19 @@ categorical evidence and preserving the private report on optional sampler failu
   generation without changing existing manifest/run compatibility or frozen legacy bytes
 - [x] T081 Mirror the derived `1.1` contract and rank-band arithmetic in the dependency-free browser,
   render the evidence honestly, and pass shared parity and publication gates
+
+---
+
+## Phase 13: Guided benchmark failure reporting
+
+- [x] T082 Publish the closed diagnostic, consent, browser-transmission, and fixed-URL contracts in
+  `specs/005-guided-failure-reporting/` and synchronize the baseline specification.
+- [x] T083 Add failing tests for structured eligible/ineligible detection, deterministic priority,
+  closed drafts, minimized platform/runtime projection, exact URL round trips, TTY/default/decline/
+  EOF behavior, browser false/error, and original-status preservation.
+- [x] T084 Implement structured runner diagnostics, the dependency-free in-memory draft and fixed
+  issue URL, and the opt-in `litb run --failure-report {ask,none}` flow without changing benchmark or
+  publication contracts.
+- [x] T085 Update operator/privacy/interpretation/contribution guidance and bump the feature version.
+- [ ] T086 Run complete unit, deterministic-build, syntax, compile, privacy, history, hooks, Gitleaks,
+  hosted review, protected merge, and post-merge verification.

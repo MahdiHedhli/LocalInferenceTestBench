@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-inference-test-bench"
-version = "0.3.0"
+version = "0.4.0"
 description = "A privacy-conscious, hardware-agnostic local inference test bench"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -430,6 +430,25 @@ Relationships:
 - A Run Record created by an experiment uses a separately versioned contract and cannot be labeled
   smoke or standard.
 
+## Entity: Failure Issue Draft
+
+Purpose: carry one opt-in, identifier-minimized execution compatibility signal from a failed
+interactive `litb run` into the fixed GitHub issue composer.
+
+The schema is version `1.0` and contains exactly the report type, LITB version, run profile and suite
+version, structured phase and failure category, coarse OS/Python/architecture/hardware enums, and a
+closed runtime `{name, version, backend}` object. Runtime text and hardware class come only from the
+already-public validated descriptor; absence or validation failure produces `unknown`. The entity
+never contains a model identity or selector, case ID, count, content, exception, traceback, log,
+endpoint, credential, environment value, path, hostname, user, process, inventory, run/submission
+ID, exact time, raw measurement, or a hash of excluded data.
+
+The entity exists only in memory. Before browser handoff, the CLI renders its complete JSON and
+discloses that opening the URL sends it to GitHub and can retain it in browser or network
+history. The fixed URL contains only bounded `title` and `body` query fields. Navigation is a data
+transmission, not issue creation; GitHub Submit is the public mutation. Decline and failure paths
+discard the object without storage and preserve the benchmark exit status.
+
 ## State Transitions
 
 ### Run lifecycle

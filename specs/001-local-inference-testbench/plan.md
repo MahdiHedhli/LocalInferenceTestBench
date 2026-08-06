@@ -339,3 +339,20 @@ leaderboard groups the existing named configuration dimensions inside facet/prof
 uses a score-neutral representative, and publishes only fixed corroboration, Wilson, distribution,
 and plausibility summaries. Anonymous repeats do not pool quality denominators. The all-legacy
 full-suite `1.0` bytes and every digest-named accepted source record remain unchanged.
+
+## Stage 5 guided failure reporting
+
+Add a separate standard-library-only diagnostic path after the Stage 4 public data contract is
+stable. `litb run` detects only structured actionable runtime/transport/harness categories and never
+uses semantic score, model output, or free-form error text as a trigger. A versioned closed draft
+contains the bench/profile/suite identity, phase/category, coarse OS/Python/architecture/hardware
+enums, and an optional already-public runtime name/version/backend from the validated local
+descriptor. It contains no model identity, content, logs, exception text, endpoints, credentials,
+paths, inventory, IDs, or event time.
+
+Interactive users see the complete draft and a disclosure that opening the prefilled URL immediately
+transmits it to GitHub and can enter browser/network history. Only exact consent performs one
+standard-library browser handoff to the fixed repository composer; GitHub Submit remains the public
+mutation. The feature uses no token, GitHub CLI, issue API, shell, local persistence, dependency, or
+auto-submit and cannot alter the original benchmark status. It does not change report, submission,
+leaderboard, Pages, or trusted-workflow contracts.

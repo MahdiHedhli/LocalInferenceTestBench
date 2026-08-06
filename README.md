@@ -142,6 +142,26 @@ an interactive terminal. Add `--confirm-public` only for an intentional non-inte
 
 See the full [operator guide](docs/guide.md) before comparing multiple models.
 
+## Opt-in execution-failure issues
+
+When an interactive `litb run` hits a recognized runtime, transport, or harness compatibility
+failure, the CLI can offer a closed, identifier-minimized GitHub issue draft. This is separate from
+benchmark scoring: wrong answers, refusals, reasoning-only output, context/output limits, and noisy
+measurement conditions do not trigger it.
+
+The preview contains the bench/profile/suite version, one categorical failure phase and class,
+coarse OS/Python/architecture/hardware classes, and the runtime name/version/backend only when your
+existing owner-only public hardware descriptor validates. It never includes model selectors or
+identity, prompts, completions, reasoning, tool arguments, exception text, logs, endpoints,
+credentials, paths, host inventory, run IDs, or precise timestamps.
+
+Opening the prefilled URL immediately sends the displayed fields to GitHub and can leave them in
+browser or network history. The CLI therefore shows the complete draft first and opens the fixed
+repository composer only after one ASCII `y` or `Y`, with surrounding ASCII whitespace ignored;
+GitHub's Submit button is the separate public-posting confirmation. No PAT, GitHub CLI, issue API,
+shell, local draft file, or automatic submission is used. Disable the prompt with
+`--failure-report none`; non-interactive runs never open a browser.
+
 ## Public leaderboard
 
 The [GitHub Pages leaderboard](https://mahdihedhli.github.io/LocalInferenceTestBench/) puts the

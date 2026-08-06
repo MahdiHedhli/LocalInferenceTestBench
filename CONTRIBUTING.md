@@ -29,6 +29,18 @@ that the scanner recognizes without creating a usable token.
 - Do not persist prompts, responses, reasoning, tool arguments, endpoint values, or general machine
   inventory. A reviewed leaderboard submission may contain only the closed public hardware fields.
 - Use standards-reserved examples and non-identifying fixture names.
+- Keep execution-failure reports closed and categorical. Never ask contributors to paste logs,
+  exceptions, prompts, responses, endpoints, credentials, paths, host inventory, IDs, or raw
+  telemetry. Browser navigation must be disclosed as transmission before consent, and issue
+  creation must remain a separate GitHub Submit action.
+
+## Report a benchmark execution failure
+
+An eligible interactive `litb run` can open the fixed GitHub issue composer after showing the entire
+identifier-minimized draft. Review it before typing `y`, and review it again before GitHub Submit.
+Do not add logs, traceback text, prompts, completions, endpoints, credentials, local paths, or raw
+machine inventory in the browser editor. Wrong model answers and other benchmark outcomes belong in
+the result evidence, not in execution-failure issues.
 
 ## Submit a benchmark
 

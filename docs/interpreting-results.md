@@ -65,6 +65,19 @@ For an inapplicable case, outcome, route, and termination all use the `not_appli
 the record cannot imply that an unattempted case completed through an ordinary response route.
 `not_applicable` is excluded from score denominators; `not_scored` remains a reached but unscored case.
 
+### Execution-failure issue signals are not scores
+
+The optional GitHub failure draft is generated only from closed runtime, transport, or harness
+compatibility categories such as timeout, invalid protocol JSON, response bounds, or a runtime
+request rejection. It is a self-reported diagnostic signal, not a benchmark result, rank input,
+attestation, or proof that the harness is defective.
+
+Semantic or exact-format failure, refusal, reasoning-only output, context/output limits,
+`not_applicable`, and nonquiescent or degraded measurement conditions remain ordinary benchmark
+evidence and never trigger the issue prompt. Configuration, endpoint safety, authentication,
+rate-limit, sampler, submission, and publication failures retain their existing local remediation
+paths.
+
 ## Promotion checklist
 
 - Exact artifact identity and suite/settings version are present.
