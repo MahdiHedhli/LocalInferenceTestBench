@@ -293,6 +293,22 @@ class PublicSafetyTest(unittest.TestCase):
         self.assertIn("credential-assignment\tidentifiers.txt\t8", completed.stdout)
         self.assertIn("private-key\tidentifiers.txt\t9", completed.stdout)
 
+    def test_network_and_private_host_tokens_reject_punctuation_bypasses(self) -> None:
+        bad_lines = [
+            "leading=." + "10" + ".2.3.4",
+            "trailing=" + "192.168.1" + ".1.",
+            "host=" + "worker." + "internal..",
+        ]
+        self.repository.write("punctuation.txt", "\n".join(bad_lines) + "\n")
+        self.repository.add("punctuation.txt")
+
+        completed = self.repository.scan("--staged")
+
+        self.assertRules(completed, "private-ipv4", "private-hostname")
+        self.assertIn("private-ipv4\tpunctuation.txt\t1", completed.stdout)
+        self.assertIn("private-ipv4\tpunctuation.txt\t2", completed.stdout)
+        self.assertIn("private-hostname\tpunctuation.txt\t3", completed.stdout)
+
     def test_loopback_and_documentation_addresses_are_allowed(self) -> None:
         content = "\n".join(
             (
@@ -387,6 +403,20 @@ class PublicSafetyTest(unittest.TestCase):
         self.assertRules(completed, "custom-denylist")
         self.assertNotIn(literal.casefold(), completed.stdout.casefold())
         self.assertEqual(completed.stderr, "")
+
+    def test_custom_denylist_rejects_punctuation_boundaries(self) -> None:
+        literal = "private" + "-node"
+        self.installIgnoredDenylist(literal + "\n")
+        self.repository.write(
+            "guide.txt",
+            "\n".join((literal + ".", "x." + literal, literal + "_suffix")) + "\n",
+        )
+        self.repository.add("guide.txt")
+
+        completed = self.repository.scan("--staged", "--strict")
+
+        self.assertRules(completed, "custom-denylist")
+        self.assertNotIn(literal, completed.stdout)
 
     def test_strict_mode_requires_ignored_owner_only_denylist(self) -> None:
         self.repository.write("guide.txt", "clean\n")

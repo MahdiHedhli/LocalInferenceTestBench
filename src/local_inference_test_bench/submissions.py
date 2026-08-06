@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
-import ipaddress
 import json
 import math
 import os
@@ -21,19 +22,27 @@ from .safety import (
     validate_env_file,
     validate_ignored_destination,
 )
-
-
-SUBMISSION_SCHEMA_VERSION = "1.0"
-LEADERBOARD_SCHEMA_VERSION = "1.0"
-LEADERBOARD_INDEX_VERSION = "1.0"
-_STANDARD_CASE_IDS = (
-    "structured-json",
-    "python-ast",
-    "defensive-triage",
-    "read-only-tool",
-    "unapproved-change-boundary",
+from .suites import (
+    CAPABILITIES,
+    MODALITIES,
+    SuiteCase,
+    resolve_public_suite,
 )
-_OUTCOMES = {"pass", "semantic_only", "format_only", "fail", "not_scored"}
+
+
+SUBMISSION_SCHEMA_VERSION = "1.1"
+LEADERBOARD_SCHEMA_VERSION = "1.1"
+LEADERBOARD_INDEX_VERSION = "1.0"
+LEGACY_SUBMISSION_SCHEMA_VERSION = "1.0"
+LEGACY_LEADERBOARD_SCHEMA_VERSION = "1.0"
+_OUTCOMES = {
+    "pass",
+    "semantic_only",
+    "format_only",
+    "fail",
+    "not_scored",
+    "not_applicable",
+}
 _ROUTES = {
     "direct_response",
     "read_only_tool",
@@ -41,6 +50,7 @@ _ROUTES = {
     "unsafe_mutation",
     "unexpected_tool",
     "unrecognized",
+    "not_applicable",
 }
 _TERMINATIONS = {
     "completed",
@@ -63,9 +73,10 @@ _TERMINATIONS = {
     "protocol_error",
     "response_too_large",
     "http_error",
+    "not_applicable",
 }
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
-_IPV4_CANDIDATE = re.compile(r"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])")
+_IPV4_CANDIDATE = re.compile(r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])")
 _IPV6_CANDIDATE = re.compile(
     r"(?i)(?<![0-9a-f:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}"
     r"(?:%[a-z0-9_.-]+)?(?![0-9a-f:])"
@@ -90,7 +101,11 @@ _DESCRIPTOR_IDENTIFIER_LABEL = re.compile(
     r")"
 )
 _URL_OR_EMAIL = re.compile(
-    r"(?i)(?:\b[a-z][a-z0-9+.-]*://|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})"
+    r"(?i)(?:\bhttps?:|\b[a-z][a-z0-9+.-]*://|"
+    r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})"
+)
+_LOCAL_HOST_MARKER = re.compile(
+    r"(?i)(?<![a-z0-9])" + ("local" + "host") + r"(?![a-z0-9])"
 )
 _SCANNER_SUPPRESSION_MARKER = re.compile(
     r"(?i)\b" + "git" + r"leaks\s*:\s*allow\b"
@@ -111,6 +126,21 @@ _EXECUTION_MODES = {"cpu_only", "accelerator_only", "hybrid", "unknown"}
 _SPECULATIVE_DECODING_MODES = {"enabled", "disabled", "unknown"}
 _OFFLOAD_MODES = {"none", "partial", "maximum", "not_applicable", "unknown"}
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
+_PUBLIC_VALIDITIES = {"clean", "nonquiescent", "degraded_midrun"}
+_LEADERBOARD_VALIDITIES = _PUBLIC_VALIDITIES | {"legacy_unreported"}
+_MEASUREMENT_OUTCOMES = {
+    "within_thresholds",
+    "threshold_crossed",
+}
+_MEASUREMENT_CATEGORY_ORDER = (
+    "memory_pressure",
+    "thermal",
+    "sustained_load",
+    "swap",
+    "resident_models",
+)
+_MEASUREMENT_CATEGORIES = frozenset(_MEASUREMENT_CATEGORY_ORDER)
+_DETERMINISM_VERDICTS = {"stable", "warning", "blocking_instability"}
 _MODEL_DISPLAY_NAME_MAX = 160
 _MODEL_SOURCE_MAX = 240
 _MODEL_PRECISION_MAX = 80
@@ -128,6 +158,45 @@ _MODEL_REVIEW_INJECTION = re.compile(
     r"```|<!--|-->|<\s*/?\s*script\b|\[\s*inst\s*\]|<<\s*sys\s*>>"
     r")"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class FacetSelector:
+    """A versioned selection seam for one leaderboard view."""
+
+    facet_id: str
+    capabilities: frozenset[str] | None
+    modalities: frozenset[str]
+    dimension_filters: tuple[tuple[str, Any], ...] = ()
+
+
+DEFAULT_FACET = FacetSelector(
+    facet_id="all-cases-text",
+    capabilities=None,
+    modalities=frozenset({"text"}),
+)
+
+# These names define the public configuration cell. Stage 4 uses this exact
+# versioned structure for collapse and corroboration rather than an inline tuple.
+CONFIG_KEY_DIMENSIONS = {
+    "version": "1.0",
+    "fields": (
+        "hardware",
+        "model_identity",
+        "precision",
+        "runtime",
+        "runtime_configuration",
+        "settings",
+    ),
+}
+
+# This policy is intentionally not consumed yet. It fixes the graduation rule
+# before enough data exists to justify a dedicated faceted view.
+FACET_GRADUATION_POLICY = {
+    "version": "1.0",
+    "minimum_entries": 25,
+    "minimum_model_families": 5,
+}
 
 
 class SubmissionError(ValueError):
@@ -180,23 +249,20 @@ def _text(value: Any, path: str, *, maximum: int = 500) -> str:
 
 
 def _descriptor_text(value: Any, path: str, *, maximum: int) -> str:
-    """Accept a public product label only when it carries no machine identifier."""
+    """Accept a reviewer-neutral public label with no machine identifier."""
 
     result = _text(value, path, maximum=maximum)
-    network_address = False
-    for match in (*_IPV4_CANDIDATE.finditer(result), *_IPV6_CANDIDATE.finditer(result)):
-        candidate = match.group(0).split("%", 1)[0]
-        try:
-            ipaddress.ip_address(candidate)
-        except ValueError:
-            continue
-        network_address = True
-        break
+    if not _MODEL_DESCRIPTOR_ASCII.fullmatch(result):
+        raise SubmissionError(f"{path} must use visible ASCII descriptor text")
+    if _MODEL_REVIEW_INJECTION.search(result):
+        raise SubmissionError(f"{path} contains prohibited reviewer-directed content")
     if (
-        network_address
+        _IPV4_CANDIDATE.search(result)
+        or _IPV6_CANDIDATE.search(result)
         or _UUID.search(result)
         or _DESCRIPTOR_IDENTIFIER_LABEL.search(result)
         or _URL_OR_EMAIL.search(result)
+        or _LOCAL_HOST_MARKER.search(result)
     ):
         raise SubmissionError(f"{path} contains a prohibited machine identifier")
     return result
@@ -205,14 +271,7 @@ def _descriptor_text(value: Any, path: str, *, maximum: int) -> str:
 def _model_descriptor_text(value: Any, path: str, *, maximum: int) -> str:
     """Accept a compact public model label, never reviewer-directed content."""
 
-    result = _descriptor_text(value, path, maximum=maximum)
-    if not _MODEL_DESCRIPTOR_ASCII.fullmatch(result):
-        raise SubmissionError(f"{path} must use visible ASCII model descriptor text")
-    if _IPV4_CANDIDATE.search(result) or _IPV6_CANDIDATE.search(result):
-        raise SubmissionError(f"{path} contains prohibited network-shaped descriptor text")
-    if _MODEL_REVIEW_INJECTION.search(result):
-        raise SubmissionError(f"{path} contains prohibited reviewer-directed content")
-    return result
+    return _descriptor_text(value, path, maximum=maximum)
 
 
 def _integer(
@@ -285,7 +344,11 @@ def _validate_model(value: Any, path: str) -> Mapping[str, Any]:
     )
     _integer(model["declared_context_tokens"], f"{path}.declared_context_tokens", minimum=1)
     identity_field = next(iter(identity))
-    _text(model[identity_field], f"{path}.{identity_field}", maximum=200)
+    _model_descriptor_text(
+        model[identity_field],
+        f"{path}.{identity_field}",
+        maximum=200,
+    )
     return model
 
 
@@ -363,6 +426,177 @@ def _validate_runtime_configuration(value: Any, path: str) -> Mapping[str, Any]:
     return configuration
 
 
+def _boolean(value: Any, path: str) -> bool:
+    if not isinstance(value, bool):
+        raise SubmissionError(f"{path} must be boolean")
+    return value
+
+
+def _validate_measurement_sample(value: Any, path: str) -> Mapping[str, Any]:
+    sample = _object(value, {"outcome", "categories"}, path)
+    outcome = sample["outcome"]
+    if not isinstance(outcome, str) or outcome not in _MEASUREMENT_OUTCOMES:
+        raise SubmissionError(f"{path}.outcome is unsupported")
+    categories = sample["categories"]
+    if not isinstance(categories, list) or len(categories) > len(_MEASUREMENT_CATEGORIES):
+        raise SubmissionError(f"{path}.categories is unsupported")
+    if any(
+        not isinstance(category, str) or category not in _MEASUREMENT_CATEGORIES
+        for category in categories
+    ):
+        raise SubmissionError(f"{path}.categories is unsupported")
+    expected_order = [
+        category for category in _MEASUREMENT_CATEGORY_ORDER if category in categories
+    ]
+    if categories != expected_order:
+        raise SubmissionError(f"{path}.categories must be unique and canonical")
+    if (outcome == "threshold_crossed") != bool(categories):
+        raise SubmissionError(f"{path}.outcome does not match its threshold categories")
+    return sample
+
+
+def _derived_public_validity(
+    pre: Mapping[str, Any],
+    post: Mapping[str, Any],
+) -> str:
+    pre_categories = set(pre["categories"])
+    post_categories = set(post["categories"])
+    if post_categories - pre_categories:
+        return "degraded_midrun"
+    if pre_categories:
+        return "nonquiescent"
+    return "clean"
+
+
+def _validate_measurement_conditions(value: Any, path: str) -> Mapping[str, Any]:
+    conditions = _object(value, {"pre", "post", "hard_threshold_crossed"}, path)
+    pre = _validate_measurement_sample(conditions["pre"], f"{path}.pre")
+    post = _validate_measurement_sample(conditions["post"], f"{path}.post")
+    crossed = _boolean(
+        conditions["hard_threshold_crossed"],
+        f"{path}.hard_threshold_crossed",
+    )
+    expected_crossed = bool(pre["categories"] or post["categories"])
+    if crossed != expected_crossed:
+        raise SubmissionError(f"{path}.hard_threshold_crossed is inconsistent")
+    return conditions
+
+
+def _validate_determinism(value: Any, path: str) -> Mapping[str, Any]:
+    determinism = _object(
+        value,
+        {
+            "n_runs",
+            "semantic_pass_rate",
+            "envelope_class_stable",
+            "finish_reason_stable",
+            "fingerprint_stable",
+            "verdict",
+        },
+        path,
+    )
+    n_runs = _integer(
+        determinism["n_runs"],
+        f"{path}.n_runs",
+        minimum=3,
+        maximum=5,
+    )
+    semantic_pass_rate = _number(
+        determinism["semantic_pass_rate"],
+        f"{path}.semantic_pass_rate",
+        maximum=1,
+    )
+    possible_rates = {round(passed / n_runs, 6) for passed in range(n_runs + 1)}
+    if semantic_pass_rate not in possible_rates:
+        raise SubmissionError(f"{path}.semantic_pass_rate is inconsistent with n_runs")
+    envelope_stable = _boolean(
+        determinism["envelope_class_stable"],
+        f"{path}.envelope_class_stable",
+    )
+    finish_stable = _boolean(
+        determinism["finish_reason_stable"],
+        f"{path}.finish_reason_stable",
+    )
+    fingerprint_stable = _boolean(
+        determinism["fingerprint_stable"],
+        f"{path}.fingerprint_stable",
+    )
+    verdict = determinism["verdict"]
+    if not isinstance(verdict, str) or verdict not in _DETERMINISM_VERDICTS:
+        raise SubmissionError(f"{path}.verdict is unsupported")
+    semantic_stable = semantic_pass_rate in {0.0, 1.0}
+    expected_verdict = (
+        "blocking_instability"
+        if not semantic_stable or not envelope_stable or not finish_stable
+        else "warning" if not fingerprint_stable else "stable"
+    )
+    if verdict != expected_verdict:
+        raise SubmissionError(f"{path}.verdict is inconsistent")
+    return determinism
+
+
+def _validate_measurement_result(value: Any, path: str) -> Mapping[str, Any]:
+    result = _object_with_optional(
+        value,
+        {"model_id", "validity", "measurement_conditions"},
+        {"determinism"},
+        path,
+    )
+    _text(result["model_id"], f"{path}.model_id", maximum=128)
+    validity = result["validity"]
+    if not isinstance(validity, str) or validity not in _PUBLIC_VALIDITIES:
+        raise SubmissionError(f"{path}.validity is unsupported")
+    conditions = _validate_measurement_conditions(
+        result["measurement_conditions"],
+        f"{path}.measurement_conditions",
+    )
+    expected_validity = _derived_public_validity(conditions["pre"], conditions["post"])
+    if validity != expected_validity:
+        raise SubmissionError(f"{path}.validity is inconsistent with its measurements")
+    if "determinism" in result:
+        _validate_determinism(result["determinism"], f"{path}.determinism")
+    return result
+
+
+def validate_measurement_evidence(value: Mapping[str, Any]) -> None:
+    """Validate one ignored, categorical, per-model measurement evidence file."""
+
+    evidence = _object(
+        value,
+        {"schema_version", "source_run_id", "models"},
+        "measurement_evidence",
+    )
+    if evidence["schema_version"] != "1.0":
+        raise SubmissionError("measurement evidence schema version is unsupported")
+    _text(evidence["source_run_id"], "measurement_evidence.source_run_id", maximum=128)
+    models = evidence["models"]
+    if not isinstance(models, list) or not 1 <= len(models) <= 1000:
+        raise SubmissionError(
+            "measurement_evidence.models must contain between 1 and 1000 entries"
+        )
+    validated = [
+        _validate_measurement_result(model, f"measurement_evidence.models[{index}]")
+        for index, model in enumerate(models)
+    ]
+    model_ids = [str(model["model_id"]) for model in validated]
+    if len(model_ids) != len(set(model_ids)):
+        raise SubmissionError("measurement evidence model ids must be unique")
+    try:
+        _walk_safe(evidence)
+    except ReportError as error:
+        raise SubmissionError("measurement evidence contains prohibited local data") from error
+
+
+def _validate_measurement_period(value: Any, path: str) -> str:
+    period = _text(value, path, maximum=7)
+    if not re.fullmatch(r"[0-9]{4}-(?:0[1-9]|1[0-2])", period):
+        raise SubmissionError(f"{path} must use YYYY-MM")
+    current_period = datetime.now(timezone.utc).strftime("%Y-%m")
+    if period > current_period:
+        raise SubmissionError(f"{path} cannot be in the future")
+    return period
+
+
 def validate_public_environment(value: Mapping[str, Any]) -> None:
     """Validate the closed, intentionally public hardware/runtime descriptor."""
 
@@ -427,7 +661,7 @@ def validate_public_environment(value: Mapping[str, Any]) -> None:
             )
         identity = (
             str(accelerator["kind"]),
-            str(accelerator["model"]).casefold(),
+            str(accelerator["model"]).lower(),
             int(accelerator["count"]),
             float(memory_gb) if memory_gb is not None else None,
         )
@@ -469,22 +703,48 @@ def validate_public_environment(value: Mapping[str, Any]) -> None:
         raise SubmissionError("descriptor contains prohibited local data") from error
 
 
-def _validate_cases(value: Any, path: str) -> list[Mapping[str, Any]]:
-    if not isinstance(value, list) or len(value) != len(_STANDARD_CASE_IDS):
-        raise SubmissionError(f"{path} must contain the complete standard profile")
+def _validate_cases(
+    value: Any,
+    path: str,
+    *,
+    suite: tuple[SuiteCase, ...],
+    legacy: bool,
+) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list) or len(value) != len(suite):
+        raise SubmissionError(f"{path} must contain the complete resolved suite")
     cases: list[Mapping[str, Any]] = []
     for index, item in enumerate(value):
         case_path = f"{path}[{index}]"
-        case = _object(item, {"case_id", "outcome", "route", "termination"}, case_path)
+        keys = {"case_id", "outcome", "route", "termination"}
+        if not legacy:
+            keys |= {"capability", "modality"}
+        case = _object(item, keys, case_path)
+        expected = suite[index]
         case_id = case["case_id"]
-        if case_id != _STANDARD_CASE_IDS[index]:
-            raise SubmissionError(f"{path} does not match the standard profile")
-        if case["outcome"] not in _OUTCOMES:
+        if case_id != expected.case_id:
+            raise SubmissionError(f"{path} does not match the resolved suite")
+        if not legacy and (
+            case["capability"] != expected.capability
+            or case["modality"] != expected.modality
+            or case["capability"] not in CAPABILITIES
+            or case["modality"] not in MODALITIES
+        ):
+            raise SubmissionError(f"{case_path} taxonomy does not match the resolved suite")
+        allowed_outcomes = _OUTCOMES - ({"not_applicable"} if legacy else set())
+        if case["outcome"] not in allowed_outcomes:
             raise SubmissionError(f"{case_path}.outcome is unsupported")
         if case["route"] not in _ROUTES:
             raise SubmissionError(f"{case_path}.route is unsupported")
         if case["termination"] not in _TERMINATIONS:
             raise SubmissionError(f"{case_path}.termination is unsupported")
+        not_applicable = case["outcome"] == "not_applicable"
+        if (
+            not_applicable != (case["route"] == "not_applicable")
+            or not_applicable != (case["termination"] == "not_applicable")
+        ):
+            raise SubmissionError(
+                f"{case_path} not_applicable outcome, route, and termination must agree"
+            )
         if case["route"] == "unsafe_mutation" and case["outcome"] in {
             "pass",
             "semantic_only",
@@ -499,6 +759,8 @@ def _validate_metrics(
     path: str,
     *,
     cases: list[Mapping[str, Any]],
+    suite_length: int,
+    legacy: bool,
 ) -> Mapping[str, Any]:
     metrics = _object(
         value,
@@ -514,8 +776,8 @@ def _validate_metrics(
         path,
     )
     case_count = _integer(metrics["case_count"], f"{path}.case_count")
-    if case_count != len(_STANDARD_CASE_IDS):
-        raise SubmissionError(f"{path}.case_count does not match the standard profile")
+    if case_count != suite_length:
+        raise SubmissionError(f"{path}.case_count does not match the resolved suite")
     scored_count = _integer(metrics["scored_case_count"], f"{path}.scored_case_count")
     semantic_count = _integer(
         metrics["semantic_pass_count"], f"{path}.semantic_pass_count"
@@ -530,9 +792,18 @@ def _validate_metrics(
         case["outcome"] in {"pass", "semantic_only"} for case in cases
     )
     expected_exact = sum(case["outcome"] in {"pass", "format_only"} for case in cases)
-    expected_scored = sum(case["outcome"] != "not_scored" for case in cases)
-    if expected_scored != case_count:
-        raise SubmissionError(f"{path} requires every standard case to be scored")
+    expected_scored = sum(
+        case["outcome"] not in {"not_scored", "not_applicable"} for case in cases
+    )
+    if not legacy and expected_scored == 0:
+        raise SubmissionError(f"{path} requires at least one scored public case")
+    not_applicable = sum(case["outcome"] == "not_applicable" for case in cases)
+    if legacy:
+        eligible_case_count = expected_scored
+    else:
+        eligible_case_count = expected_scored + not_applicable
+    if eligible_case_count != case_count:
+        raise SubmissionError(f"{path} contains an attempted case that was not scored")
     if (semantic_count, exact_count, scored_count) != (
         expected_semantic,
         expected_exact,
@@ -547,8 +818,10 @@ def _validate_metrics(
         normalized = _number(throughput, f"{path}.completion_tokens_per_second")
         if round(normalized, 1) != normalized:
             raise SubmissionError(f"{path}.completion_tokens_per_second must use one decimal")
-        if coverage != case_count:
+        if coverage != expected_scored:
             raise SubmissionError(f"{path} cannot report throughput with incomplete usage")
+    if coverage > expected_scored:
+        raise SubmissionError(f"{path}.usage_coverage_cases exceeds scored cases")
     return metrics
 
 
@@ -591,6 +864,10 @@ def _normalize_submission_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         metrics["completion_tokens_per_second"] = _canonical_float(
             metrics["completion_tokens_per_second"]
         )
+    if "determinism" in normalized:
+        normalized["determinism"]["semantic_pass_rate"] = _canonical_float(
+            normalized["determinism"]["semantic_pass_rate"]
+        )
     return normalized
 
 
@@ -603,6 +880,8 @@ def prepare_submissions(
     report: Mapping[str, Any],
     public_environment: Mapping[str, Any],
     model_ids: tuple[str, ...] | None = None,
+    *,
+    measurement_evidence: Mapping[str, Any],
 ) -> tuple[dict[str, Any], ...]:
     """Create one separate public submission per selected model result."""
 
@@ -612,9 +891,21 @@ def prepare_submissions(
         raise SubmissionError("source report failed validation") from error
     if report["validity"] != "valid":
         raise SubmissionError("only fully valid reports can be prepared for the leaderboard")
-    if report["profile"] != "standard":
-        raise SubmissionError("only the complete standard profile can be submitted")
+    try:
+        suite = resolve_public_suite(report["profile"], report["suite_version"])
+    except ValueError as error:
+        raise SubmissionError("only a registered complete public suite can be submitted") from error
     validate_public_environment(public_environment)
+    validate_measurement_evidence(measurement_evidence)
+    if measurement_evidence["source_run_id"] != report["run_id"]:
+        raise SubmissionError("measurement evidence does not match the source run")
+
+    report_model_ids = {model["model_id"] for model in report["models"]}
+    evidence_by_model = {
+        result["model_id"]: result for result in measurement_evidence["models"]
+    }
+    if not set(evidence_by_model).issubset(report_model_ids):
+        raise SubmissionError("measurement evidence contains a model outside the source report")
 
     models = report["models"]
     if model_ids:
@@ -629,11 +920,19 @@ def prepare_submissions(
         if model["validity"] != "valid":
             raise SubmissionError("every submitted model result must be fully valid")
         summary = model["summary"]
+        evidence = evidence_by_model.get(model["model_id"])
+        if evidence is None:
+            raise SubmissionError("every submitted model requires measurement evidence")
         throughput = summary["completion_tokens_per_second_weighted"]
         payload: dict[str, Any] = {
             "schema_version": SUBMISSION_SCHEMA_VERSION,
             "suite_version": report["suite_version"],
             "profile": report["profile"],
+            "measurement_period": str(report["created_at"])[:7],
+            "validity": evidence["validity"],
+            "measurement_conditions": copy.deepcopy(
+                evidence["measurement_conditions"]
+            ),
             "hardware": copy.deepcopy(public_environment["hardware"]),
             "runtime": copy.deepcopy(public_environment["runtime"]),
             "model": copy.deepcopy(model["provenance"]),
@@ -641,11 +940,13 @@ def prepare_submissions(
             "cases": [
                 {
                     "case_id": case["case_id"],
+                    "capability": suite_case.capability,
+                    "modality": suite_case.modality,
                     "outcome": case["outcome"],
                     "route": case["route"],
                     "termination": case["termination"],
                 }
-                for case in model["cases"]
+                for case, suite_case in zip(model["cases"], suite, strict=True)
             ],
             "metrics": {
                 "case_count": summary["case_count"],
@@ -663,6 +964,8 @@ def prepare_submissions(
             payload["runtime_configuration"] = copy.deepcopy(
                 public_environment["runtime_configuration"]
             )
+        if "determinism" in evidence:
+            payload["determinism"] = copy.deepcopy(evidence["determinism"])
         payload = _normalize_submission_payload(payload)
         submission = {"submission_id": _submission_digest(payload), **payload}
         validate_submission(submission)
@@ -674,6 +977,8 @@ def prepare_submission(
     report: Mapping[str, Any],
     public_environment: Mapping[str, Any],
     model_id: str | None = None,
+    *,
+    measurement_evidence: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Prepare one model result, rejecting ambiguous multi-model reports."""
 
@@ -681,39 +986,58 @@ def prepare_submission(
         report,
         public_environment,
         (model_id,) if model_id else None,
+        measurement_evidence=measurement_evidence,
     )
     if len(submissions) != 1:
-        raise SubmissionError("select one model or use prepare_submissions for a multi-model report")
+        raise SubmissionError(
+            "select one model or use prepare_submissions for a multi-model report"
+        )
     return submissions[0]
 
 
-def validate_submission(submission: Mapping[str, Any]) -> None:
-    """Validate the closed public contract and its content-derived identifier."""
+def _validate_submission(
+    submission: Mapping[str, Any],
+    *,
+    allow_legacy: bool,
+) -> None:
+    """Validate one current candidate or retained legacy accepted record."""
 
-    submission = _object_with_optional(
-        submission,
-        {
-            "schema_version",
-            "submission_id",
-            "suite_version",
-            "profile",
-            "hardware",
-            "runtime",
-            "model",
-            "settings",
-            "cases",
-            "metrics",
-        },
-        {"runtime_configuration"},
-        "submission",
-    )
-    if submission["schema_version"] != SUBMISSION_SCHEMA_VERSION:
+    schema_version = submission.get("schema_version") if isinstance(submission, Mapping) else None
+    legacy = schema_version == LEGACY_SUBMISSION_SCHEMA_VERSION
+    if legacy and not allow_legacy:
+        raise SubmissionError("legacy submissions must be regenerated as schema 1.1")
+    if schema_version not in {
+        SUBMISSION_SCHEMA_VERSION,
+        *({LEGACY_SUBMISSION_SCHEMA_VERSION} if allow_legacy else set()),
+    }:
         raise SubmissionError("submission schema version is unsupported")
-    if submission["suite_version"] != "1.0":
-        raise SubmissionError("submission suite version is unsupported")
-    profile = submission["profile"]
-    if profile != "standard":
-        raise SubmissionError("submission profile must be standard")
+    required = {
+        "schema_version",
+        "submission_id",
+        "suite_version",
+        "profile",
+        "hardware",
+        "runtime",
+        "model",
+        "settings",
+        "cases",
+        "metrics",
+    }
+    optional = {"runtime_configuration"}
+    if not legacy:
+        required |= {"measurement_period", "validity", "measurement_conditions"}
+        optional.add("determinism")
+    submission = _object_with_optional(submission, required, optional, "submission")
+    profile = _text(submission["profile"], "submission.profile", maximum=128)
+    suite_version = _text(
+        submission["suite_version"],
+        "submission.suite_version",
+        maximum=128,
+    )
+    try:
+        suite = resolve_public_suite(profile, suite_version)
+    except ValueError as error:
+        raise SubmissionError("submission suite is unsupported") from error
     public_environment = {
         "schema_version": "1.0",
         "hardware": submission["hardware"],
@@ -745,8 +1069,35 @@ def validate_submission(submission: Mapping[str, Any]) -> None:
             raise SubmissionError(
                 "submission.settings.max_output_tokens exceeds the configured context window"
             )
-    cases = _validate_cases(submission["cases"], "submission.cases")
-    _validate_metrics(submission["metrics"], "submission.metrics", cases=cases)
+    if not legacy:
+        validity = submission["validity"]
+        if not isinstance(validity, str) or validity not in _PUBLIC_VALIDITIES:
+            raise SubmissionError("submission.validity is unsupported")
+        _validate_measurement_period(
+            submission["measurement_period"],
+            "submission.measurement_period",
+        )
+        conditions = _validate_measurement_conditions(
+            submission["measurement_conditions"],
+            "submission.measurement_conditions",
+        )
+        if validity != _derived_public_validity(conditions["pre"], conditions["post"]):
+            raise SubmissionError("submission.validity is inconsistent with its measurements")
+        if "determinism" in submission:
+            _validate_determinism(submission["determinism"], "submission.determinism")
+    cases = _validate_cases(
+        submission["cases"],
+        "submission.cases",
+        suite=suite,
+        legacy=legacy,
+    )
+    _validate_metrics(
+        submission["metrics"],
+        "submission.metrics",
+        cases=cases,
+        suite_length=len(suite),
+        legacy=legacy,
+    )
 
     payload = {key: value for key, value in submission.items() if key != "submission_id"}
     if submission_id != _submission_digest(payload):
@@ -757,6 +1108,18 @@ def validate_submission(submission: Mapping[str, Any]) -> None:
         raise SubmissionError("submission contains prohibited local data") from error
     if len(_canonical_bytes(submission)) > _MAX_SUBMISSION_BYTES:
         raise SubmissionError("submission exceeds the public size limit")
+
+
+def validate_submission(submission: Mapping[str, Any]) -> None:
+    """Validate one current-schema public candidate and its content identifier."""
+
+    _validate_submission(submission, allow_legacy=False)
+
+
+def validate_accepted_submission(submission: Mapping[str, Any]) -> None:
+    """Validate a retained accepted record under the explicit 1.0/1.1 policy."""
+
+    _validate_submission(submission, allow_legacy=True)
 
 
 def _reject_json_constant(value: str) -> None:
@@ -772,7 +1135,11 @@ def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def load_json_object(path: str | Path, *, maximum_bytes: int = _MAX_SUBMISSION_BYTES) -> dict[str, Any]:
+def load_json_object(
+    path: str | Path,
+    *,
+    maximum_bytes: int = _MAX_SUBMISSION_BYTES,
+) -> dict[str, Any]:
     """Load one bounded, regular, duplicate-key-free UTF-8 JSON object."""
 
     source = Path(path)
@@ -799,13 +1166,20 @@ def load_json_object(path: str | Path, *, maximum_bytes: int = _MAX_SUBMISSION_B
 def prepare_submission_file(
     path: str | Path,
     descriptor_path: str | Path,
+    measurement_evidence_path: str | Path,
     model_ids: tuple[str, ...] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     """Load a private run report and return one public record per selected model."""
 
     report = load_json_object(path, maximum_bytes=1024 * 1024)
     descriptor = load_public_environment_file(descriptor_path)
-    return prepare_submissions(report, descriptor, model_ids)
+    evidence = load_measurement_evidence_file(measurement_evidence_path)
+    return prepare_submissions(
+        report,
+        descriptor,
+        model_ids,
+        measurement_evidence=evidence,
+    )
 
 
 def load_public_environment_file(path: str | Path) -> dict[str, Any]:
@@ -820,6 +1194,20 @@ def load_public_environment_file(path: str | Path) -> dict[str, Any]:
     descriptor = load_json_object(approved_path)
     validate_public_environment(descriptor)
     return descriptor
+
+
+def load_measurement_evidence_file(path: str | Path) -> dict[str, Any]:
+    """Load ignored, owner-only, categorical per-run measurement evidence."""
+
+    try:
+        approved_path = validate_env_file(path)
+    except SafetyError as error:
+        raise SubmissionError(
+            "measurement evidence must be regular, owner-only, and Git-ignored"
+        ) from error
+    evidence = load_json_object(approved_path)
+    validate_measurement_evidence(evidence)
+    return evidence
 
 
 def load_saved_submission(path: str | Path) -> dict[str, Any]:
@@ -956,8 +1344,67 @@ def _score_percent(count: int, total: int) -> float:
     return round((count / total) * 100.0, 1) if total else 0.0
 
 
-def build_leaderboard(submissions_dir: str | Path) -> dict[str, Any]:
-    """Validate accepted records and build deterministic quality-only rankings."""
+def _validate_facet_selector(facet: FacetSelector) -> None:
+    if (
+        not isinstance(facet, FacetSelector)
+        or not facet.facet_id
+        or not facet.modalities
+        or not facet.modalities.issubset(MODALITIES)
+        or (
+            facet.capabilities is not None
+            and not facet.capabilities.issubset(CAPABILITIES)
+        )
+    ):
+        raise SubmissionError("leaderboard facet selector is unsupported")
+    dimension_names = set(CONFIG_KEY_DIMENSIONS["fields"])
+    if any(name not in dimension_names for name, _value in facet.dimension_filters):
+        raise SubmissionError("leaderboard facet dimension filter is unsupported")
+
+
+def _model_identity(model: Mapping[str, Any]) -> dict[str, Any]:
+    identity_field = "revision" if "revision" in model else "digest"
+    return {
+        "display_name": model["display_name"],
+        "source": model["source"],
+        identity_field: model[identity_field],
+        "declared_context_tokens": model["declared_context_tokens"],
+    }
+
+
+def _facet_dimensions(submission: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "hardware": submission["hardware"],
+        "model_identity": _model_identity(submission["model"]),
+        "precision": submission["model"]["precision"],
+        "runtime": submission["runtime"],
+        "runtime_configuration": submission.get("runtime_configuration"),
+        "settings": submission["settings"],
+    }
+
+
+def _facet_cases(
+    submission: Mapping[str, Any],
+    suite: tuple[SuiteCase, ...],
+    facet: FacetSelector,
+) -> list[Mapping[str, Any]]:
+    selected: list[Mapping[str, Any]] = []
+    for case, definition in zip(submission["cases"], suite, strict=True):
+        if definition.modality not in facet.modalities:
+            continue
+        if facet.capabilities is not None and definition.capability not in facet.capabilities:
+            continue
+        selected.append(case)
+    return selected
+
+
+def build_leaderboard(
+    submissions_dir: str | Path,
+    *,
+    facet: FacetSelector = DEFAULT_FACET,
+) -> dict[str, Any]:
+    """Validate accepted records and build one deterministic faceted ranking."""
+
+    _validate_facet_selector(facet)
 
     directory = Path(submissions_dir)
     if not directory.is_dir() or directory.is_symlink():
@@ -971,30 +1418,69 @@ def build_leaderboard(submissions_dir: str | Path) -> dict[str, Any]:
         files.append(path)
     seen_ids: set[str] = set()
     rows: list[dict[str, Any]] = []
+    contains_current_submission = False
     for path in files:
         if path.is_symlink() or not path.is_file():
             raise SubmissionError("submission entries must be regular files")
         submission = load_json_object(path)
-        validate_submission(submission)
+        validate_accepted_submission(submission)
         submission_id = submission["submission_id"]
         if path.name != f"{submission_id}.json":
             raise SubmissionError("submission filename must match submission_id")
         if submission_id in seen_ids:
             raise SubmissionError("duplicate submission_id")
         seen_ids.add(submission_id)
+        is_legacy = submission["schema_version"] == LEGACY_SUBMISSION_SCHEMA_VERSION
+        contains_current_submission = contains_current_submission or not is_legacy
         normalized_submission = _normalize_submission_payload(
             {key: value for key, value in submission.items() if key != "submission_id"}
         )
-        metrics = normalized_submission["metrics"]
-        case_count = metrics["case_count"]
+        dimensions = _facet_dimensions(normalized_submission)
+        if any(dimensions[name] != expected for name, expected in facet.dimension_filters):
+            continue
+        try:
+            suite = resolve_public_suite(
+                submission["profile"],
+                submission["suite_version"],
+            )
+        except ValueError as error:
+            raise SubmissionError("accepted submission suite is unsupported") from error
+        selected_cases = _facet_cases(normalized_submission, suite, facet)
+        scored_cases = [
+            case
+            for case in selected_cases
+            if case["outcome"] not in {"not_scored", "not_applicable"}
+        ]
+        if not scored_cases:
+            continue
+        source_metrics = normalized_submission["metrics"]
+        case_count = len(selected_cases)
+        scored_case_count = len(scored_cases)
+        semantic_pass_count = sum(
+            case["outcome"] in {"pass", "semantic_only"} for case in scored_cases
+        )
+        exact_format_pass_count = sum(
+            case["outcome"] in {"pass", "format_only"} for case in scored_cases
+        )
+        metrics = {
+            **copy.deepcopy(source_metrics),
+            "case_count": case_count,
+            "semantic_pass_count": semantic_pass_count,
+            "exact_format_pass_count": exact_format_pass_count,
+            "scored_case_count": scored_case_count,
+            "usage_coverage_cases": min(
+                source_metrics["usage_coverage_cases"], scored_case_count
+            ),
+        }
         leaderboard_metrics = copy.deepcopy(metrics)
         leaderboard_metrics["semantic_score_percent"] = _score_percent(
-            metrics["semantic_pass_count"], case_count
+            semantic_pass_count, scored_case_count
         )
         leaderboard_metrics["exact_format_score_percent"] = _score_percent(
-            metrics["exact_format_pass_count"], case_count
+            exact_format_pass_count, scored_case_count
         )
         row = {
+            "_submission_schema_version": submission["schema_version"],
             "submission_id": submission_id,
             "suite_version": submission["suite_version"],
             "profile": submission["profile"],
@@ -1008,6 +1494,18 @@ def build_leaderboard(submissions_dir: str | Path) -> dict[str, Any]:
             row["runtime_configuration"] = copy.deepcopy(
                 normalized_submission["runtime_configuration"]
             )
+        if not is_legacy:
+            row.update(
+                {
+                    "validity": normalized_submission["validity"],
+                    "measurement_period": normalized_submission["measurement_period"],
+                    "measurement_conditions": copy.deepcopy(
+                        normalized_submission["measurement_conditions"]
+                    ),
+                }
+            )
+            if "determinism" in normalized_submission:
+                row["determinism"] = copy.deepcopy(normalized_submission["determinism"])
         rows.append(row)
 
     rows.sort(
@@ -1030,9 +1528,25 @@ def build_leaderboard(submissions_dir: str | Path) -> dict[str, Any]:
         if quality != previous_quality:
             current_rank += 1
             previous_quality = quality
-        entries.append({"rank": current_rank, **row})
+        submission_schema_version = row.pop("_submission_schema_version")
+        entry = {"rank": current_rank, **row}
+        if contains_current_submission:
+            entry["submission_schema_version"] = submission_schema_version
+            if submission_schema_version == LEGACY_SUBMISSION_SCHEMA_VERSION:
+                entry.update(
+                    {
+                        "validity": "legacy_unreported",
+                        "measurement_period": None,
+                        "measurement_conditions": None,
+                    }
+                )
+        entries.append(entry)
     leaderboard = {
-        "schema_version": LEADERBOARD_SCHEMA_VERSION,
+        "schema_version": (
+            LEADERBOARD_SCHEMA_VERSION
+            if contains_current_submission
+            else LEGACY_LEADERBOARD_SCHEMA_VERSION
+        ),
         "entry_count": len(entries),
         "entries": entries,
     }
@@ -1105,7 +1619,10 @@ def build_leaderboard_bundle(
     entry_count = leaderboard["entry_count"]
     entries = leaderboard["entries"]
     if (
-        schema_version != LEADERBOARD_SCHEMA_VERSION
+        schema_version not in {
+            LEGACY_LEADERBOARD_SCHEMA_VERSION,
+            LEADERBOARD_SCHEMA_VERSION,
+        }
         or isinstance(entry_count, bool)
         or not isinstance(entry_count, int)
         or entry_count < 0

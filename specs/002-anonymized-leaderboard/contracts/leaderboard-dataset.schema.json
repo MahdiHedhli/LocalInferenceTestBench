@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "leaderboard-dataset.schema.json",
   "title": "Local Inference Test Bench leaderboard dataset",
-  "description": "The deterministic static dataset built from accepted leaderboard submissions, preserving optional explicit runtime configuration.",
+  "description": "The deterministic logical dataset built from accepted submissions, including an explicit retained-1.0 migration branch.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,21 +12,50 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0"
+      "enum": [
+        "1.0",
+        "1.1"
+      ]
     },
     "entry_count": {
       "type": "integer",
       "minimum": 0
     },
     "entries": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/entry"
-      }
+      "type": "array"
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": "1.0"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/$defs/legacyMonolithEntry"
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/$defs/versionedEntry"
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
-    "entry": {
+    "legacyMonolithEntry": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -65,6 +94,96 @@
           "$ref": "hardware-descriptor.schema.json#/$defs/runtimeConfiguration"
         },
         "model": {
+          "$ref": "leaderboard-submission-v1.0.schema.json#/$defs/model"
+        },
+        "settings": {
+          "$ref": "leaderboard-submission-v1.0.schema.json#/$defs/settings"
+        },
+        "metrics": {
+          "$ref": "#/$defs/legacyLeaderboardMetrics"
+        }
+      }
+    },
+    "versionedEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rank",
+        "submission_schema_version",
+        "submission_id",
+        "suite_version",
+        "profile",
+        "validity",
+        "measurement_period",
+        "measurement_conditions",
+        "hardware",
+        "runtime",
+        "model",
+        "settings",
+        "metrics"
+      ],
+      "properties": {
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "submission_schema_version": {
+          "enum": [
+            "1.0",
+            "1.1"
+          ]
+        },
+        "submission_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "suite_version": {
+          "$ref": "leaderboard-submission.schema.json#/$defs/suiteVersion"
+        },
+        "profile": {
+          "$ref": "leaderboard-submission.schema.json#/$defs/profile"
+        },
+        "validity": {
+          "enum": [
+            "clean",
+            "nonquiescent",
+            "degraded_midrun",
+            "legacy_unreported"
+          ]
+        },
+        "measurement_period": {
+          "oneOf": [
+            {
+              "$ref": "leaderboard-submission.schema.json#/$defs/measurementPeriod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "measurement_conditions": {
+          "oneOf": [
+            {
+              "$ref": "leaderboard-submission.schema.json#/$defs/measurementConditions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "determinism": {
+          "$ref": "leaderboard-submission.schema.json#/$defs/determinism"
+        },
+        "hardware": {
+          "$ref": "hardware-descriptor.schema.json#/$defs/hardware"
+        },
+        "runtime": {
+          "$ref": "hardware-descriptor.schema.json#/$defs/runtime"
+        },
+        "runtime_configuration": {
+          "$ref": "hardware-descriptor.schema.json#/$defs/runtimeConfiguration"
+        },
+        "model": {
           "$ref": "leaderboard-submission.schema.json#/$defs/model"
         },
         "settings": {
@@ -73,9 +192,54 @@
         "metrics": {
           "$ref": "#/$defs/leaderboardMetrics"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "submission_schema_version": {
+              "const": "1.0"
+            },
+            "suite_version": {
+              "const": "1.0"
+            },
+            "profile": {
+              "const": "standard"
+            },
+            "validity": {
+              "const": "legacy_unreported"
+            },
+            "measurement_period": {
+              "type": "null"
+            },
+            "measurement_conditions": {
+              "type": "null"
+            }
+          },
+          "not": {
+            "required": [
+              "determinism"
+            ]
+          }
+        },
+        {
+          "properties": {
+            "submission_schema_version": {
+              "const": "1.1"
+            },
+            "validity": {
+              "$ref": "leaderboard-submission.schema.json#/$defs/publicValidity"
+            },
+            "measurement_period": {
+              "$ref": "leaderboard-submission.schema.json#/$defs/measurementPeriod"
+            },
+            "measurement_conditions": {
+              "$ref": "leaderboard-submission.schema.json#/$defs/measurementConditions"
+            }
+          }
+        }
+      ]
     },
-    "leaderboardMetrics": {
+    "legacyLeaderboardMetrics": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -157,7 +321,76 @@
           }
         }
       ]
+    },
+    "leaderboardMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_count",
+        "semantic_pass_count",
+        "exact_format_pass_count",
+        "scored_case_count",
+        "usage_coverage_cases",
+        "latency_ms_mean",
+        "completion_tokens_per_second",
+        "semantic_score_percent",
+        "exact_format_score_percent"
+      ],
+      "properties": {
+        "case_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "semantic_pass_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "exact_format_pass_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "scored_case_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "usage_coverage_cases": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "latency_ms_mean": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000000
+        },
+        "completion_tokens_per_second": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "semantic_score_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "exact_format_score_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
     }
   },
-  "$comment": "This is the logical full-dataset contract used while deriving ranks. The Python builder is authoritative for entry_count, derived percentages, one-decimal numeric precision, dense ranking, deterministic order, and bounded transport partitioning. Decimal precision is kept out of the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
+  "$comment": "The logical 1.0 branch preserves the original unannotated monolith byte contract. A logical 1.1 dataset requires every row to declare its source submission schema: retained 1.0 rows use legacy_unreported with null measurement evidence, while 1.1 rows carry measured categorical validity. The Python builder is authoritative for entry_count, registry resolution, arithmetic, one-decimal precision, deterministic ordering, dense ranks, and bounded transport partitioning."
 }

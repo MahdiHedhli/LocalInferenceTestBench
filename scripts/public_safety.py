@@ -117,7 +117,7 @@ RISKY_BASENAMES = frozenset(
     }
 )
 
-_IPV4_CANDIDATE = re.compile(r"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])")
+_IPV4_CANDIDATE = re.compile(r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])")
 _IPV6_CANDIDATE = re.compile(
     r"(?i)(?<![0-9a-f:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}"
     r"(?:%[a-z0-9_.-]+)?(?![0-9a-f:])"
@@ -143,7 +143,7 @@ _WINDOWS_USER_PATH = re.compile(
 _PRIVATE_HOST = re.compile(
     r"(?i)(?<![a-z0-9_-])"
     r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
-    r"(?:lan|local|internal|home|corp|private|localdomain|home\.arpa)\.?"
+    r"(?:lan|local|internal|home|corp|private|localdomain|home\.arpa)\.*"
     r"(?![a-z0-9_.-])"
 )
 _PRIVATE_KEY_HEADER = re.compile(
@@ -371,7 +371,7 @@ def _is_rejected_ipv6(address: ipaddress.IPv6Address) -> bool:
 def _literal_present(line: str, value: str) -> bool:
     escaped = re.escape(value)
     if value[0].isalnum() and value[-1].isalnum():
-        pattern = rf"(?<![a-zA-Z0-9_.-]){escaped}(?![a-zA-Z0-9_.-])"
+        pattern = rf"(?<![a-zA-Z0-9]){escaped}(?![a-zA-Z0-9])"
     else:
         pattern = escaped
     return re.search(pattern, line, flags=re.IGNORECASE) is not None

@@ -64,9 +64,11 @@
               All entries are self-reported and unverified. Repository checks validate their schema
               and content hash; the hash establishes content integrity, not provenance or proof that
               a benchmark run occurred. Quality determines rank; speed is shown only as a
-              hardware-dependent observation. On paginated leaderboards, search, hardware filters,
-              and sorting apply only to results loaded so far; use “Load more results” to expand that
-              set.
+              hardware-dependent observation. The default view shows only results that report clean
+              measurement conditions; legacy and non-clean results remain available through the
+              validity filter. On paginated leaderboards, search, hardware filters, and sorting apply
+              only to results loaded so far; validity and month filters share that same loaded-result
+              scope. Use “Load more results” to expand that set.
             </p>
           </div>
           <p class="updated" id="leaderboard-updated" aria-live="polite">Loading results...</p>
@@ -84,6 +86,20 @@
             </select>
           </div>
           <div class="field">
+            <label for="validity-filter">Validity</label>
+            <select id="validity-filter" name="validity">
+              <option value="clean" selected>Clean only</option>
+              <option value="all">All reported states</option>
+              <option value="nonquiescent">Nonquiescent</option>
+              <option value="degraded_midrun">Degraded mid-run</option>
+              <option value="legacy_unreported">Legacy: not reported</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="period-filter">Measurement month</label>
+            <input id="period-filter" name="period" type="month">
+          </div>
+          <div class="field">
             <label for="sort-results">Sort loaded results by</label>
             <select id="sort-results" name="sort">
               <option value="semantic">Semantic score</option>
@@ -91,6 +107,7 @@
               <option value="throughput">Throughput</option>
               <option value="latency">Lowest latency</option>
               <option value="context">Declared context</option>
+              <option value="recency">Most recent month</option>
             </select>
           </div>
         </form>
@@ -115,6 +132,8 @@
                 <th scope="col">Rank</th>
                 <th scope="col">Model</th>
                 <th scope="col">Profile</th>
+                <th scope="col">Validity</th>
+                <th scope="col">As of</th>
                 <th scope="col">Hardware</th>
                 <th scope="col">
                   <span class="metric-label">Semantic</span>
@@ -161,10 +180,11 @@
           <p class="eyebrow">Add a result</p>
           <h2 id="submit-title">Review the evidence before you submit it.</h2>
           <p>
-            A valid standard run can now save identifier-minimized JSON or open the reviewed GitHub
-            pull request for you. Choose the public option at the end of the run, inspect the complete
-            record, and confirm it. You can still select a saved file here for a browser-only check.
-            This page never accepts a raw report or sends the file anywhere.
+            A valid standard run with categorical measurement evidence can save
+            identifier-minimized JSON or open the reviewed GitHub pull request for you. Choose the
+            public option at the end of the run, inspect the complete record, and confirm it. You can
+            still select a saved file here for a browser-only check. This page never accepts a raw
+            report or sends the file anywhere.
           </p>
           <p class="submission-disclosure">
             The JSON omits direct machine and contributor identifiers, but it does include exact

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "leaderboard-index.schema.json",
   "title": "Local Inference Test Bench leaderboard transport index",
-  "description": "A constant-shape index for deterministic, same-origin leaderboard shards.",
+  "description": "A constant-shape index for deterministic, same-origin leaderboard shards across the logical 1.0 to 1.1 migration.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -16,7 +16,10 @@
       "const": "1.0"
     },
     "schema_version": {
-      "const": "1.0"
+      "enum": [
+        "1.0",
+        "1.1"
+      ]
     },
     "entry_count": {
       "type": "integer",
@@ -51,5 +54,5 @@
       }
     }
   ],
-  "$comment": "The schema encodes the zero/zero and positive/positive branches. Standard JSON Schema cannot compare sibling numeric values, so the Python builder and browser additionally enforce shard_count <= entry_count. Shard paths are never supplied by public data."
+  "$comment": "index_version remains 1.0 because sharding transport is unchanged. schema_version identifies the logical projected-entry contract used by every referenced shard. The schema encodes the zero/zero and positive/positive branches. Standard JSON Schema cannot compare sibling numeric values, so the Python builder and browser additionally enforce shard_count <= entry_count. Shard paths are never supplied by public data."
 }

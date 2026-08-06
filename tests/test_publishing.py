@@ -21,7 +21,7 @@ from local_inference_test_bench.publishing import (  # noqa: E402
 
 
 SUBMISSION_ID = "a" * 64
-SUBMISSION = {"submission_id": SUBMISSION_ID}
+SUBMISSION = {"submission_id": SUBMISSION_ID, "suite_version": "1.0"}
 IDENTITY = PublicationIdentity(
     login="contributor",
     upstream_owner="MahdiHedhli",
@@ -38,6 +38,12 @@ PREPARED = publishing._PreparedChange(
 
 
 class PublishingTests(unittest.TestCase):
+    def test_pull_request_body_uses_the_validated_suite_version(self) -> None:
+        body = publishing._pull_request_body("a" * 64, "9.0")
+
+        self.assertIn("Suite version: `9.0`", body)
+        self.assertNotIn("Suite version: `1.0`", body)
+
     def test_subprocess_boundary_uses_argv_and_discards_stderr(self) -> None:
         completed = subprocess.CompletedProcess(["gh", "api", "user"], 0, "{}", "")
         github_auth_key = "_".join(("GH", "TOKEN"))

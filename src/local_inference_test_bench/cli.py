@@ -18,9 +18,11 @@ from .publishing import (
 from .reporting import ReportError, write_report
 from .runner import BenchmarkRunner, RunnerError
 from .safety import SafetyError, load_credential
+from .suites import resolve_public_suite
 from .submissions import (
     SubmissionError,
     ensure_submissions,
+    load_measurement_evidence_file,
     load_saved_submission,
     load_public_environment_file,
     prepare_submissions,
@@ -91,6 +93,15 @@ def build_parser() -> argparse.ArgumentParser:
                 ),
             )
             command.add_argument(
+                "--measurement-evidence",
+                type=Path,
+                default=Path(".local") / "measurement-evidence.json",
+                help=(
+                    "owner-only ignored categorical quiescence evidence "
+                    "(default: .local/measurement-evidence.json)"
+                ),
+            )
+            command.add_argument(
                 "--submission-model",
                 help="source report model id to save or publish from a multi-model run",
             )
@@ -118,6 +129,15 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         type=Path,
         help="ignored public hardware/runtime/configuration descriptor JSON",
+    )
+    submission.add_argument(
+        "--measurement-evidence",
+        type=Path,
+        default=Path(".local") / "measurement-evidence.json",
+        help=(
+            "owner-only ignored categorical quiescence evidence "
+            "(default: .local/measurement-evidence.json)"
+        ),
     )
     submission.add_argument(
         "--model",
@@ -151,6 +171,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="confirm public GitHub account, branch, and pull-request disclosure",
     )
     return parser
+
+
+def _eligible_public_report(report: object) -> bool:
+    if not isinstance(report, dict) or report.get("validity") != "valid":
+        return False
+    try:
+        resolve_public_suite(
+            str(report.get("profile", "")),
+            str(report.get("suite_version", "")),
+        )
+    except ValueError:
+        return False
+    return True
 
 
 def _runner_from_args(args: argparse.Namespace) -> BenchmarkRunner:
@@ -234,8 +267,14 @@ def _save_post_run_submissions(
 ) -> int:
     hardware_path = _prompt_hardware_path(args.hardware) if interactive else args.hardware
     descriptor = load_public_environment_file(hardware_path)
+    measurement_evidence = load_measurement_evidence_file(args.measurement_evidence)
     selected_models = (args.submission_model,) if args.submission_model else None
-    submissions = prepare_submissions(report, descriptor, selected_models)
+    submissions = prepare_submissions(
+        report,
+        descriptor,
+        selected_models,
+        measurement_evidence=measurement_evidence,
+    )
     paths = ensure_submissions(submissions, args.submission_dir)
     noun = "file" if len(paths) == 1 else "files"
     print(f"identifier-minimized JSON saved: {len(paths)} {noun}")
@@ -305,6 +344,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             submissions = prepare_submission_file(
                 args.report,
                 args.hardware,
+                args.measurement_evidence,
                 tuple(args.models) or None,
             )
             paths = write_submissions(submissions, args.output_dir)
@@ -334,7 +374,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_status = 0 if report["validity"] != "invalid" else 1
         action = args.submission
         interactive = _interactive_terminal()
-        eligible = report["validity"] == "valid" and report["profile"] == "standard"
+        eligible = _eligible_public_report(report)
         if action == "ask":
             action = _prompt_submission_action() if eligible and interactive else "none"
         if action == "none":
@@ -343,7 +383,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if run_status != 0:
                 return run_status
             raise SubmissionError(
-                "only a fully valid standard run can produce a leaderboard submission"
+                "only a fully valid registered public-suite run can produce a leaderboard submission"
             )
         return _save_post_run_submissions(
             report,

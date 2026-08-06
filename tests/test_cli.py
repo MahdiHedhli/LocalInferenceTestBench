@@ -41,12 +41,30 @@ class StubRunner:
 
 
 class PostRunCliTests(unittest.TestCase):
+    def test_public_run_eligibility_uses_suite_registry_membership(self) -> None:
+        self.assertTrue(
+            cli._eligible_public_report(
+                {"validity": "valid", "profile": "standard", "suite_version": "1.0"}
+            )
+        )
+        for report in (
+            {"validity": "valid", "profile": "smoke", "suite_version": "1.0"},
+            {"validity": "valid", "profile": "standard", "suite_version": "9.9"},
+            {"validity": "limited", "profile": "standard", "suite_version": "1.0"},
+        ):
+            with self.subTest(report=report):
+                self.assertFalse(cli._eligible_public_report(report))
+
     def test_run_parser_defaults_to_safe_interactive_ask(self) -> None:
         args = cli.build_parser().parse_args(run_arguments())
 
         self.assertEqual(args.submission, "ask")
         self.assertEqual(args.timeout_seconds, 300.0)
         self.assertEqual(args.hardware, Path(".local/hardware.json"))
+        self.assertEqual(
+            args.measurement_evidence,
+            Path(".local/measurement-evidence.json"),
+        )
         self.assertEqual(args.submission_dir, Path(".local/leaderboard-submissions"))
         self.assertFalse(args.confirm_public)
 
@@ -59,7 +77,7 @@ class PostRunCliTests(unittest.TestCase):
         self.assertFalse(args.confirm_public)
 
     def test_default_ask_is_silent_for_noninteractive_runs(self) -> None:
-        report = {"validity": "valid", "profile": "standard"}
+        report = {"validity": "valid", "profile": "standard", "suite_version": "1.0"}
         with (
             mock.patch.object(cli, "_runner_from_args", return_value=StubRunner(report)),
             mock.patch.object(cli, "write_report", return_value=Path("private.json")),
@@ -75,7 +93,7 @@ class PostRunCliTests(unittest.TestCase):
         post_run.assert_not_called()
 
     def test_interactive_valid_standard_run_offers_post_action(self) -> None:
-        report = {"validity": "valid", "profile": "standard"}
+        report = {"validity": "valid", "profile": "standard", "suite_version": "1.0"}
         with (
             mock.patch.object(cli, "_runner_from_args", return_value=StubRunner(report)),
             mock.patch.object(cli, "write_report", return_value=Path("private.json")),
@@ -91,7 +109,7 @@ class PostRunCliTests(unittest.TestCase):
         self.assertTrue(post_run.call_args.kwargs["interactive"])
 
     def test_invalid_run_is_saved_but_never_exported(self) -> None:
-        report = {"validity": "invalid", "profile": "standard"}
+        report = {"validity": "invalid", "profile": "standard", "suite_version": "1.0"}
         with (
             mock.patch.object(cli, "_runner_from_args", return_value=StubRunner(report)),
             mock.patch.object(cli, "write_report", return_value=Path("private.json")) as writer,
@@ -106,7 +124,7 @@ class PostRunCliTests(unittest.TestCase):
         post_run.assert_not_called()
 
     def test_limited_explicit_export_is_a_submission_error_after_report_save(self) -> None:
-        report = {"validity": "limited", "profile": "standard"}
+        report = {"validity": "limited", "profile": "standard", "suite_version": "1.0"}
         errors = io.StringIO()
         with (
             mock.patch.object(cli, "_runner_from_args", return_value=StubRunner(report)),
@@ -119,7 +137,7 @@ class PostRunCliTests(unittest.TestCase):
 
         self.assertEqual(result, 2)
         writer.assert_called_once()
-        self.assertIn("only a fully valid standard run", errors.getvalue())
+        self.assertIn("only a fully valid registered public-suite run", errors.getvalue())
 
     def test_prompt_defaults_to_private_on_enter_or_eof(self) -> None:
         with mock.patch("builtins.input", return_value=""):
@@ -130,6 +148,7 @@ class PostRunCliTests(unittest.TestCase):
     def _post_args(self, **overrides: object) -> SimpleNamespace:
         values = {
             "hardware": Path(".local/hardware.json"),
+            "measurement_evidence": Path(".local/measurement-evidence.json"),
             "submission_model": None,
             "submission_dir": Path(".local/leaderboard-submissions"),
             "confirm_public": False,
@@ -141,6 +160,7 @@ class PostRunCliTests(unittest.TestCase):
         candidate = {"submission_id": "a" * 64}
         with (
             mock.patch.object(cli, "load_public_environment_file", return_value={}),
+            mock.patch.object(cli, "load_measurement_evidence_file", return_value={}),
             mock.patch.object(cli, "prepare_submissions", return_value=(candidate,)),
             mock.patch.object(
                 cli, "ensure_submissions", return_value=(Path("candidate.json"),)
@@ -167,6 +187,7 @@ class PostRunCliTests(unittest.TestCase):
                 cli, "_prompt_hardware_path", return_value=Path("hardware.json")
             ),
             mock.patch.object(cli, "load_public_environment_file", return_value={}),
+            mock.patch.object(cli, "load_measurement_evidence_file", return_value={}),
             mock.patch.object(cli, "prepare_submissions", return_value=(candidate,)),
             mock.patch.object(
                 cli, "ensure_submissions", return_value=(Path("candidate.json"),)
@@ -197,6 +218,7 @@ class PostRunCliTests(unittest.TestCase):
         opened = PublicationResult("https://github.com/owner/repo/pull/1", "opened", "branch")
         with (
             mock.patch.object(cli, "load_public_environment_file", return_value={}),
+            mock.patch.object(cli, "load_measurement_evidence_file", return_value={}),
             mock.patch.object(cli, "prepare_submissions", return_value=(candidate,)),
             mock.patch.object(
                 cli, "ensure_submissions", return_value=(Path("candidate.json"),)
@@ -225,6 +247,7 @@ class PostRunCliTests(unittest.TestCase):
                 cli, "_prompt_hardware_path", return_value=Path("hardware.json")
             ),
             mock.patch.object(cli, "load_public_environment_file", return_value={}),
+            mock.patch.object(cli, "load_measurement_evidence_file", return_value={}),
             mock.patch.object(cli, "prepare_submissions", return_value=(candidate,)),
             mock.patch.object(
                 cli, "ensure_submissions", return_value=(Path("candidate.json"),)
@@ -254,6 +277,7 @@ class PostRunCliTests(unittest.TestCase):
         )
         with (
             mock.patch.object(cli, "load_public_environment_file", return_value={}),
+            mock.patch.object(cli, "load_measurement_evidence_file", return_value={}),
             mock.patch.object(cli, "prepare_submissions", return_value=candidates),
             mock.patch.object(
                 cli,

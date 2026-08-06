@@ -19,13 +19,13 @@ sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 from local_inference_test_bench.submissions import (  # noqa: E402
     build_leaderboard_bundle,
     build_leaderboard,
-    prepare_submission,
     render_leaderboard_bytes,
     render_leaderboard_shard_bytes,
     render_submission_bytes,
 )
 from local_inference_test_bench import submissions as submissions_module  # noqa: E402
 from test_submissions import (  # noqa: E402
+    prepare_submission,
     public_environment,
     runtime_configuration,
     valid_report,
@@ -107,7 +107,7 @@ class LeaderboardShardTransportTests(unittest.TestCase):
             {"index_version", "schema_version", "entry_count", "shard_count"},
         )
         self.assertEqual(payload["index_version"], "1.0")
-        self.assertEqual(payload["schema_version"], "1.0")
+        self.assertEqual(payload["schema_version"], "1.1")
         self.assertEqual(payload["entry_count"], self.submission_count)
         self.assertIsInstance(payload["shard_count"], int)
         self.assertGreater(payload["shard_count"], 1)
@@ -237,7 +237,7 @@ class LeaderboardShardTransportTests(unittest.TestCase):
                 },
             )
             self.assertEqual(payload["index_version"], "1.0")
-            self.assertEqual(payload["schema_version"], "1.0")
+            self.assertEqual(payload["schema_version"], "1.1")
             self.assertEqual(payload["shard_id"], shard_id)
             self.assertEqual(payload["entry_count"], len(payload["entries"]))
             self.assertGreater(payload["entry_count"], 0)

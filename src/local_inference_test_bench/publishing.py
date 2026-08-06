@@ -840,14 +840,14 @@ def _verified_existing_pull_request(
     return url
 
 
-def _pull_request_body(submission_id: str) -> str:
+def _pull_request_body(submission_id: str, suite_version: str) -> str:
     return "\n".join(
         (
             "## Benchmark submission",
             "",
             f"Submission ID: `{submission_id}`",
             "",
-            "Suite version: `1.0`",
+            f"Suite version: `{suite_version}`",
             "",
             "## Automated contributor checks",
             "",
@@ -960,7 +960,10 @@ def publish_submission(
             method="POST",
             payload={
                 "title": f"benchmarks: submit {submission_id[:12]}",
-                "body": _pull_request_body(submission_id),
+                "body": _pull_request_body(
+                    submission_id,
+                    str(submission["suite_version"]),
+                ),
                 "head": f"{head_owner}:{branch}",
                 "base": identity.base_branch,
                 "maintainer_can_modify": True,
