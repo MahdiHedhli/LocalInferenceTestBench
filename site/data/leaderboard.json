@@ -181,8 +181,69 @@
       },
       "submission_id": "57d8926c992f0000592f49c7643a0942636217262eb9259fbbe1c9e834a06ff2",
       "suite_version": "1.0"
+    },
+    {
+      "hardware": {
+        "accelerators": [
+          {
+            "count": 1,
+            "kind": "integrated_gpu",
+            "memory_gb": null,
+            "model": "Apple M1 Ultra 64-core GPU"
+          }
+        ],
+        "cpu": {
+          "logical_cores": 20,
+          "model": "Apple M1 Ultra"
+        },
+        "execution_mode": "unknown",
+        "memory": {
+          "architecture": "shared",
+          "system_gb": 128.0
+        }
+      },
+      "metrics": {
+        "case_count": 5,
+        "completion_tokens_per_second": 33.6,
+        "exact_format_pass_count": 3,
+        "exact_format_score_percent": 60.0,
+        "latency_ms_mean": 1356.0,
+        "scored_case_count": 5,
+        "semantic_pass_count": 4,
+        "semantic_score_percent": 80.0,
+        "usage_coverage_cases": 5
+      },
+      "model": {
+        "declared_context_tokens": 262144,
+        "digest": "sha256-manifest-v1:3d544be39bd552e743b356c62904e1be1dbaf0f99ef2269e9b31825b7bcfd75d",
+        "display_name": "Laguna S 2.1",
+        "precision": "GGUF Q4_K_M",
+        "source": "lmstudio-community/Laguna-S-2.1-GGUF"
+      },
+      "profile": "standard",
+      "rank": 3,
+      "runtime": {
+        "backend": "llama.cpp 2.27.1 / Apple Metal",
+        "name": "LM Studio",
+        "version": "0.4.20+1"
+      },
+      "runtime_configuration": {
+        "concurrent_requests": 1,
+        "context_window_tokens": 262144,
+        "offload_mode": "maximum",
+        "speculative_decoding": "disabled"
+      },
+      "settings": {
+        "max_output_tokens": 4096,
+        "reasoning_effort": "none",
+        "seed": 0,
+        "temperature": 0.0,
+        "top_p": 1.0
+      },
+      "submission_id": "7fae46e3d4df5f0c66ab6e0a1c499465e20bd5b83c11c8fcb664d0034a25665a",
+      "suite_version": "1.0"
     }
   ],
-  "entry_count": 3,
+  "entry_count": 4,
   "schema_version": "1.0"
 }
