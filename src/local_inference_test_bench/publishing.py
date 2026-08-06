@@ -857,7 +857,7 @@ def _pull_request_body(submission_id: str) -> str:
             "- [x] Deterministic leaderboard rebuilt and checked.",
             "- [x] Unit, privacy, and redacted secret scans passed locally.",
             "",
-            "This public pull request was opened by `litb` and still requires maintainer review.",
+            "This public pull request is eligible for base-controlled exact-head review and protected auto-merge; findings or stale data leave it open.",
         )
     )
 
@@ -867,7 +867,10 @@ def publish_submission(
     identity: PublicationIdentity,
     denylist_bytes: bytes,
 ) -> PublicationResult:
-    """Create one public branch and reviewed PR containing only minimized data."""
+    """Publish minimized data, reusing a publication PR when one already exists.
+
+    A new PR contains only the minimized submission and generated leaderboard.
+    """
 
     validate_submission(submission)
     submission_id = submission.get("submission_id")

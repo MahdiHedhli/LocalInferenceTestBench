@@ -83,11 +83,14 @@ Before deliberately publishing a result:
    setup more closely than intended;
 4. add only the candidate to `site/data/submissions/` and rebuild the leaderboard;
 5. run the full privacy and secret scans; and
-6. have another person review the diff.
+6. use the base-controlled exact-head review lane, with maintainer review when automation reports a
+   finding or cannot establish every gate.
 
-The guided `litb run --submission pr` path automates steps 2 through 5 without weakening them. The
-`litb publish-submission --candidate <path>` retry applies the same gates to an existing canonical,
-owner-only, ignored minimized file, so a failed public step does not require another inference run.
+The guided `litb run --submission pr` path automates steps 2 through 5 without weakening them. Hosted
+automation performs step 6 only for an exact benchmark-only change; every other change stays manual.
+The `litb publish-submission --candidate <path>` retry applies the same gates to an existing
+canonical, owner-only, ignored minimized file, so a failed public step does not require another
+inference run.
 The post-run path always writes the private aggregate report first and saves the minimized candidate;
 both paths show the entire candidate, name the public GitHub account, and require an explicit
 publication confirmation. Both require the strict local denylist and Gitleaks before any mutating
@@ -98,7 +101,7 @@ candidate and the generated leaderboard may enter the Git index or GitHub API pa
 report, descriptor, endpoint, credentials, environment, artifact directory, and denylist never enter
 the network helper. Validation children receive a scrubbed environment so inference credentials and
 scanner configuration overrides are not inherited. Upload bytes are read back from the checked Git
-index, never from a potentially changed working tree. The helper creates a feature branch and reviewed pull request; it does not write
+index, never from a potentially changed working tree. The helper creates a feature branch and pull request; it does not write
 to `main`, force-push, or overwrite an existing branch. A contributor without upstream write access
 gets a public fork, which is disclosed before confirmation.
 
@@ -108,9 +111,40 @@ the validator stored at the pull request's trusted base commit, so a data PR can
 checker. Candidate save paths inside a worktree must be Git-ignored before a file or directory is
 created.
 
+The trusted benchmark boundary executes only validator and builder code from the base commit. It
+fetches the pull-request head as Git data, verifies the exact append-only paths and ordinary blob
+modes, materializes only public dataset blobs, and checks schema, digest, duplicates, and the
+byte-exact leaderboard before requesting external review. No pull-request code is checked out or
+executed in the privileged workflows.
+
+A clean Codex comment is accepted only from the pinned bot and GitHub App identities, must be
+unedited, and must follow a trusted request marker containing the full base and head SHAs. The
+connector's shortened commit marker is advisory. Before any reviewer credential is exposed, trusted
+code rechecks the live PR, content boundary, publicly observable app-bound required checks, native
+review decision, review states, complete paginated thread set, and exact base/head. GitHub enforces
+the repository's remaining configured protections. The workflow does not claim per-run visibility
+into administration-only settings; stale-review dismissal, last-push approval, conversation
+resolution, linear history, admin enforcement, and force-push/deletion prohibitions are mandatory
+operator prerequisites. The workflow arms native squash auto-merge with a full-head guard and fixed
+digest-derived commit metadata before adding a full-head approval. It freshly requires the live
+`main` tip to equal the authorized base SHA immediately before either possible mutation. It never
+performs a direct merge, admin bypass, head checkout, force-push, or push to `main`. CodeRabbit
+review is requested but a rate-limit status never authorizes a merge.
+
+The automated lane requires `litb/submission-<submission-id>` as the live head ref, with the digest
+matching the sole added file and canonical content ID. GitHub's transient unknown mergeability gets
+only bounded retries. Once mergeability is established, an `unstable` state may continue to native
+auto-merge, but it does not pass or waive a required check; GitHub remains the merge authority.
+After a partial run, an existing approval is reusable only if it is the configured reviewer's latest
+decisive state for the exact current head. Full revalidation precedes re-arming missing auto-merge;
+later dismissal, change request, or approval of another commit fails closed.
+
 The pull request is public before continuous integration finishes. The candidate has no contributor
 field, but the submitting GitHub account remains visible. Accepted entries are self-reported,
-schema-validated, maintainer-reviewed, and not independently reproduced.
+schema-validated, exact-head reviewed, and not independently reproduced. The digest, bot review, and
+approval establish neither provenance nor attestation that a run occurred.
+The reviewer-account approval is an automated policy gate, not a second independent substantive
+review.
 
 For that reason the project calls the record **identifier-minimized**, not anonymous. Exact model,
 hardware, runtime, runtime configuration, and performance data can still fingerprint a setup, while GitHub adds the account

@@ -1,0 +1,22 @@
+query AutoMergeState($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      id
+      headRefOid
+      state
+      isDraft
+      reviewDecision
+      autoMergeRequest {
+        mergeMethod
+        commitHeadline
+        commitBody
+        enabledBy {
+          login
+          ... on User {
+            databaseId
+          }
+        }
+      }
+    }
+  }
+}

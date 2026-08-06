@@ -8,14 +8,21 @@ on:
       - reopened
       - ready_for_review
 
-permissions:
-  contents: read
+permissions: {}
+
+concurrency:
+  group: trusted-benchmark-boundary-${{ github.repository_id }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   boundary:
     name: Trusted benchmark boundary
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      classification: ${{ steps.classify.outputs.classification }}
     steps:
       - name: Check out trusted base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,9 +38,87 @@ jobs:
           git fetch --no-tags --depth=1 origin "pull/${PR_NUMBER}/head"
           test "$(git rev-parse FETCH_HEAD)" = "${HEAD_SHA}"
       - name: Run trusted base checker
+        id: classify
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          git show "${BASE_SHA}:scripts/validate_benchmark_change.py" |
-            python3 - --base "${BASE_SHA}" --head "${HEAD_SHA}"
+          set -euo pipefail
+          expected_submission_id=""
+          validator_args=(
+            --base "${BASE_SHA}"
+            --head "${HEAD_SHA}"
+            --check-content
+            --trusted-root "${GITHUB_WORKSPACE}"
+          )
+          if [[ "${HEAD_REF}" =~ ^litb/submission-([0-9a-f]{64})$ ]]; then
+            expected_submission_id="${BASH_REMATCH[1]}"
+            validator_args+=(--expected-submission-id "${expected_submission_id}")
+          fi
+          result="$(
+            git show "${BASE_SHA}:scripts/validate_benchmark_change.py" |
+              python3 - \
+                "${validator_args[@]}"
+          )"
+          case "${result}" in
+            "change boundary passed: benchmark-only")
+              if [ -n "${expected_submission_id}" ]; then
+                classification="benchmark-only"
+              else
+                classification="benchmark-manual"
+              fi
+              ;;
+            "change boundary passed: general") classification="general" ;;
+            *) exit 1 ;;
+          esac
+          echo "classification=${classification}" >> "${GITHUB_OUTPUT}"
+
+  request-reviews:
+    name: Request bounded benchmark review
+    needs: boundary
+    if: >-
+      needs.boundary.outputs.classification == 'benchmark-only' &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out trusted base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Request Codex and CodeRabbit once for the exact base and head
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          [[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
+          comments_file="${RUNNER_TEMP}/litb-comments.json"
+          gh api --paginate --slurp \
+            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments?per_page=100" \
+            > "${comments_file}"
+          request_state="${RUNNER_TEMP}/litb-review-request.env"
+          request_body="${RUNNER_TEMP}/litb-review-request.txt"
+          python3 scripts/trusted_submission_automation.py review-request \
+            --input "${comments_file}" \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}" \
+            --output "${request_state}" \
+            --body-output "${request_body}"
+          if grep -Fqx "exists=true" "${request_state}"; then
+            exit 0
+          fi
+          grep -Fqx "exists=false" "${request_state}"
+          gh api --silent --method POST \
+            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments" \
+            --raw-field body="$(< "${request_body}")"

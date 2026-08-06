@@ -1,0 +1,396 @@
+name: Trusted benchmark auto-merge
+
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions: {}
+
+concurrency:
+  group: trusted-benchmark-auto-merge-${{ github.repository_id }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: Authorize exact benchmark head
+    if: >-
+      github.event.repository.id == 1324333809 &&
+      github.event.repository.full_name == 'MahdiHedhli/LocalInferenceTestBench' &&
+      github.event.issue.pull_request &&
+      github.event.comment.user.id == 199175422 &&
+      github.event.comment.user.login == 'chatgpt-codex-connector[bot]' &&
+      github.event.comment.performed_via_github_app.id == 1144995
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      base_sha: ${{ steps.pull.outputs.base_sha }}
+      head_sha: ${{ steps.pull.outputs.head_sha }}
+      pull_request_node_id: ${{ steps.pull.outputs.pull_request_node_id }}
+      pull_request_number: ${{ steps.pull.outputs.pull_request_number }}
+      reviewed_commit_prefix: ${{ steps.signal.outputs.reviewed_commit_prefix }}
+      submission_id: ${{ steps.pull.outputs.submission_id }}
+    steps:
+      - name: Check out trusted default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Validate immutable Codex signal
+        id: signal
+        run: >-
+          python3 scripts/trusted_submission_automation.py signal
+          --event "${GITHUB_EVENT_PATH}"
+          --output "${GITHUB_OUTPUT}"
+      - name: Read live repository, protection, and pull request state
+        id: pull
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.signal.outputs.pull_request_number }}
+          REVIEWED_PREFIX: ${{ steps.signal.outputs.reviewed_commit_prefix }}
+        run: |
+          set -euo pipefail
+          gh api repos/MahdiHedhli/LocalInferenceTestBench > "${RUNNER_TEMP}/repository.json"
+          python3 scripts/trusted_submission_automation.py repository \
+            --input "${RUNNER_TEMP}/repository.json"
+          gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
+            > "${RUNNER_TEMP}/protection.json"
+          python3 scripts/trusted_submission_automation.py protection \
+            --input "${RUNNER_TEMP}/protection.json"
+          bash scripts/fetch_mergeable_pull.sh \
+            "${PR_NUMBER}" "${RUNNER_TEMP}/pull-request.json"
+          python3 scripts/trusted_submission_automation.py pull-request \
+            --input "${RUNNER_TEMP}/pull-request.json" \
+            --number "${PR_NUMBER}" \
+            --prefix "${REVIEWED_PREFIX}" \
+            --output "${GITHUB_OUTPUT}"
+      - name: Fetch untrusted head as Git data and validate trusted content
+        env:
+          BASE_SHA: ${{ steps.pull.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pull.outputs.head_sha }}
+          PR_NUMBER: ${{ steps.pull.outputs.pull_request_number }}
+          SUBMISSION_ID: ${{ steps.pull.outputs.submission_id }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin refs/heads/main
+          test "$(git rev-parse FETCH_HEAD)" = "${BASE_SHA}"
+          git fetch --no-tags --depth=1 origin "pull/${PR_NUMBER}/head"
+          test "$(git rev-parse FETCH_HEAD)" = "${HEAD_SHA}"
+          git checkout --detach "${BASE_SHA}"
+          result="$(
+            git show "${BASE_SHA}:scripts/validate_benchmark_change.py" |
+              python3 - \
+                --base "${BASE_SHA}" \
+                --head "${HEAD_SHA}" \
+                --require-benchmark \
+                --check-content \
+                --expected-submission-id "${SUBMISSION_ID}" \
+                --trusted-root "${GITHUB_WORKSPACE}"
+          )"
+          test "${result}" = "change boundary passed: benchmark-only"
+      - name: Validate full-head request, live comment, and review state
+        env:
+          BASE_SHA: ${{ steps.pull.outputs.base_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ steps.pull.outputs.head_sha }}
+          PR_NUMBER: ${{ steps.pull.outputs.pull_request_number }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp \
+            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments?per_page=100" \
+            > "${RUNNER_TEMP}/comments.json"
+          python3 scripts/trusted_submission_automation.py comments \
+            --input "${RUNNER_TEMP}/comments.json" \
+            --event "${GITHUB_EVENT_PATH}" \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}"
+          gh api graphql --paginate --slurp \
+            -f owner=MahdiHedhli \
+            -f name=LocalInferenceTestBench \
+            -F number="${PR_NUMBER}" \
+            -F query=@"${GITHUB_WORKSPACE}/scripts/queries/review_threads.graphql" \
+            > "${RUNNER_TEMP}/threads.json"
+          python3 scripts/trusted_submission_automation.py threads \
+            --input "${RUNNER_TEMP}/threads.json"
+          gh api --paginate --slurp \
+            "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}/reviews?per_page=100" \
+            > "${RUNNER_TEMP}/reviews.json"
+          python3 scripts/trusted_submission_automation.py review-states \
+            --input "${RUNNER_TEMP}/reviews.json"
+      - name: Revalidate head and base after read-only authorization
+        env:
+          BASE_SHA: ${{ steps.pull.outputs.base_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ steps.pull.outputs.head_sha }}
+          PR_NUMBER: ${{ steps.pull.outputs.pull_request_number }}
+          REVIEWED_PREFIX: ${{ steps.signal.outputs.reviewed_commit_prefix }}
+        run: |
+          set -euo pipefail
+          bash scripts/fetch_mergeable_pull.sh \
+            "${PR_NUMBER}" "${RUNNER_TEMP}/pull-request-final.json"
+          python3 scripts/trusted_submission_automation.py pull-request \
+            --input "${RUNNER_TEMP}/pull-request-final.json" \
+            --number "${PR_NUMBER}" \
+            --prefix "${REVIEWED_PREFIX}" \
+            --output "${RUNNER_TEMP}/pull-request-final.out"
+          grep -Fqx "base_sha=${BASE_SHA}" "${RUNNER_TEMP}/pull-request-final.out"
+          grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request-final.out"
+
+  mutate:
+    name: Arm protected auto-merge and approve exact head
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Fetch exact trusted helpers and queries
+        env:
+          BASE_SHA: ${{ needs.authorize.outputs.base_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          fetch_trusted_file() {
+            local source="$1"
+            local destination="$2"
+            gh api \
+              -H "Accept: application/vnd.github.raw+json" \
+              "repos/MahdiHedhli/LocalInferenceTestBench/contents/${source}?ref=${BASE_SHA}" \
+              > "${destination}"
+          }
+          fetch_trusted_file \
+            scripts/trusted_submission_automation.py \
+            "${RUNNER_TEMP}/trusted_submission_automation.py"
+          fetch_trusted_file \
+            scripts/fetch_mergeable_pull.sh \
+            "${RUNNER_TEMP}/fetch_mergeable_pull.sh"
+          fetch_trusted_file \
+            scripts/queries/review_threads.graphql \
+            "${RUNNER_TEMP}/review_threads.graphql"
+          fetch_trusted_file \
+            scripts/queries/auto_merge_state.graphql \
+            "${RUNNER_TEMP}/auto_merge_state.graphql"
+          python3 "${RUNNER_TEMP}/trusted_submission_automation.py" --help > /dev/null
+          bash -n "${RUNNER_TEMP}/fetch_mergeable_pull.sh"
+          test -s "${RUNNER_TEMP}/review_threads.graphql"
+          test -s "${RUNNER_TEMP}/auto_merge_state.graphql"
+      - name: Revalidate without reviewer credential
+        env:
+          BASE_SHA: ${{ needs.authorize.outputs.base_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ needs.authorize.outputs.head_sha }}
+          PR_NODE_ID: ${{ needs.authorize.outputs.pull_request_node_id }}
+          PR_NUMBER: ${{ needs.authorize.outputs.pull_request_number }}
+          REVIEWED_PREFIX: ${{ needs.authorize.outputs.reviewed_commit_prefix }}
+          SUBMISSION_ID: ${{ needs.authorize.outputs.submission_id }}
+        run: |
+          set -euo pipefail
+          helper="${RUNNER_TEMP}/trusted_submission_automation.py"
+          mergeable_helper="${RUNNER_TEMP}/fetch_mergeable_pull.sh"
+          review_threads_query="${RUNNER_TEMP}/review_threads.graphql"
+          gh api repos/MahdiHedhli/LocalInferenceTestBench > "${RUNNER_TEMP}/repository.json"
+          python3 "${helper}" repository --input "${RUNNER_TEMP}/repository.json"
+          gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
+            > "${RUNNER_TEMP}/protection.json"
+          python3 "${helper}" protection --input "${RUNNER_TEMP}/protection.json"
+          bash "${mergeable_helper}" \
+            "${PR_NUMBER}" "${RUNNER_TEMP}/pull-request.json"
+          python3 "${helper}" pull-request \
+            --input "${RUNNER_TEMP}/pull-request.json" \
+            --number "${PR_NUMBER}" \
+            --prefix "${REVIEWED_PREFIX}" \
+            --output "${RUNNER_TEMP}/pull-request.out"
+          grep -Fqx "pull_request_node_id=${PR_NODE_ID}" "${RUNNER_TEMP}/pull-request.out"
+          grep -Fqx "base_sha=${BASE_SHA}" "${RUNNER_TEMP}/pull-request.out"
+          grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request.out"
+          grep -Fqx "submission_id=${SUBMISSION_ID}" "${RUNNER_TEMP}/pull-request.out"
+          gh api --paginate --slurp \
+            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments?per_page=100" \
+            > "${RUNNER_TEMP}/comments.json"
+          python3 "${helper}" comments \
+            --input "${RUNNER_TEMP}/comments.json" \
+            --event "${GITHUB_EVENT_PATH}" \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}"
+          gh api graphql --paginate --slurp \
+            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -F query=@"${review_threads_query}" \
+            > "${RUNNER_TEMP}/threads.json"
+          python3 "${helper}" threads --input "${RUNNER_TEMP}/threads.json"
+          gh api --paginate --slurp \
+            "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}/reviews?per_page=100" \
+            > "${RUNNER_TEMP}/reviews.json"
+          python3 "${helper}" review-states --input "${RUNNER_TEMP}/reviews.json"
+      - name: Arm protected squash auto-merge, then approve the exact head
+        env:
+          BASE_SHA: ${{ needs.authorize.outputs.base_sha }}
+          GH_TOKEN: ${{ secrets.ERNEST_REVIEW_TOKEN }}
+          HEAD_SHA: ${{ needs.authorize.outputs.head_sha }}
+          PR_NODE_ID: ${{ needs.authorize.outputs.pull_request_node_id }}
+          PR_NUMBER: ${{ needs.authorize.outputs.pull_request_number }}
+          REVIEWED_PREFIX: ${{ needs.authorize.outputs.reviewed_commit_prefix }}
+          SUBMISSION_ID: ${{ needs.authorize.outputs.submission_id }}
+        run: |
+          set -euo pipefail
+          helper="${RUNNER_TEMP}/trusted_submission_automation.py"
+          mergeable_helper="${RUNNER_TEMP}/fetch_mergeable_pull.sh"
+          review_threads_query="${RUNNER_TEMP}/review_threads.graphql"
+          auto_merge_query="${RUNNER_TEMP}/auto_merge_state.graphql"
+          validate_live_base() {
+            local destination="$1"
+            local live_base
+            gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
+              > "${destination}"
+            python3 "${helper}" protection --input "${destination}"
+            live_base="$(jq -er '.commit.sha | strings' "${destination}")"
+            [[ "${live_base}" =~ ^[0-9a-f]{40}$ ]]
+            test "${live_base}" = "${BASE_SHA}"
+          }
+          gh api user > "${RUNNER_TEMP}/reviewer.json"
+          python3 "${helper}" identity --input "${RUNNER_TEMP}/reviewer.json"
+          gh api repos/MahdiHedhli/LocalInferenceTestBench > "${RUNNER_TEMP}/repository-final.json"
+          python3 "${helper}" repository --input "${RUNNER_TEMP}/repository-final.json"
+          gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
+            > "${RUNNER_TEMP}/protection-final.json"
+          python3 "${helper}" protection --input "${RUNNER_TEMP}/protection-final.json"
+          bash "${mergeable_helper}" \
+            "${PR_NUMBER}" "${RUNNER_TEMP}/pull-request-final.json"
+          python3 "${helper}" pull-request \
+            --input "${RUNNER_TEMP}/pull-request-final.json" \
+            --number "${PR_NUMBER}" \
+            --prefix "${REVIEWED_PREFIX}" \
+            --output "${RUNNER_TEMP}/pull-request-final.out"
+          grep -Fqx "pull_request_node_id=${PR_NODE_ID}" "${RUNNER_TEMP}/pull-request-final.out"
+          grep -Fqx "base_sha=${BASE_SHA}" "${RUNNER_TEMP}/pull-request-final.out"
+          grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request-final.out"
+          grep -Fqx "submission_id=${SUBMISSION_ID}" "${RUNNER_TEMP}/pull-request-final.out"
+          gh api --paginate --slurp \
+            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments?per_page=100" \
+            > "${RUNNER_TEMP}/comments-final.json"
+          python3 "${helper}" comments \
+            --input "${RUNNER_TEMP}/comments-final.json" \
+            --event "${GITHUB_EVENT_PATH}" \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}"
+          gh api graphql --paginate --slurp \
+            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -F query=@"${review_threads_query}" \
+            > "${RUNNER_TEMP}/threads-final.json"
+          python3 "${helper}" threads --input "${RUNNER_TEMP}/threads-final.json"
+          gh api --paginate --slurp \
+            "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}/reviews?per_page=100" \
+            > "${RUNNER_TEMP}/reviews-final.json"
+          python3 "${helper}" review-states --input "${RUNNER_TEMP}/reviews-final.json"
+          python3 "${helper}" approvals \
+            --input "${RUNNER_TEMP}/reviews-final.json" \
+            --head "${HEAD_SHA}" \
+            --output "${RUNNER_TEMP}/approval-state.out"
+          gh api graphql \
+            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -F query=@"${auto_merge_query}" \
+            > "${RUNNER_TEMP}/auto-merge-before.json"
+          python3 "${helper}" auto-merge-state \
+            --input "${RUNNER_TEMP}/auto-merge-before.json" \
+            --pull-request-node-id "${PR_NODE_ID}" \
+            --head "${HEAD_SHA}" \
+            --submission-id "${SUBMISSION_ID}" \
+            --output "${RUNNER_TEMP}/auto-merge-before.out"
+          if grep -Fqx "enabled=false" "${RUNNER_TEMP}/auto-merge-before.out"; then
+            if grep -Fqx "exists=true" "${RUNNER_TEMP}/approval-state.out"; then
+              grep -Fqx "review_decision=APPROVED" "${RUNNER_TEMP}/auto-merge-before.out"
+            else
+              grep -Fqx "exists=false" "${RUNNER_TEMP}/approval-state.out"
+              grep -Fqx "review_decision=REVIEW_REQUIRED" "${RUNNER_TEMP}/auto-merge-before.out"
+            fi
+            headline="data: add benchmark submission ${SUBMISSION_ID:0:12}"
+            commit_body="Schema-validated self-reported benchmark record; run unverified."
+            validate_live_base "${RUNNER_TEMP}/base-before-auto-merge.json"
+            gh api graphql \
+              -f id="${PR_NODE_ID}" \
+              -f head="${HEAD_SHA}" \
+              -f headline="${headline}" \
+              -f body="${commit_body}" \
+              -f query='mutation($id:ID!,$head:GitObjectID!,$headline:String!,$body:String!){enablePullRequestAutoMerge(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:SQUASH,commitHeadline:$headline,commitBody:$body}){pullRequest{id headRefOid autoMergeRequest{mergeMethod}}}}' \
+              > "${RUNNER_TEMP}/enable-auto-merge.json"
+          else
+            grep -Fqx "enabled=true" "${RUNNER_TEMP}/auto-merge-before.out"
+          fi
+          gh api "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}" \
+            > "${RUNNER_TEMP}/pull-request-after-arm.json"
+          test "$(jq -r '.head.sha' "${RUNNER_TEMP}/pull-request-after-arm.json")" = "${HEAD_SHA}"
+          if [ "$(jq -r '.merged' "${RUNNER_TEMP}/pull-request-after-arm.json")" = "true" ]; then
+            test "$(jq -r '.state' "${RUNNER_TEMP}/pull-request-after-arm.json")" = "closed"
+            echo "trusted benchmark auto-merge completed"
+            exit 0
+          fi
+          test "$(jq -r '.state' "${RUNNER_TEMP}/pull-request-after-arm.json")" = "open"
+          bash "${mergeable_helper}" \
+            "${PR_NUMBER}" "${RUNNER_TEMP}/pull-request-before-approval.json"
+          python3 "${helper}" pull-request \
+            --input "${RUNNER_TEMP}/pull-request-before-approval.json" \
+            --number "${PR_NUMBER}" \
+            --prefix "${REVIEWED_PREFIX}" \
+            --output "${RUNNER_TEMP}/pull-request-before-approval.out"
+          grep -Fqx "base_sha=${BASE_SHA}" "${RUNNER_TEMP}/pull-request-before-approval.out"
+          grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request-before-approval.out"
+          gh api graphql \
+            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -F query=@"${auto_merge_query}" \
+            > "${RUNNER_TEMP}/auto-merge-armed.json"
+          python3 "${helper}" auto-merge-state \
+            --input "${RUNNER_TEMP}/auto-merge-armed.json" \
+            --pull-request-node-id "${PR_NODE_ID}" \
+            --head "${HEAD_SHA}" \
+            --submission-id "${SUBMISSION_ID}" \
+            --output "${RUNNER_TEMP}/auto-merge-armed.out"
+          grep -Fqx "enabled=true" "${RUNNER_TEMP}/auto-merge-armed.out"
+          gh api graphql --paginate --slurp \
+            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -F query=@"${review_threads_query}" \
+            > "${RUNNER_TEMP}/threads-before-approval.json"
+          python3 "${helper}" threads --input "${RUNNER_TEMP}/threads-before-approval.json"
+          if grep -Fqx "exists=false" "${RUNNER_TEMP}/approval-state.out"; then
+            approval_body="Exact-head approval after trusted benchmark authorization."
+            validate_live_base "${RUNNER_TEMP}/base-before-approval.json"
+            gh api graphql \
+              -f id="${PR_NODE_ID}" \
+              -f head="${HEAD_SHA}" \
+              -f body="${approval_body}" \
+              -f query='mutation($id:ID!,$head:GitObjectID!,$body:String!){addPullRequestReview(input:{pullRequestId:$id,commitOID:$head,event:APPROVE,body:$body}){pullRequestReview{state commit{oid} author{login ... on User{databaseId}}}}}' \
+              > "${RUNNER_TEMP}/approval-result.json"
+            python3 "${helper}" approval-result \
+              --input "${RUNNER_TEMP}/approval-result.json" \
+              --head "${HEAD_SHA}"
+          else
+            grep -Fqx "exists=true" "${RUNNER_TEMP}/approval-state.out"
+          fi
+          gh api "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}" \
+            > "${RUNNER_TEMP}/pull-request-after.json"
+          test "$(jq -r '.head.sha' "${RUNNER_TEMP}/pull-request-after.json")" = "${HEAD_SHA}"
+          final_state="$(jq -r '.state' "${RUNNER_TEMP}/pull-request-after.json")"
+          final_merged="$(jq -r '.merged' "${RUNNER_TEMP}/pull-request-after.json")"
+          if [ "${final_merged}" = "true" ]; then
+            echo "trusted benchmark auto-merge completed"
+          else
+            test "${final_state}" = "open"
+            gh api graphql \
+              -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+              -F query=@"${auto_merge_query}" \
+              > "${RUNNER_TEMP}/auto-merge-after.json"
+            python3 "${helper}" auto-merge-state \
+              --input "${RUNNER_TEMP}/auto-merge-after.json" \
+              --pull-request-node-id "${PR_NODE_ID}" \
+              --head "${HEAD_SHA}" \
+              --submission-id "${SUBMISSION_ID}" \
+              --output "${RUNNER_TEMP}/auto-merge-after.out"
+            grep -Fqx "enabled=true" "${RUNNER_TEMP}/auto-merge-after.out"
+            echo "trusted benchmark auto-merge armed"
+          fi
