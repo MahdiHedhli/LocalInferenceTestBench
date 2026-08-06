@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "leaderboard-submission.schema.json",
   "title": "Local Inference Test Bench leaderboard submission",
-  "description": "One closed, minimized, self-reported standard-suite result for one public model artifact.",
+  "description": "One closed, minimized, self-reported standard-suite result for one public model artifact, with optional explicit runtime configuration.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -36,6 +36,9 @@
     },
     "runtime": {
       "$ref": "hardware-descriptor.schema.json#/$defs/runtime"
+    },
+    "runtime_configuration": {
+      "$ref": "hardware-descriptor.schema.json#/$defs/runtimeConfiguration"
     },
     "model": {
       "$ref": "#/$defs/model"
@@ -169,6 +172,16 @@
           ],
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
+        },
+        "reasoning_effort": {
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
         }
       }
     },
@@ -351,5 +364,5 @@
       ]
     }
   },
-  "$comment": "The Python validator is authoritative for canonical digest verification, safe text, arithmetic consistency, numeric precision, model output limits, unsafe routes, and the public data deny rules. Decimal precision is kept out of the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
+  "$comment": "The Python validator is authoritative for canonical digest verification, safe text, arithmetic consistency, numeric precision, model and configured context output limits, unsafe routes, and the public data deny rules. Decimal precision is kept out of the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
 }

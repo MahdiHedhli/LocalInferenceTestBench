@@ -26,7 +26,9 @@ _MODEL_KEYS = {
     "runtime_model",
     "settings",
 }
-_SETTINGS_KEYS = {"temperature", "top_p", "max_output_tokens", "seed"}
+_REQUIRED_SETTINGS_KEYS = {"temperature", "top_p", "max_output_tokens", "seed"}
+_SETTINGS_KEYS = _REQUIRED_SETTINGS_KEYS | {"reasoning_effort"}
+_REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 
 class ManifestError(ValueError):
@@ -56,6 +58,7 @@ class GenerationSettings:
     top_p: float = 1.0
     max_output_tokens: int = 512
     seed: int | None = 0
+    reasoning_effort: str | None = None
 
     @classmethod
     def from_mapping(
@@ -67,7 +70,7 @@ class GenerationSettings:
         if not isinstance(value, Mapping):
             raise ManifestError("settings must be an object")
         _reject_unknown(value, _SETTINGS_KEYS, "settings")
-        missing = sorted(_SETTINGS_KEYS - set(value))
+        missing = sorted(_REQUIRED_SETTINGS_KEYS - set(value))
         if missing:
             raise ManifestError(f"settings is missing required fields: {', '.join(missing)}")
 
@@ -75,6 +78,7 @@ class GenerationSettings:
         top_p = value["top_p"]
         maximum = value["max_output_tokens"]
         seed = value["seed"]
+        reasoning_effort = value.get("reasoning_effort")
 
         if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
             raise ManifestError("settings.temperature must be numeric")
@@ -94,33 +98,44 @@ class GenerationSettings:
             raise ManifestError("settings.seed must be an integer or null")
         if seed is not None and seed < -(2**63):
             raise ManifestError("settings.seed is below the supported minimum")
+        if "reasoning_effort" in value and (
+            not isinstance(reasoning_effort, str)
+            or reasoning_effort not in _REASONING_EFFORTS
+        ):
+            raise ManifestError("settings.reasoning_effort is unsupported")
 
         return cls(
             temperature=float(temperature),
             top_p=float(top_p),
             max_output_tokens=maximum,
             seed=seed,
+            reasoning_effort=reasoning_effort,
         )
 
-    def as_api_parameters(self) -> dict[str, int | float]:
+    def as_api_parameters(self) -> dict[str, int | float | str]:
         """Return only non-secret OpenAI-compatible request parameters."""
 
-        parameters: dict[str, int | float] = {
+        parameters: dict[str, int | float | str] = {
             "temperature": self.temperature,
             "top_p": self.top_p,
             "max_tokens": self.max_output_tokens,
         }
         if self.seed is not None:
             parameters["seed"] = self.seed
+        if self.reasoning_effort is not None:
+            parameters["reasoning_effort"] = self.reasoning_effort
         return parameters
 
-    def as_report_data(self) -> dict[str, int | float | None]:
-        return {
+    def as_report_data(self) -> dict[str, int | float | str | None]:
+        result: dict[str, int | float | str | None] = {
             "temperature": self.temperature,
             "top_p": self.top_p,
             "max_output_tokens": self.max_output_tokens,
             "seed": self.seed,
         }
+        if self.reasoning_effort is not None:
+            result["reasoning_effort"] = self.reasoning_effort
+        return result
 
 
 @dataclass(frozen=True, slots=True)

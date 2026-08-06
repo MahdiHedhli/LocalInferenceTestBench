@@ -17,8 +17,8 @@ the static Pages dataset.
 | Classification | May contain | Must not contain |
 |----------------|-------------|------------------|
 | Private run report | Existing minimized run evidence, local run ID, time, and local model selector | Raw prompt, completion, reasoning, tool arguments, endpoint, or credential |
-| Local hardware descriptor | Exact CPU, memory, accelerator, execution, and runtime product details intended for publication | Hostname, account, network, serial, inventory ID, device UUID, unused inventory, or notes |
-| Public submission | Public model provenance, settings, structured hardware and runtime, categorical cases, and rounded aggregate observations | Source run ID or time, local model selector, manifest digest, contributor field, or raw model content |
+| Local hardware descriptor | Exact CPU, memory, accelerator, execution, runtime product details, and optional runtime configuration intended for publication | Hostname, account, network, serial, inventory ID, device UUID, unused inventory, or notes |
+| Public submission | Public model provenance, settings, structured hardware and runtime, optional runtime configuration, categorical cases, and rounded aggregate observations | Source run ID or time, local model selector, manifest digest, contributor field, or raw model content |
 | Generated dataset | Accepted submission fields, derived quality percentages, and quality rank | Per-case text, contributor identity, or unpublished local data |
 
 Hardware and performance can weakly characterize a setup. The exporter removes direct machine
@@ -41,6 +41,15 @@ collecting general machine inventory.
 | runtime.name | string | Public runtime name, 1 to 100 characters |
 | runtime.version | string | Public runtime version, 1 to 100 characters |
 | runtime.backend | string | Public compute backend, 1 to 100 characters |
+| runtime_configuration | object, optional | Closed snapshot; if present, all four fields below are required |
+| runtime_configuration.context_window_tokens | integer or null | 1 to 9,007,199,254,740,991; `null` means not known |
+| runtime_configuration.concurrent_requests | integer or null | 1 to 4096; `null` means not known |
+| runtime_configuration.speculative_decoding | enum | `enabled`, `disabled`, or `unknown` |
+| runtime_configuration.offload_mode | enum | `none`, `partial`, `maximum`, `not_applicable`, or `unknown` |
+
+The optional object is carried only when the operator supplies it; validators never synthesize
+defaults. When `context_window_tokens` is known, it cannot be smaller than the submitted
+`settings.max_output_tokens` value.
 
 Each accelerator description has a `kind`, product `model`, positive `count`, and `memory_gb`.
 `count` groups identical devices used for inference. `null` means that separately scoped accelerator
@@ -69,8 +78,9 @@ Purpose: hold the smallest accepted evidence for one model artifact and one stan
 | profile | string | Must be `standard` |
 | hardware | object | Hardware portion of the validated public descriptor |
 | runtime | object | Runtime portion of the validated public descriptor |
+| runtime_configuration | object, optional | Closed configuration when the descriptor supplied it |
 | model | object | Public provenance with exactly one revision or digest |
-| settings | object | Temperature and top-p use at most six fractional digits; output limit and optional seed are integers |
+| settings | object | Bounded generation controls, with an optional closed reasoning-effort enum |
 | cases | list | The five standard cases in suite order |
 | metrics | object | Counts plus rounded mean latency and weighted throughput |
 
@@ -119,8 +129,9 @@ Purpose: provide one deterministic, browser-readable file built from all accepte
 | entry_count | integer | Must equal the number of entries |
 | entries | list | Valid accepted records with cases removed and derived rank fields added |
 
-Each entry keeps submission ID, suite, profile, hardware, runtime, model, settings, and aggregate
-metrics. It adds `semantic_score_percent`, `exact_format_score_percent`, and `rank`.
+Each entry keeps submission ID, suite, profile, hardware, runtime, optional runtime configuration,
+model, settings, and aggregate metrics. It adds `semantic_score_percent`,
+`exact_format_score_percent`, and `rank`.
 
 Ranking uses descending semantic percentage, then descending exact-format percentage. Equal quality
 pairs share a dense rank. Source, display name, and submission ID provide deterministic display order

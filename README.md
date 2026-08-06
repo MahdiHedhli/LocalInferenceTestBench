@@ -66,6 +66,37 @@ litb run \
 Use `--profile standard` after smoke passes. Run artifacts stay ignored under `artifacts/` and are
 restricted to aggregate-safe fields.
 
+At the end of a valid interactive standard run, the bench now offers three choices: keep the report
+private, save identifier-minimized JSON, or open a reviewed public pull request. Enter keeps the
+result private. Nothing is uploaded merely because a run finished.
+
+For a scripted local export:
+
+```sh
+litb run \
+  --manifest .local/models.json \
+  --endpoint http://127.0.0.1:1234/v1 \
+  --profile standard \
+  --hardware .local/hardware.json \
+  --submission save
+```
+
+To automate the public contribution path, use `--submission pr`. The tool saves and displays the
+complete minimized record, runs the privacy and secret gates in an isolated clone, then creates a
+feature branch and pull request through an authenticated GitHub CLI. It never pushes directly to
+`main`. Non-interactive publication also requires `--confirm-public`.
+
+If publication is cancelled or a GitHub step fails, retry from the saved minimized file without
+rerunning inference:
+
+```sh
+litb publish-submission \
+  --candidate .local/leaderboard-submissions/<submission-id>.json
+```
+
+The retry revalidates the file, repeats the complete disclosure, and requires literal `PUBLISH` in
+an interactive terminal. Add `--confirm-public` only for an intentional non-interactive retry.
+
 See the full [operator guide](docs/guide.md) before comparing multiple models.
 
 ## Public leaderboard
@@ -75,11 +106,13 @@ community results first. Quality rank uses semantic score, then exact-format sco
 throughput are shown with the hardware and runtime that produced them, but speed does not affect
 rank.
 
-Leaderboard records include exact CPU, memory, accelerator, execution-mode, and runtime details
-because performance without that context is not useful. They omit direct machine identifiers,
-source run IDs, timestamps, local model selectors, raw prompts, completions, reasoning, and tool
-arguments. Hardware plus performance can still make a setup recognizable, and the GitHub account
-used to open a submission pull request is public.
+Leaderboard records include exact CPU, memory, accelerator, execution-mode, runtime name and
+version, and—when supplied—the configured context window, concurrency, speculative-decoding state,
+and offload mode because performance without that context is not useful. Unknown numeric values are
+reported as `null`; categorical uncertainty is reported as `unknown`, never inferred. Records omit
+direct machine identifiers, source run IDs, timestamps, local model selectors, raw prompts,
+completions, reasoning, and tool arguments. Hardware plus performance can still make a setup
+recognizable, and the GitHub account used to open a submission pull request is public.
 
 To prepare a result from a valid standard run:
 
@@ -95,6 +128,10 @@ litb prepare-submission \
 
 Review the generated file before sharing it. The complete process is in
 [submitting a benchmark](docs/submitting-benchmarks.md).
+
+The same preparation and review happen automatically after `litb run --profile standard` when you
+choose the save or public-PR option. “Identifier-minimized” is deliberate: exact hardware,
+performance, the public pull request, and its GitHub account can still link a result to its source.
 
 ## Method at a glance
 

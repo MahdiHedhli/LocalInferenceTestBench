@@ -41,6 +41,20 @@ _ALLOWED_ENDPOINT_NETWORKS = (
 )
 
 
+def _git_environment() -> dict[str, str]:
+    """Return the process environment without repository-routing overrides."""
+
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith("GIT_")
+    }
+
+
+def _has_git_marker(path: Path) -> bool:
+    return any((parent / ".git").exists() for parent in (path, *path.parents))
+
+
 def _is_private_address(address: str) -> bool:
     try:
         parsed = ipaddress.ip_address(address.split("%", 1)[0])
@@ -132,11 +146,12 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return values
 
 
-def _is_in_ignored_worktree(path: Path) -> bool:
+def _is_in_ignored_worktree(path: Path, *, require_worktree: bool = False) -> bool:
     """Return whether Git confirms that a file inside a worktree is ignored.
 
-    Files outside a worktree cannot accidentally be added to this repository and are accepted.
-    Git is a publication safeguard here, not a Python runtime dependency.
+    Files outside a worktree cannot accidentally be added to this repository and are accepted unless
+    ``require_worktree`` is set. Git is a publication safeguard here, not a Python runtime
+    dependency.
     """
 
     try:
@@ -146,31 +161,116 @@ def _is_in_ignored_worktree(path: Path) -> bool:
             capture_output=True,
             text=True,
             timeout=3,
+            env=_git_environment(),
         )
     except (OSError, subprocess.SubprocessError):
-        return False
+        return not require_worktree and not _has_git_marker(path.parent)
     if root_result.returncode != 0:
-        return True
+        return not require_worktree and not _has_git_marker(path.parent)
     root = Path(root_result.stdout.strip()).resolve()
     try:
         resolved = path.resolve(strict=True)
         resolved.relative_to(root)
-    except (OSError, ValueError):
-        return True
+    except OSError:
+        return False
+    except ValueError:
+        return not require_worktree
     try:
         ignored = subprocess.run(
             ["git", "-C", str(root), "check-ignore", "--quiet", "--", str(resolved)],
             check=False,
             capture_output=True,
             timeout=3,
+            env=_git_environment(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
     return ignored.returncode == 0
 
 
-def validate_env_file(path: str | Path) -> Path:
-    """Require a regular, owner-only, ignored credential environment file."""
+def validate_ignored_destination(path: str | Path) -> Path:
+    """Require a future output path to be Git-ignored when it is in a worktree.
+
+    Unlike :func:`validate_env_file`, this check intentionally supports a path
+    that does not exist yet. Destinations outside a worktree remain valid.
+    """
+
+    candidate = Path(path).expanduser().resolve(strict=False)
+    probe = candidate.parent
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    if probe.exists() and not probe.is_dir():
+        probe = probe.parent
+    try:
+        root_result = subprocess.run(
+            ["git", "-C", str(probe), "rev-parse", "--show-toplevel"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            env=_git_environment(),
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        if _has_git_marker(probe):
+            raise SafetyError("submission destination ignore status could not be verified") from error
+        return candidate
+    if root_result.returncode != 0:
+        if _has_git_marker(probe):
+            raise SafetyError("submission destination ignore status could not be verified")
+        return candidate
+    root = Path(root_result.stdout.strip()).resolve()
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return candidate
+    relative_text = relative.as_posix()
+    try:
+        tracked = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "--error-unmatch",
+                "--",
+                relative_text,
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            env=_git_environment(),
+        )
+        ignored = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "check-ignore",
+                "--quiet",
+                "--no-index",
+                "--",
+                relative_text,
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            env=_git_environment(),
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise SafetyError("submission destination ignore status could not be verified") from error
+    if tracked.returncode not in {0, 1} or ignored.returncode not in {0, 1}:
+        raise SafetyError("submission destination ignore status could not be verified")
+    if tracked.returncode == 0 or ignored.returncode == 1:
+        raise SafetyError("submission destination must be Git-ignored")
+    return candidate
+
+
+def validate_env_file(
+    path: str | Path, *, require_worktree: bool = False
+) -> Path:
+    """Require a regular, owner-only, ignored file, optionally inside a worktree."""
 
     env_path = Path(path)
     try:
@@ -184,7 +284,7 @@ def validate_env_file(path: str | Path) -> Path:
             raise SafetyError("credential environment file permissions must be owner-only")
         if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
             raise SafetyError("credential environment file must be owned by the current user")
-    if not _is_in_ignored_worktree(env_path):
+    if not _is_in_ignored_worktree(env_path, require_worktree=require_worktree):
         raise SafetyError("credential environment file must be ignored by Git")
     return env_path
 

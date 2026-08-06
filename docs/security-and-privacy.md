@@ -12,8 +12,10 @@ This project assumes the repository will be public and the inference endpoint wi
 
 A leaderboard submission is a narrow exception for reviewed public product details. Its closed
 contract permits the CPU model and logical cores, system memory and architecture, accelerators used
-for inference, execution mode, and runtime name, version, and backend. It does not permit a hostname,
-account, address, device UUID, serial number, inventory tag, unused device list, or free-form note.
+for inference, execution mode, runtime name, version, and backend, plus an optional closed snapshot
+of context window, concurrency, speculative decoding, and offload mode. Unknown configuration is
+represented explicitly rather than inferred. It does not permit a hostname, account, address,
+device UUID, serial number, inventory tag, unused device list, or free-form note.
 
 Examples use loopback, `example.com`, and standards-reserved documentation addresses. Local values
 belong in ignored files under `.local/` or in process environment variables.
@@ -66,7 +68,8 @@ that expose POSIX modes.
 
 The candidate removes the source run ID and time, manifest digest, local model selector, contributor,
 raw content, per-case timing, and per-case token counts. It keeps public model provenance, settings,
-exact hardware and runtime fields, categorical case outcomes, and rounded aggregate performance.
+exact hardware and runtime fields, optional reported runtime configuration, categorical case
+outcomes, and rounded aggregate performance.
 The content digest detects changes and duplicates. It does not prove that the benchmark was run.
 
 The Pages file picker reads only an already-prepared candidate. Its shape check runs in the browser,
@@ -82,9 +85,39 @@ Before deliberately publishing a result:
 5. run the full privacy and secret scans; and
 6. have another person review the diff.
 
+The guided `litb run --submission pr` path automates steps 2 through 5 without weakening them. The
+`litb publish-submission --candidate <path>` retry applies the same gates to an existing canonical,
+owner-only, ignored minimized file, so a failed public step does not require another inference run.
+The post-run path always writes the private aggregate report first and saves the minimized candidate;
+both paths show the entire candidate, name the public GitHub account, and require an explicit
+publication confirmation. Both require the strict local denylist and Gitleaks before any mutating
+GitHub call.
+
+Publication uses a fixed canonical target and an isolated temporary clone. Only one validated
+candidate and the generated leaderboard may enter the Git index or GitHub API payload. The raw
+report, descriptor, endpoint, credentials, environment, artifact directory, and denylist never enter
+the network helper. Validation children receive a scrubbed environment so inference credentials and
+scanner configuration overrides are not inherited. Upload bytes are read back from the checked Git
+index, never from a potentially changed working tree. The helper creates a feature branch and reviewed pull request; it does not write
+to `main`, force-push, or overwrite an existing branch. A contributor without upstream write access
+gets a public fork, which is disclosed before confirmation.
+
+An idempotent retry trusts an existing pull request only after verifying its base and head identity,
+exact two-file diff, and exact candidate and leaderboard bytes. Hosted benchmark-boundary checks run
+the validator stored at the pull request's trusted base commit, so a data PR cannot relax its own
+checker. Candidate save paths inside a worktree must be Git-ignored before a file or directory is
+created.
+
 The pull request is public before continuous integration finishes. The candidate has no contributor
 field, but the submitting GitHub account remains visible. Accepted entries are self-reported,
 schema-validated, maintainer-reviewed, and not independently reproduced.
+
+For that reason the project calls the record **identifier-minimized**, not anonymous. Exact model,
+hardware, runtime, runtime configuration, and performance data can still fingerprint a setup, while GitHub adds the account
+and publication time. Cancellation, end-of-input, an invalid choice, a missing tool, a stale
+leaderboard base, or a failed local gate causes no branch or PR creation. If PR creation fails after
+the branch exists, the command reports the exact public branch that may remain instead of claiming a
+rollback.
 
 ## If a leak is detected
 

@@ -24,6 +24,7 @@ from local_inference_test_bench.models import GenerationSettings  # noqa: E402
 from local_inference_test_bench.safety import (  # noqa: E402
     SafetyError,
     load_credential,
+    validate_env_file,
     validate_endpoint,
 )
 
@@ -306,6 +307,38 @@ class EndpointSafetyTests(unittest.TestCase):
                 with self.assertRaisesRegex(SafetyError, "owner-only"):
                     load_credential("INFERENCE_TEST_TOKEN", env_file=path, environ={})
 
+    def test_git_probe_exception_allows_only_optional_outside_worktree_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / ".env"
+            path.write_text("INFERENCE_TEST_TOKEN=placeholder\n", encoding="utf-8")
+            if sys.platform != "win32":
+                path.chmod(0o600)
+
+            with patch(
+                "local_inference_test_bench.safety.subprocess.run",
+                side_effect=OSError("git unavailable"),
+            ):
+                self.assertEqual(validate_env_file(path), path)
+
+            with (
+                patch(
+                    "local_inference_test_bench.safety.subprocess.run",
+                    side_effect=OSError("git unavailable"),
+                ),
+                self.assertRaisesRegex(SafetyError, "ignored by Git"),
+            ):
+                validate_env_file(path, require_worktree=True)
+
+            (Path(temporary) / ".git").mkdir()
+            with (
+                patch(
+                    "local_inference_test_bench.safety.subprocess.run",
+                    side_effect=OSError("git unavailable"),
+                ),
+                self.assertRaisesRegex(SafetyError, "ignored by Git"),
+            ):
+                validate_env_file(path)
+
 
 class ClientIntegrationTests(unittest.TestCase):
     def test_stub_server_startup_never_resolves_fqdn(self) -> None:
@@ -377,6 +410,20 @@ class ClientIntegrationTests(unittest.TestCase):
             (5, None, None),
         )
         self.assertEqual(partial.finish_reason, "length")
+
+    def test_explicit_reasoning_effort_is_sent_as_a_top_level_parameter(self) -> None:
+        with StubServer() as stub:
+            client = OpenAICompatibleClient(stub.endpoint, timeout_seconds=2)
+            client.chat_completions(
+                model="stub-model",
+                messages=({"role": "user", "content": "synthetic request"},),
+                settings=GenerationSettings(
+                    max_output_tokens=32,
+                    reasoning_effort="none",
+                ),
+            )
+
+        self.assertEqual(stub.server.last_request["reasoning_effort"], "none")
 
     def test_response_size_limit_fails_with_a_categorical_error(self) -> None:
         with StubServer() as stub, patch.object(client_module, "MAX_RESPONSE_BYTES", 64):

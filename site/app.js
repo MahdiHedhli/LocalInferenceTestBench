@@ -50,6 +50,9 @@ const ACCELERATOR_KINDS = new Set([
   "other",
 ]);
 const EXECUTION_MODES = new Set(["cpu_only", "accelerator_only", "hybrid", "unknown"]);
+const SPECULATIVE_DECODING_MODES = new Set(["enabled", "disabled", "unknown"]);
+const OFFLOAD_MODES = new Set(["none", "partial", "maximum", "not_applicable", "unknown"]);
+const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
 const DESCRIPTOR_UUID = /(?:^|[^0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:$|[^0-9a-f])/iu;
 const DESCRIPTOR_LABEL = /\b(?:s\s*\/?\s*n|serial(?:\s+(?:number|no|id))?|inventory\s+(?:id|tag)|asset\s+(?:id|tag)|device\s+uuid|machine\s+(?:id|name)|host\s*name|user\s*name|account\s+(?:id|name))\b/iu;
 const DESCRIPTOR_NETWORK = /(?:^|[^0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?:$|[^0-9.])|(?:^|[^0-9a-f:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?:%[a-z0-9_.-]+)?(?:$|[^0-9a-f:])/iu;
@@ -222,15 +225,43 @@ function validateRuntime(runtime) {
   );
 }
 
-function validateSettings(settings, contextTokens) {
+function validateRuntimeConfiguration(configuration) {
   return (
-    hasExactKeys(settings, ["temperature", "top_p", "max_output_tokens", "seed"]) &&
+    hasExactKeys(configuration, [
+      "context_window_tokens",
+      "concurrent_requests",
+      "speculative_decoding",
+      "offload_mode",
+    ]) &&
+    (configuration.context_window_tokens === null ||
+      isInteger(configuration.context_window_tokens, 1)) &&
+    (configuration.concurrent_requests === null ||
+      isInteger(configuration.concurrent_requests, 1, 4096)) &&
+    SPECULATIVE_DECODING_MODES.has(configuration.speculative_decoding) &&
+    OFFLOAD_MODES.has(configuration.offload_mode)
+  );
+}
+
+function validateSettings(settings, contextTokens, runtimeConfiguration) {
+  const configuredContext = runtimeConfiguration?.context_window_tokens;
+  const maximumOutputTokens =
+    configuredContext === undefined || configuredContext === null
+      ? contextTokens
+      : Math.min(contextTokens, configuredContext);
+  return (
+    hasExactKeys(
+      settings,
+      ["temperature", "top_p", "max_output_tokens", "seed"],
+      ["reasoning_effort"],
+    ) &&
     isFiniteNumber(settings.temperature, 0, 2) &&
     hasAtMostSixDecimalPlaces(settings.temperature) &&
     isFiniteNumber(settings.top_p, Number.MIN_VALUE, 1) &&
     hasAtMostSixDecimalPlaces(settings.top_p) &&
-    isInteger(settings.max_output_tokens, 1, contextTokens) &&
-    (settings.seed === null || Number.isSafeInteger(settings.seed))
+    isInteger(settings.max_output_tokens, 1, maximumOutputTokens) &&
+    (settings.seed === null || Number.isSafeInteger(settings.seed)) &&
+    (!Object.hasOwn(settings, "reasoning_effort") ||
+      REASONING_EFFORTS.has(settings.reasoning_effort))
   );
 }
 
@@ -271,17 +302,21 @@ function validateMetrics(metrics) {
 
 function validateEntry(entry) {
   return (
-    hasExactKeys(entry, [
-      "rank",
-      "submission_id",
-      "suite_version",
-      "profile",
-      "hardware",
-      "runtime",
-      "model",
-      "settings",
-      "metrics",
-    ]) &&
+    hasExactKeys(
+      entry,
+      [
+        "rank",
+        "submission_id",
+        "suite_version",
+        "profile",
+        "hardware",
+        "runtime",
+        "model",
+        "settings",
+        "metrics",
+      ],
+      ["runtime_configuration"],
+    ) &&
     isInteger(entry.rank, 1) &&
     typeof entry.submission_id === "string" &&
     /^[a-f0-9]{64}$/u.test(entry.submission_id) &&
@@ -289,8 +324,14 @@ function validateEntry(entry) {
     entry.profile === "standard" &&
     validateHardware(entry.hardware) &&
     validateRuntime(entry.runtime) &&
+    (!Object.hasOwn(entry, "runtime_configuration") ||
+      validateRuntimeConfiguration(entry.runtime_configuration)) &&
     validateModel(entry.model) &&
-    validateSettings(entry.settings, entry.model.declared_context_tokens) &&
+    validateSettings(
+      entry.settings,
+      entry.model.declared_context_tokens,
+      entry.runtime_configuration,
+    ) &&
     validateMetrics(entry.metrics)
   );
 }
@@ -405,18 +446,22 @@ function validateSubmissionMetrics(metrics, cases) {
 
 function validateSubmission(submission) {
   if (
-    !hasExactKeys(submission, [
-      "schema_version",
-      "submission_id",
-      "suite_version",
-      "profile",
-      "hardware",
-      "runtime",
-      "model",
-      "settings",
-      "cases",
-      "metrics",
-    ]) ||
+    !hasExactKeys(
+      submission,
+      [
+        "schema_version",
+        "submission_id",
+        "suite_version",
+        "profile",
+        "hardware",
+        "runtime",
+        "model",
+        "settings",
+        "cases",
+        "metrics",
+      ],
+      ["runtime_configuration"],
+    ) ||
     submission.schema_version !== "1.0" ||
     submission.suite_version !== "1.0" ||
     submission.profile !== "standard" ||
@@ -424,8 +469,14 @@ function validateSubmission(submission) {
     !/^[a-f0-9]{64}$/u.test(submission.submission_id) ||
     !validateHardware(submission.hardware) ||
     !validateRuntime(submission.runtime) ||
+    (Object.hasOwn(submission, "runtime_configuration") &&
+      !validateRuntimeConfiguration(submission.runtime_configuration)) ||
     !validateModel(submission.model) ||
-    !validateSettings(submission.settings, submission.model.declared_context_tokens) ||
+    !validateSettings(
+      submission.settings,
+      submission.model.declared_context_tokens,
+      submission.runtime_configuration,
+    ) ||
     !validateCases(submission.cases) ||
     !validateSubmissionMetrics(submission.metrics, submission.cases)
   ) {
@@ -493,6 +544,25 @@ function addDefinition(list, term, description) {
   list.append(makeElement("dt", term), makeElement("dd", description));
 }
 
+function runtimeConfigurationText(configuration) {
+  if (configuration === undefined) {
+    return "Not reported";
+  }
+  const context =
+    configuration.context_window_tokens === null
+      ? "context not reported"
+      : `${integer(configuration.context_window_tokens)} token context`;
+  const concurrency =
+    configuration.concurrent_requests === null
+      ? "concurrency not reported"
+      : `${integer(configuration.concurrent_requests)} concurrent request${
+          configuration.concurrent_requests === 1 ? "" : "s"
+        }`;
+  return `${context}; ${concurrency}; speculative ${readableEnum(
+    configuration.speculative_decoding,
+  )}; offload ${readableEnum(configuration.offload_mode)}`;
+}
+
 function addHardwareCell(row, entry) {
   const cell = makeElement("td", undefined, "hardware-cell");
   const details = document.createElement("details");
@@ -525,6 +595,11 @@ function addHardwareCell(row, entry) {
     list,
     "Runtime",
     `${entry.runtime.name} ${entry.runtime.version}, ${entry.runtime.backend}`,
+  );
+  addDefinition(
+    list,
+    "Runtime configuration",
+    runtimeConfigurationText(entry.runtime_configuration),
   );
   details.append(list);
   cell.append(
@@ -600,10 +675,13 @@ function addRow(entry) {
   );
   addCell(row, `${decimal(entry.metrics.latency_ms_mean)} ms`, "observed mean");
   const seed = entry.settings.seed === null ? "none" : integer(entry.settings.seed);
+  const reasoning = Object.hasOwn(entry.settings, "reasoning_effort")
+    ? ` | reasoning ${readableEnum(entry.settings.reasoning_effort)}`
+    : "";
   addCell(
     row,
     `T ${settingNumber(entry.settings.temperature)} | top-p ${settingNumber(entry.settings.top_p)}`,
-    `max ${integer(entry.settings.max_output_tokens)} | seed ${seed}`,
+    `max ${integer(entry.settings.max_output_tokens)} | seed ${seed}${reasoning}`,
   );
   elements.body.append(row);
 }
@@ -723,7 +801,9 @@ function showCheckedSubmission(submission, source) {
     : "No accelerator used";
   elements.previewHardware.textContent = `CPU: ${submission.hardware.cpu.model} | ${acceleratorPreview} | ${decimal(
     submission.hardware.memory.system_gb,
-  )} GB | ${submission.runtime.name} ${submission.runtime.version}`;
+  )} GB | ${submission.runtime.name} ${submission.runtime.version} | Runtime configuration: ${runtimeConfigurationText(
+    submission.runtime_configuration,
+  )}`;
   elements.submissionPreview.hidden = false;
   elements.copySubmission.disabled = false;
   elements.downloadSubmission.disabled = false;
