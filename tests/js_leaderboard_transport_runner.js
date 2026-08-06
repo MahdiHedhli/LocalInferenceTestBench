@@ -27,39 +27,45 @@ if (!appSource || !leaderboardSource) {
     entries: legacy.entries,
   };
 
-  function accepts(callback) {
+  async function accepts(callback) {
     try {
-      callback();
+      await callback();
       return true;
     } catch (error) {
       return false;
     }
   }
 
-  const results = {
-    legacy: accepts(() => validatePayload(legacy)),
-    index: accepts(() => validateIndex(index)),
-    index_extra_key: accepts(() => validateIndex({ ...index, path: "not-accepted" })),
-    index_nonzero_entries_zero_shards: accepts(() =>
-      validateIndex({ ...index, entry_count: 1, shard_count: 0 }),
-    ),
-    index_more_shards_than_entries: accepts(() =>
-      validateIndex({ ...index, entry_count: 1, shard_count: 2 }),
-    ),
-    shard: accepts(() => validateShard(shard, "000001", legacy.schema_version)),
-    shard_extra_key: accepts(() =>
-      validateShard({ ...shard, path: "not-accepted" }, "000001", legacy.schema_version),
-    ),
-    shard_wrong_id: accepts(() => validateShard(shard, "000002", legacy.schema_version)),
-    legacy_reordered_tie:
-      legacy.entries.length < 2
-        ? "skipped"
-        : accepts(() =>
-            validatePayload({
-              ...legacy,
-              entries: [legacy.entries[1], legacy.entries[0], ...legacy.entries.slice(2)],
-            }),
-          ),
-  };
-  process.stdout.write(JSON.stringify(results));
+  (async () => {
+    const results = {
+      legacy: await accepts(() => validatePayload(legacy)),
+      index: await accepts(() => validateIndex(index)),
+      index_extra_key: await accepts(() =>
+        validateIndex({ ...index, path: "not-accepted" }),
+      ),
+      index_nonzero_entries_zero_shards: await accepts(() =>
+        validateIndex({ ...index, entry_count: 1, shard_count: 0 }),
+      ),
+      index_more_shards_than_entries: await accepts(() =>
+        validateIndex({ ...index, entry_count: 1, shard_count: 2 }),
+      ),
+      shard: await accepts(() => validateShard(shard, "000001", legacy.schema_version)),
+      shard_extra_key: await accepts(() =>
+        validateShard({ ...shard, path: "not-accepted" }, "000001", legacy.schema_version),
+      ),
+      shard_wrong_id: await accepts(() =>
+        validateShard(shard, "000002", legacy.schema_version),
+      ),
+      legacy_reordered_tie:
+        legacy.entries.length < 2
+          ? "skipped"
+          : await accepts(() =>
+              validatePayload({
+                ...legacy,
+                entries: [legacy.entries[1], legacy.entries[0], ...legacy.entries.slice(2)],
+              }),
+            ),
+    };
+    process.stdout.write(JSON.stringify(results));
+  })();
 }

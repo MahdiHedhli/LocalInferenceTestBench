@@ -63,12 +63,19 @@
             <p class="section-note">
               All entries are self-reported and unverified. Repository checks validate their schema
               and content hash; the hash establishes content integrity, not provenance or proof that
-              a benchmark run occurred. Quality determines rank; speed is shown only as a
-              hardware-dependent observation. The default view shows only results that report clean
-              measurement conditions; legacy and non-clean results remain available through the
-              validity filter. On paginated leaderboards, search, hardware filters, and sorting apply
-              only to results loaded so far; validity and month filters share that same loaded-result
-              scope. Use “Load more results” to expand that set.
+              a benchmark run occurred. Rank bands use representative pass counts and 95% Wilson
+              intervals; overlapping intervals do not imply a strict ordering. Repeated matching
+              configurations collapse into one bounded cell, where corroboration counts accepted
+              content hashes, not people or independently verified runs. Speed is shown only as a
+              hardware-dependent distribution and never changes rank. The default view shows only
+              cells whose deterministic representative reports clean measurement conditions;
+              validity and month filters apply to that representative, while the evidence column
+              keeps all retained validity counts and month ranges visible. Legacy and non-clean
+              representatives remain available through the validity filter. On paginated
+              leaderboards, search, hardware filters, and sorting apply only to results loaded so
+              far; validity and month filters share that same loaded-result scope. Use “Load more
+              results” to expand that set. Frozen legacy rows retain their historical stored rank;
+              their 95% Wilson bounds are derived in the browser without rewriting the source data.
             </p>
           </div>
           <p class="updated" id="leaderboard-updated" aria-live="polite">Loading results...</p>
@@ -129,27 +136,28 @@
             </caption>
             <thead>
               <tr>
-                <th scope="col">Rank</th>
+                <th scope="col">Rank band</th>
                 <th scope="col">Model</th>
                 <th scope="col">Profile</th>
                 <th scope="col">Validity</th>
                 <th scope="col">As of</th>
+                <th scope="col">Evidence</th>
                 <th scope="col">Hardware</th>
                 <th scope="col">
                   <span class="metric-label">Semantic</span>
-                  <span class="metric-unit">score</span>
+                  <span class="metric-unit">passes + 95% Wilson</span>
                 </th>
                 <th scope="col">
                   <span class="metric-label">Format</span>
-                  <span class="metric-unit">score</span>
+                  <span class="metric-unit">passes + 95% Wilson</span>
                 </th>
                 <th scope="col">
                   <span class="metric-label">Throughput</span>
-                  <span class="metric-unit">tokens/s, hardware-dependent</span>
+                  <span class="metric-unit">median/range, tokens/s</span>
                 </th>
                 <th scope="col">
                   <span class="metric-label">Latency</span>
-                  <span class="metric-unit">mean, hardware-dependent</span>
+                  <span class="metric-unit">median/range, ms</span>
                 </th>
                 <th scope="col">Settings</th>
               </tr>

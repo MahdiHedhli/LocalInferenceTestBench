@@ -457,7 +457,7 @@ select:hover {
 
 table {
   width: 100%;
-  min-width: 76rem;
+  min-width: 94rem;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
@@ -523,6 +523,39 @@ tbody td:first-child {
 
 .model-source {
   overflow-wrap: anywhere;
+}
+
+.evidence-cell {
+  min-width: 17rem;
+}
+
+.evidence-count,
+.plausibility-note {
+  display: block;
+}
+
+.evidence-count {
+  color: var(--cyan);
+  font-family: var(--font-interface);
+  font-weight: 800;
+}
+
+.evidence-validity {
+  margin-top: 0.16rem;
+}
+
+.plausibility-note {
+  margin-top: 0.55rem;
+  padding-left: 0.55rem;
+  border-left: 0.15rem solid var(--cyan-deep);
+  color: var(--muted);
+  font-family: var(--font-interface);
+  font-size: 0.7rem;
+}
+
+.plausibility-caution {
+  border-left-color: var(--amber);
+  color: var(--amber);
 }
 
 .hardware-cell {

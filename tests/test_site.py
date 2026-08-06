@@ -279,6 +279,78 @@ class SiteSafetyTests(unittest.TestCase):
             {"clean_default": 1, "all": 4, "legacy": 1, "month": 2},
         )
 
+    def test_evidence_bands_are_closed_validated_and_neutral(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable")
+        completed = subprocess.run(
+            [
+                node,
+                str(PROJECT_ROOT / "tests" / "js_evidence_bands_runner.js"),
+                str(SITE_ROOT / "app.js"),
+                str(SITE_ROOT / "data" / "leaderboard.json"),
+            ],
+            cwd=PROJECT_ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            json.loads(completed.stdout),
+            {
+                "wilson_five_of_five": {"lower_percent": 56, "upper_percent": 100},
+                "wilson_zero_of_five": {"lower_percent": 0, "upper_percent": 44},
+                "legacy_wilson_in_memory": {"lower_percent": 56, "upper_percent": 100},
+                "legacy_score_text": "5/5 (56–100%)",
+                "legacy_display_band_count": 1,
+                "valid_projected_entry": True,
+                "valid_projected_payload": True,
+                "tampered_config_digest_rejected": True,
+                "tampered_wilson_rejected": True,
+                "corroboration_arithmetic_rejected": True,
+                "distribution_order_rejected": True,
+                "plausibility_basis_rejected": True,
+                "signal_order_rejected": True,
+                "caution_remains_valid": True,
+                "caution_text_is_non_attesting": True,
+                "parameter_scale_valid": True,
+                "parameter_scale_precision_rejected": True,
+                "parameter_scale_active_without_total_rejected": True,
+                "parameter_scale_active_above_total_rejected": True,
+                "transitive_rank_bands": True,
+                "tampered_rank_band_rejected": True,
+                "duplicate_config_cell_rejected": True,
+                "names_do_not_change_bands": True,
+                "partial_rank_bands_are_monotonic": True,
+                "tampered_shard_rank_band_rejected": True,
+                "delayed_shard_bridge_accepted": True,
+                "neutral_default_tiebreak": True,
+            },
+        )
+
+    def test_evidence_ui_uses_literal_non_attestation_language(self) -> None:
+        visible_text = re.sub(r"<[^>]+>", " ", self.html)
+        visible_text = re.sub(r"\s+", " ", visible_text).casefold()
+        for expected in (
+            "rank band",
+            "95% wilson",
+            "accepted content hashes, not people",
+            "filters apply to that representative",
+            "median/range",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, visible_text)
+        for expected in (
+            "Plausibility not evaluated; this is not verification.",
+            "No plausibility flag; this is not verification.",
+            "accepted hash",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, self.javascript)
+
     def test_browser_validators_accept_both_closed_transport_forms(self) -> None:
         node = shutil.which("node")
         if node is None:
