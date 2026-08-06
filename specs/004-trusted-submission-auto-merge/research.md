@@ -1,15 +1,36 @@
 # Research: Trusted submission auto-merge
 
-## Review signals
+## Trusted audit marker and direct call
 
-Codex clean reviews arrive as top-level issue comments from immutable user ID `199175422` through
-GitHub App ID `1144995`. The human-readable commit marker contains only ten hexadecimal characters,
-so it is never the full authorization. A base-controlled request comment records the complete base
-and head SHAs before the clean response.
+The base-controlled boundary posts a fixed comment only after it classifies and validates an exact
+benchmark-only change. GitHub records that comment under GitHub Actions user ID `41898282` and
+GitHub App ID `15368`. Its canonical body binds the full base and head SHAs. The downstream workflow
+fetches the exact comment ID live and requires matching actor/App IDs and equal creation/update
+timestamps, so an edited or substituted comment fails closed.
 
-CodeRabbit may report a successful commit status while its description says review was rate-limited.
-That status is availability information only. Neither CodeRabbit nor Codex replaces deterministic
-validation or branch protection.
+Those user/App IDs identify GitHub Actions, not one unique workflow. Another repository workflow
+with pull-request comment permission could produce the same actor identity. The marker therefore
+derives its limited audit value from the successful trusted-job dependency and exact live binding;
+it can never replace downstream revalidation.
+
+The marker is audit evidence that the trusted classification path completed; it is not sufficient
+authorization. The successful marker job directly invokes a local reusable workflow resolved from
+the same trusted caller commit and supplies the exact PR number, full base SHA, full head SHA, and
+comment ID. The called workflow independently retrieves and verifies every live authorization input
+before mutation.
+
+GitHub deliberately prevents most events created with a repository `GITHUB_TOKEN` from creating a
+new workflow run. Consequently, the marker's comment event does not trigger an `issue_comment`
+workflow. A clean Codex comment is therefore removed as an automation gate; using a direct local
+reusable-workflow call preserves a base-controlled chain without a broad maintainer PAT or event-loop
+workaround. See GitHub's
+[GITHUB_TOKEN event behavior](https://docs.github.com/en/actions/concepts/security/github_token).
+
+Codex and CodeRabbit remain best-effort advisory reviewers. Rate limiting, absence, connector
+failure, or a clean response is availability/review information only. Automation does not wait for
+either service. A review thread or changes request that arrives before final authorization is still
+read as live GitHub state and fails closed. Neither reviewer replaces deterministic validation or
+branch protection.
 
 ## Merge ordering
 
@@ -20,9 +41,16 @@ auto-merge guard and fixed squash metadata. The exact-head approval is added las
 A retry after a partial workflow run is different: a latest decisive Ernest approval for the exact
 current head may already exist while the auto-merge request is missing. After the complete content,
 identity, comment, thread, review, and head revalidation repeats, the workflow may re-arm native
-auto-merge without manufacturing another approval. A later dismissal or change request, or an
-approval tied to any other commit, invalidates reuse. GitHub then enforces every required check and
-configured repository protection in both paths.
+auto-merge without manufacturing another approval. The final required `Trusted benchmark boundary`
+context is still pending during that retry, so the PR retains a native requirement and can accept a
+new auto-merge request. A later dismissal or change request, or an approval tied to any other commit,
+invalidates reuse. GitHub then enforces every required check and configured repository protection in
+both paths.
+
+The final required boundary is also the recovery guard for the fresh path. Native auto-merge is armed
+before Ernest approves the exact head, but the required boundary does not turn green until the entire
+called workflow finishes. A transport or parser failure after arming therefore cannot become
+mergeable merely because another reviewer later approves the PR.
 
 ## Mergeability and retries
 
@@ -48,6 +76,16 @@ settings, or force-push/deletion prohibitions. Those remain explicit operator pr
 be rechecked after repository-setting changes. GitHub enforces the configured controls when native
 auto-merge evaluates the PR.
 
-The reviewer credential is a repository secret exposed only to the final mutation step. The step
-pins its immutable account ID before any write. A dedicated short-lived GitHub App token would be a
-future reduction in credential blast radius; it is not required for this feature.
+The trusted caller maps repository secret `ERNEST_REVIEW_TOKEN` explicitly to the local reusable
+workflow's `reviewer_token`; `secrets: inherit` is prohibited. The credential is bound only to the
+final mutation step after all public-token checks pass, and the step pins its immutable account ID
+before any write. Boundary and marker jobs never receive it. A dedicated short-lived GitHub App
+token would be a future reduction in credential blast radius; it is not required for this feature.
+
+## Integrity and provenance
+
+Canonical digest and deterministic rebuild checks establish that accepted public bytes satisfy the
+schema and have not changed relative to their content ID. They cannot establish that a benchmark was
+run or that self-reported performance is truthful. The marker, advisory reviews, automated Ernest
+approval, and native auto-merge are publication-policy evidence, not benchmark provenance or
+attestation.

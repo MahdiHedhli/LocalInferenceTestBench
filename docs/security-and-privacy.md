@@ -114,35 +114,60 @@ created.
 The trusted benchmark boundary executes only validator and builder code from the base commit. It
 fetches the pull-request head as Git data, verifies the exact append-only paths and ordinary blob
 modes, materializes only public dataset blobs, and checks schema, digest, duplicates, and the
-byte-exact leaderboard before requesting external review. No pull-request code is checked out or
+byte-exact leaderboard before posting one fixed audit marker. No pull-request code is checked out or
 executed in the privileged workflows.
 
-A clean Codex comment is accepted only from the pinned bot and GitHub App identities, must be
-unedited, and must follow a trusted request marker containing the full base and head SHAs. The
-connector's shortened commit marker is advisory. Before any reviewer credential is exposed, trusted
-code rechecks the live PR, content boundary, publicly observable app-bound required checks, native
-review decision, review states, complete paginated thread set, and exact base/head. GitHub enforces
-the repository's remaining configured protections. The workflow does not claim per-run visibility
-into administration-only settings; stale-review dismissal, last-push approval, conversation
-resolution, linear history, admin enforcement, and force-push/deletion prohibitions are mandatory
-operator prerequisites. The workflow arms native squash auto-merge with a full-head guard and fixed
+The marker contains no contributor-controlled text and binds the full base and head SHAs. The
+downstream workflow fetches it by the exact comment ID and requires the canonical body, equal
+creation/update timestamps, GitHub Actions user ID `41898282`, and GitHub App ID `15368`. The marker
+is audit evidence that trusted classification completed; it is not authorization by itself. After
+the marker job succeeds, the base-controlled caller directly invokes a local reusable workflow from
+the same trusted commit and passes the exact PR number, full base SHA, full head SHA, and comment ID.
+The called workflow independently verifies every input and the live marker before repeating the
+complete authorization.
+
+The required branch-protection context named `Trusted benchmark boundary` comes from a final
+aggregator, not the early classifier. It remains pending until the marker and reusable automation
+jobs reach their exact expected states. Consequently, an approval or auto-merge request left by an
+interrupted attempt cannot merge the pull request through an already-successful early check.
+
+Comments created with a repository `GITHUB_TOKEN` do not start downstream `issue_comment` workflow
+runs, so the lane no longer depends on a clean Codex reply as its trigger or merge gate. Codex and
+CodeRabbit remain best-effort advisory reviewers, and automation does not wait for them. Their clean,
+missing, failed, skipped, or rate-limited response never authorizes a merge. A review thread or
+changes request visible during final revalidation still fails closed.
+
+Before any reviewer credential is bound, trusted code rechecks the live PR, content boundary,
+publicly observable app-bound required checks, native review decision, review states, complete
+paginated thread set, exact marker, and exact base/head. GitHub enforces the repository's remaining
+configured protections. The workflow does not claim per-run visibility into administration-only
+settings; stale-review dismissal, last-push approval, conversation resolution, linear history, admin
+enforcement, and force-push/deletion prohibitions are mandatory operator prerequisites. The caller
+explicitly maps repository secret `ERNEST_REVIEW_TOKEN` to the local reusable workflow's
+`reviewer_token`; `secrets: inherit` is forbidden, and the credential is bound only in the final
+mutation step. The workflow arms native squash auto-merge with a full-head guard and fixed
 digest-derived commit metadata before adding a full-head approval. It freshly requires the live
 `main` tip to equal the authorized base SHA immediately before either possible mutation. It never
-performs a direct merge, admin bypass, head checkout, force-push, or push to `main`. CodeRabbit
-review is requested but a rate-limit status never authorizes a merge.
+performs a direct merge, admin bypass, head checkout, force-push, or push to `main`.
 
 The automated lane requires `litb/submission-<submission-id>` as the live head ref, with the digest
 matching the sole added file and canonical content ID. GitHub's transient unknown mergeability gets
 only bounded retries. Once mergeability is established, an `unstable` state may continue to native
 auto-merge, but it does not pass or waive a required check; GitHub remains the merge authority.
+The `litb/submission-` namespace is reserved: if a branch bearing that name changes into a general,
+mixed, or otherwise non-submission diff, the trusted boundary fails instead of reclassifying it as a
+normal code pull request.
 After a partial run, an existing approval is reusable only if it is the configured reviewer's latest
-decisive state for the exact current head. Full revalidation precedes re-arming missing auto-merge;
-later dismissal, change request, or approval of another commit fails closed.
+decisive state for the exact current head. Full revalidation precedes re-arming missing auto-merge
+while the final required boundary remains pending. That pending required context keeps the exact
+retry eligible for native auto-merge rather than presenting GitHub with an already-clean approved
+pull request. A later dismissal, change request, or approval of another commit fails closed.
 
 The pull request is public before continuous integration finishes. The candidate has no contributor
 field, but the submitting GitHub account remains visible. Accepted entries are self-reported,
-schema-validated, exact-head reviewed, and not independently reproduced. The digest, bot review, and
-approval establish neither provenance nor attestation that a run occurred.
+schema-validated, exact-head reviewed, and not independently reproduced. Deterministic validation
+establishes schema conformance and integrity of the published bytes. The digest, audit marker, bot
+review, and approval establish neither provenance nor attestation that a run occurred.
 The reviewer-account approval is an automated policy gate, not a second independent substantive
 review.
 

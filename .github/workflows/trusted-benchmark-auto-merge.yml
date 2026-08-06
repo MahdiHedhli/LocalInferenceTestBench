@@ -1,26 +1,29 @@
 name: Trusted benchmark auto-merge
 
 on:
-  issue_comment:
-    types:
-      - created
+  workflow_call:
+    inputs:
+      pull_request_number:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      marker_comment_id:
+        required: true
+        type: string
+    secrets:
+      reviewer_token:
+        required: true
 
 permissions: {}
-
-concurrency:
-  group: trusted-benchmark-auto-merge-${{ github.repository_id }}-${{ github.event.issue.number }}
-  cancel-in-progress: false
 
 jobs:
   authorize:
     name: Authorize exact benchmark head
-    if: >-
-      github.event.repository.id == 1324333809 &&
-      github.event.repository.full_name == 'MahdiHedhli/LocalInferenceTestBench' &&
-      github.event.issue.pull_request &&
-      github.event.comment.user.id == 199175422 &&
-      github.event.comment.user.login == 'chatgpt-codex-connector[bot]' &&
-      github.event.comment.performed_via_github_app.id == 1144995
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -30,29 +33,38 @@ jobs:
     outputs:
       base_sha: ${{ steps.pull.outputs.base_sha }}
       head_sha: ${{ steps.pull.outputs.head_sha }}
+      marker_comment_id: ${{ steps.call.outputs.marker_comment_id }}
       pull_request_node_id: ${{ steps.pull.outputs.pull_request_node_id }}
       pull_request_number: ${{ steps.pull.outputs.pull_request_number }}
-      reviewed_commit_prefix: ${{ steps.signal.outputs.reviewed_commit_prefix }}
       submission_id: ${{ steps.pull.outputs.submission_id }}
     steps:
-      - name: Check out trusted default branch
+      - name: Validate exact trusted-call inputs
+        id: call
+        env:
+          BASE_SHA: ${{ inputs.base_sha }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+          MARKER_COMMENT_ID: ${{ inputs.marker_comment_id }}
+          PR_NUMBER: ${{ inputs.pull_request_number }}
+        run: |
+          set -euo pipefail
+          [[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${MARKER_COMMENT_ID}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
+          echo "marker_comment_id=${MARKER_COMMENT_ID}" >> "${GITHUB_OUTPUT}"
+      - name: Check out the exact trusted base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: ${{ inputs.base_sha }}
           fetch-depth: 1
           persist-credentials: false
-      - name: Validate immutable Codex signal
-        id: signal
-        run: >-
-          python3 scripts/trusted_submission_automation.py signal
-          --event "${GITHUB_EVENT_PATH}"
-          --output "${GITHUB_OUTPUT}"
       - name: Read live repository, protection, and pull request state
         id: pull
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ steps.signal.outputs.pull_request_number }}
-          REVIEWED_PREFIX: ${{ steps.signal.outputs.reviewed_commit_prefix }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+          PR_NUMBER: ${{ inputs.pull_request_number }}
         run: |
           set -euo pipefail
           gh api repos/MahdiHedhli/LocalInferenceTestBench > "${RUNNER_TEMP}/repository.json"
@@ -67,7 +79,8 @@ jobs:
           python3 scripts/trusted_submission_automation.py pull-request \
             --input "${RUNNER_TEMP}/pull-request.json" \
             --number "${PR_NUMBER}" \
-            --prefix "${REVIEWED_PREFIX}" \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}" \
             --output "${GITHUB_OUTPUT}"
       - name: Fetch untrusted head as Git data and validate trusted content
         env:
@@ -98,15 +111,17 @@ jobs:
           BASE_SHA: ${{ steps.pull.outputs.base_sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ steps.pull.outputs.head_sha }}
+          MARKER_COMMENT_ID: ${{ steps.call.outputs.marker_comment_id }}
           PR_NUMBER: ${{ steps.pull.outputs.pull_request_number }}
         run: |
           set -euo pipefail
-          gh api --paginate --slurp \
-            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments?per_page=100" \
+          gh api \
+            "repos/MahdiHedhli/LocalInferenceTestBench/issues/comments/${MARKER_COMMENT_ID}" \
             > "${RUNNER_TEMP}/comments.json"
           python3 scripts/trusted_submission_automation.py comments \
             --input "${RUNNER_TEMP}/comments.json" \
-            --event "${GITHUB_EVENT_PATH}" \
+            --number "${PR_NUMBER}" \
+            --comment-id "${MARKER_COMMENT_ID}" \
             --base "${BASE_SHA}" \
             --head "${HEAD_SHA}"
           gh api graphql --paginate --slurp \
@@ -128,7 +143,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ steps.pull.outputs.head_sha }}
           PR_NUMBER: ${{ steps.pull.outputs.pull_request_number }}
-          REVIEWED_PREFIX: ${{ steps.signal.outputs.reviewed_commit_prefix }}
         run: |
           set -euo pipefail
           bash scripts/fetch_mergeable_pull.sh \
@@ -136,7 +150,8 @@ jobs:
           python3 scripts/trusted_submission_automation.py pull-request \
             --input "${RUNNER_TEMP}/pull-request-final.json" \
             --number "${PR_NUMBER}" \
-            --prefix "${REVIEWED_PREFIX}" \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}" \
             --output "${RUNNER_TEMP}/pull-request-final.out"
           grep -Fqx "base_sha=${BASE_SHA}" "${RUNNER_TEMP}/pull-request-final.out"
           grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request-final.out"
@@ -187,9 +202,9 @@ jobs:
           BASE_SHA: ${{ needs.authorize.outputs.base_sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ needs.authorize.outputs.head_sha }}
+          MARKER_COMMENT_ID: ${{ needs.authorize.outputs.marker_comment_id }}
           PR_NODE_ID: ${{ needs.authorize.outputs.pull_request_node_id }}
           PR_NUMBER: ${{ needs.authorize.outputs.pull_request_number }}
-          REVIEWED_PREFIX: ${{ needs.authorize.outputs.reviewed_commit_prefix }}
           SUBMISSION_ID: ${{ needs.authorize.outputs.submission_id }}
         run: |
           set -euo pipefail
@@ -206,18 +221,20 @@ jobs:
           python3 "${helper}" pull-request \
             --input "${RUNNER_TEMP}/pull-request.json" \
             --number "${PR_NUMBER}" \
-            --prefix "${REVIEWED_PREFIX}" \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}" \
             --output "${RUNNER_TEMP}/pull-request.out"
           grep -Fqx "pull_request_node_id=${PR_NODE_ID}" "${RUNNER_TEMP}/pull-request.out"
           grep -Fqx "base_sha=${BASE_SHA}" "${RUNNER_TEMP}/pull-request.out"
           grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request.out"
           grep -Fqx "submission_id=${SUBMISSION_ID}" "${RUNNER_TEMP}/pull-request.out"
-          gh api --paginate --slurp \
-            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments?per_page=100" \
+          gh api \
+            "repos/MahdiHedhli/LocalInferenceTestBench/issues/comments/${MARKER_COMMENT_ID}" \
             > "${RUNNER_TEMP}/comments.json"
           python3 "${helper}" comments \
             --input "${RUNNER_TEMP}/comments.json" \
-            --event "${GITHUB_EVENT_PATH}" \
+            --number "${PR_NUMBER}" \
+            --comment-id "${MARKER_COMMENT_ID}" \
             --base "${BASE_SHA}" \
             --head "${HEAD_SHA}"
           gh api graphql --paginate --slurp \
@@ -232,11 +249,11 @@ jobs:
       - name: Arm protected squash auto-merge, then approve the exact head
         env:
           BASE_SHA: ${{ needs.authorize.outputs.base_sha }}
-          GH_TOKEN: ${{ secrets.ERNEST_REVIEW_TOKEN }}
+          GH_TOKEN: ${{ secrets.reviewer_token }}
           HEAD_SHA: ${{ needs.authorize.outputs.head_sha }}
+          MARKER_COMMENT_ID: ${{ needs.authorize.outputs.marker_comment_id }}
           PR_NODE_ID: ${{ needs.authorize.outputs.pull_request_node_id }}
           PR_NUMBER: ${{ needs.authorize.outputs.pull_request_number }}
-          REVIEWED_PREFIX: ${{ needs.authorize.outputs.reviewed_commit_prefix }}
           SUBMISSION_ID: ${{ needs.authorize.outputs.submission_id }}
         run: |
           set -euo pipefail
@@ -244,15 +261,44 @@ jobs:
           mergeable_helper="${RUNNER_TEMP}/fetch_mergeable_pull.sh"
           review_threads_query="${RUNNER_TEMP}/review_threads.graphql"
           auto_merge_query="${RUNNER_TEMP}/auto_merge_state.graphql"
-          validate_live_base() {
-            local destination="$1"
+          validate_live_authorization() {
+            local label="$1"
+            local destination="${RUNNER_TEMP}/${label}"
             local live_base
             gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
-              > "${destination}"
-            python3 "${helper}" protection --input "${destination}"
-            live_base="$(jq -er '.commit.sha | strings' "${destination}")"
+              > "${destination}-base.json"
+            python3 "${helper}" protection --input "${destination}-base.json"
+            live_base="$(jq -er '.commit.sha | strings' "${destination}-base.json")"
             [[ "${live_base}" =~ ^[0-9a-f]{40}$ ]]
             test "${live_base}" = "${BASE_SHA}"
+            bash "${mergeable_helper}" \
+              "${PR_NUMBER}" "${destination}-pull.json"
+            python3 "${helper}" pull-request \
+              --input "${destination}-pull.json" \
+              --number "${PR_NUMBER}" \
+              --base "${BASE_SHA}" \
+              --head "${HEAD_SHA}" \
+              --output "${destination}-pull.out"
+            grep -Fqx "pull_request_node_id=${PR_NODE_ID}" "${destination}-pull.out"
+            grep -Fqx "submission_id=${SUBMISSION_ID}" "${destination}-pull.out"
+            gh api \
+              "repos/MahdiHedhli/LocalInferenceTestBench/issues/comments/${MARKER_COMMENT_ID}" \
+              > "${destination}-comments.json"
+            python3 "${helper}" comments \
+              --input "${destination}-comments.json" \
+              --number "${PR_NUMBER}" \
+              --comment-id "${MARKER_COMMENT_ID}" \
+              --base "${BASE_SHA}" \
+              --head "${HEAD_SHA}"
+            gh api graphql --paginate --slurp \
+              -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+              -F query=@"${review_threads_query}" \
+              > "${destination}-threads.json"
+            python3 "${helper}" threads --input "${destination}-threads.json"
+            gh api --paginate --slurp \
+              "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}/reviews?per_page=100" \
+              > "${destination}-reviews.json"
+            python3 "${helper}" review-states --input "${destination}-reviews.json"
           }
           gh api user > "${RUNNER_TEMP}/reviewer.json"
           python3 "${helper}" identity --input "${RUNNER_TEMP}/reviewer.json"
@@ -266,18 +312,20 @@ jobs:
           python3 "${helper}" pull-request \
             --input "${RUNNER_TEMP}/pull-request-final.json" \
             --number "${PR_NUMBER}" \
-            --prefix "${REVIEWED_PREFIX}" \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}" \
             --output "${RUNNER_TEMP}/pull-request-final.out"
           grep -Fqx "pull_request_node_id=${PR_NODE_ID}" "${RUNNER_TEMP}/pull-request-final.out"
           grep -Fqx "base_sha=${BASE_SHA}" "${RUNNER_TEMP}/pull-request-final.out"
           grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request-final.out"
           grep -Fqx "submission_id=${SUBMISSION_ID}" "${RUNNER_TEMP}/pull-request-final.out"
-          gh api --paginate --slurp \
-            "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments?per_page=100" \
+          gh api \
+            "repos/MahdiHedhli/LocalInferenceTestBench/issues/comments/${MARKER_COMMENT_ID}" \
             > "${RUNNER_TEMP}/comments-final.json"
           python3 "${helper}" comments \
             --input "${RUNNER_TEMP}/comments-final.json" \
-            --event "${GITHUB_EVENT_PATH}" \
+            --number "${PR_NUMBER}" \
+            --comment-id "${MARKER_COMMENT_ID}" \
             --base "${BASE_SHA}" \
             --head "${HEAD_SHA}"
           gh api graphql --paginate --slurp \
@@ -312,7 +360,7 @@ jobs:
             fi
             headline="data: add benchmark submission ${SUBMISSION_ID:0:12}"
             commit_body="Schema-validated self-reported benchmark record; run unverified."
-            validate_live_base "${RUNNER_TEMP}/base-before-auto-merge.json"
+            validate_live_authorization "before-auto-merge"
             gh api graphql \
               -f id="${PR_NODE_ID}" \
               -f head="${HEAD_SHA}" \
@@ -337,7 +385,8 @@ jobs:
           python3 "${helper}" pull-request \
             --input "${RUNNER_TEMP}/pull-request-before-approval.json" \
             --number "${PR_NUMBER}" \
-            --prefix "${REVIEWED_PREFIX}" \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}" \
             --output "${RUNNER_TEMP}/pull-request-before-approval.out"
           grep -Fqx "base_sha=${BASE_SHA}" "${RUNNER_TEMP}/pull-request-before-approval.out"
           grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request-before-approval.out"
@@ -359,7 +408,7 @@ jobs:
           python3 "${helper}" threads --input "${RUNNER_TEMP}/threads-before-approval.json"
           if grep -Fqx "exists=false" "${RUNNER_TEMP}/approval-state.out"; then
             approval_body="Exact-head approval after trusted benchmark authorization."
-            validate_live_base "${RUNNER_TEMP}/base-before-approval.json"
+            validate_live_authorization "before-approval"
             gh api graphql \
               -f id="${PR_NODE_ID}" \
               -f head="${HEAD_SHA}" \
