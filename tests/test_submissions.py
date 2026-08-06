@@ -989,20 +989,16 @@ class SubmissionTests(unittest.TestCase):
             with self.assertRaisesRegex(SubmissionError, "filename"):
                 build_leaderboard(directory)
 
-    def test_leaderboard_enforces_total_input_and_output_limits(self) -> None:
+    def test_direct_leaderboard_writer_enforces_its_single_payload_limit(self) -> None:
         submission = prepare_submission(valid_report(), public_environment())
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             path = directory / f"{submission['submission_id']}.json"
             path.write_text(json.dumps(submission), encoding="utf-8")
-            with mock.patch.object(submissions_module, "_MAX_DATASET_BYTES", 1):
-                with self.assertRaisesRegex(SubmissionError, "input exceeds"):
-                    build_leaderboard(directory)
+            leaderboard = build_leaderboard(directory)
+            with mock.patch.object(submissions_module, "_MAX_DATA_FILE_BYTES", 1):
                 with self.assertRaisesRegex(SubmissionError, "generated leaderboard"):
-                    write_leaderboard(
-                        {"schema_version": "1.0", "entry_count": 0, "entries": []},
-                        directory / "leaderboard.json",
-                    )
+                    write_leaderboard(leaderboard, directory / "leaderboard.json")
 
     def test_leaderboard_writer_does_not_follow_a_fixed_temporary_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

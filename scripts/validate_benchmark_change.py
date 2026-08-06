@@ -13,6 +13,7 @@ import tempfile
 
 SUBMISSIONS = PurePosixPath("site/data/submissions")
 LEADERBOARD = PurePosixPath("site/data/leaderboard.json")
+PUBLIC_DATA = PurePosixPath("site/data")
 SUBMISSION_NAME = re.compile(r"^[0-9a-f]{64}\.json$")
 
 
@@ -73,14 +74,11 @@ def validate_changes(
 ) -> bool:
     """Return whether this is a benchmark PR; reject mixed or unsafe benchmark diffs."""
 
-    def touches_submission_tree(path: str) -> bool:
+    def touches_public_data(path: str) -> bool:
         candidate = PurePosixPath(path)
-        return candidate == SUBMISSIONS or SUBMISSIONS in candidate.parents
+        return candidate == PUBLIC_DATA or PUBLIC_DATA in candidate.parents
 
-    if not any(
-        PurePosixPath(path) == LEADERBOARD or touches_submission_tree(path)
-        for _status, path in changes
-    ):
+    if not any(touches_public_data(path) for _status, path in changes):
         if require_benchmark:
             raise ChangeError("benchmark-only change required")
         return False
@@ -155,7 +153,6 @@ def validate_benchmark_content(repository: Path, head: str, trusted_root: Path) 
             LEADERBOARD.as_posix(),
         ).split(b"\0")
         found_leaderboard = False
-        total_bytes = 0
         for record in records:
             if not record:
                 continue
@@ -181,9 +178,6 @@ def validate_benchmark_content(repository: Path, head: str, trusted_root: Path) 
             maximum = 4 * 1024 * 1024 if relative == LEADERBOARD else 256 * 1024
             if blob_size > maximum:
                 raise ChangeError("benchmark content exceeds its trusted size limit")
-            total_bytes += blob_size
-            if total_bytes > 8 * 1024 * 1024:
-                raise ChangeError("benchmark dataset exceeds its trusted materialization limit")
             target = destination.joinpath(*relative.parts)
             target.parent.mkdir(parents=True, exist_ok=True)
             try:

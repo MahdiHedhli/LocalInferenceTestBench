@@ -64,25 +64,27 @@
               All entries are self-reported and unverified. Repository checks validate their schema
               and content hash; the hash establishes content integrity, not provenance or proof that
               a benchmark run occurred. Quality determines rank; speed is shown only as a
-              hardware-dependent observation.
+              hardware-dependent observation. On paginated leaderboards, search, hardware filters,
+              and sorting apply only to results loaded so far; use “Load more results” to expand that
+              set.
             </p>
           </div>
           <p class="updated" id="leaderboard-updated" aria-live="polite">Loading results...</p>
         </div>
 
-        <form class="filters" id="leaderboard-filters" aria-label="Filter leaderboard results">
+        <form class="filters" id="leaderboard-filters" aria-label="Filter loaded leaderboard results">
           <div class="field field-search">
-            <label for="model-search">Find a model</label>
+            <label for="model-search">Find a loaded model</label>
             <input id="model-search" name="model" type="search" autocomplete="off" placeholder="Model name or source">
           </div>
           <div class="field">
-            <label for="hardware-filter">Hardware</label>
+            <label for="hardware-filter">Loaded hardware</label>
             <select id="hardware-filter" name="hardware">
               <option value="all">All hardware</option>
             </select>
           </div>
           <div class="field">
-            <label for="sort-results">Sort by</label>
+            <label for="sort-results">Sort loaded results by</label>
             <select id="sort-results" name="sort">
               <option value="semantic">Semantic score</option>
               <option value="format">Format score</option>
@@ -135,6 +137,15 @@
             </thead>
             <tbody id="leaderboard-body"></tbody>
           </table>
+        </div>
+
+        <div class="leaderboard-pagination">
+          <button
+            class="button button-secondary"
+            id="load-more-results"
+            type="button"
+            hidden
+          >Load more results</button>
         </div>
 
         <noscript>

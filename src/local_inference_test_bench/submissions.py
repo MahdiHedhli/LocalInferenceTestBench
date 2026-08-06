@@ -25,6 +25,7 @@ from .safety import (
 
 SUBMISSION_SCHEMA_VERSION = "1.0"
 LEADERBOARD_SCHEMA_VERSION = "1.0"
+LEADERBOARD_INDEX_VERSION = "1.0"
 _STANDARD_CASE_IDS = (
     "structured-json",
     "python-ast",
@@ -95,7 +96,9 @@ _SCANNER_SUPPRESSION_MARKER = re.compile(
     r"(?i)\b" + "git" + r"leaks\s*:\s*allow\b"
 )
 _MAX_SUBMISSION_BYTES = 256 * 1024
-_MAX_DATASET_BYTES = 2 * 1024 * 1024
+# This is a per-file publication limit. The accepted corpus itself is unbounded;
+# the static transport paginates it into independently bounded shard files.
+_MAX_DATA_FILE_BYTES = 2 * 1024 * 1024
 _MAX_SAFE_INTEGER = 9_007_199_254_740_991
 _MEMORY_ARCHITECTURES = {"shared", "discrete", "mixed", "unknown"}
 _ACCELERATOR_KINDS = {
@@ -966,12 +969,6 @@ def build_leaderboard(submissions_dir: str | Path) -> dict[str, Any]:
         if path.suffix != ".json" or path.is_symlink() or not path.is_file():
             raise SubmissionError("submissions directory contains an unsupported entry")
         files.append(path)
-    try:
-        input_bytes = sum(path.stat().st_size for path in files)
-    except OSError as error:
-        raise SubmissionError("submission input size could not be checked") from error
-    if input_bytes > _MAX_DATASET_BYTES:
-        raise SubmissionError("accepted submission input exceeds the site data limit")
     seen_ids: set[str] = set()
     rows: list[dict[str, Any]] = []
     for path in files:
@@ -1039,9 +1036,158 @@ def build_leaderboard(submissions_dir: str | Path) -> dict[str, Any]:
         "entry_count": len(entries),
         "entries": entries,
     }
-    if len(render_leaderboard_bytes(leaderboard)) > _MAX_DATASET_BYTES:
-        raise SubmissionError("generated leaderboard exceeds the site data limit")
     return leaderboard
+
+
+def _shard_id(index: int) -> str:
+    return f"{index:06d}"
+
+
+def _leaderboard_shard(
+    leaderboard: Mapping[str, Any],
+    index: int,
+    entries: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "index_version": LEADERBOARD_INDEX_VERSION,
+        "schema_version": leaderboard["schema_version"],
+        "shard_id": _shard_id(index),
+        "entry_count": len(entries),
+        "entries": entries,
+    }
+
+
+def render_leaderboard_shard_bytes(value: Mapping[str, Any]) -> bytes:
+    """Render the compact canonical representation used for one transport shard."""
+
+    try:
+        rendered = json.dumps(
+            value,
+            separators=(",", ":"),
+            sort_keys=True,
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as error:
+        raise SubmissionError("leaderboard shard is not strict JSON") from error
+    return (rendered + "\n").encode("utf-8")
+
+
+def _compact_entry_size(value: Mapping[str, Any]) -> int:
+    return len(render_leaderboard_shard_bytes(value)) - 1
+
+
+def _projected_shard_size(
+    leaderboard: Mapping[str, Any],
+    shard_number: int,
+    entry_count: int,
+    compact_entry_bytes: int,
+) -> int:
+    envelope = {
+        "index_version": LEADERBOARD_INDEX_VERSION,
+        "schema_version": leaderboard["schema_version"],
+        "shard_id": _shard_id(shard_number),
+        "entry_count": entry_count,
+        "entries": [],
+    }
+    separators = max(0, entry_count - 1)
+    return len(render_leaderboard_shard_bytes(envelope)) + compact_entry_bytes + separators
+
+
+def build_leaderboard_bundle(
+    leaderboard: Mapping[str, Any],
+) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
+    """Partition one logical leaderboard into a bounded index and shard payloads."""
+
+    if set(leaderboard) != {"schema_version", "entry_count", "entries"}:
+        raise SubmissionError("leaderboard has an unsupported transport contract")
+    schema_version = leaderboard["schema_version"]
+    entry_count = leaderboard["entry_count"]
+    entries = leaderboard["entries"]
+    if (
+        schema_version != LEADERBOARD_SCHEMA_VERSION
+        or isinstance(entry_count, bool)
+        or not isinstance(entry_count, int)
+        or entry_count < 0
+        or not isinstance(entries, list)
+        or len(entries) != entry_count
+    ):
+        raise SubmissionError("leaderboard has an unsupported transport contract")
+
+    shards: list[dict[str, Any]] = []
+    current_entries: list[dict[str, Any]] = []
+    current_entry_bytes = 0
+    for entry in entries:
+        entry_bytes = _compact_entry_size(entry)
+        shard_number = len(shards) + 1
+        candidate_count = len(current_entries) + 1
+        candidate_entry_bytes = current_entry_bytes + entry_bytes
+        candidate_size = _projected_shard_size(
+            leaderboard,
+            shard_number,
+            candidate_count,
+            candidate_entry_bytes,
+        )
+        if candidate_size <= _MAX_DATA_FILE_BYTES:
+            current_entries.append(entry)
+            current_entry_bytes = candidate_entry_bytes
+            continue
+        if not current_entries:
+            raise SubmissionError("one leaderboard entry exceeds the site data file limit")
+        shards.append(_leaderboard_shard(leaderboard, shard_number, current_entries))
+        current_entries = [entry]
+        current_entry_bytes = entry_bytes
+        if (
+            _projected_shard_size(
+                leaderboard,
+                shard_number + 1,
+                1,
+                current_entry_bytes,
+            )
+            > _MAX_DATA_FILE_BYTES
+        ):
+            raise SubmissionError("one leaderboard entry exceeds the site data file limit")
+    if current_entries:
+        shards.append(
+            _leaderboard_shard(leaderboard, len(shards) + 1, current_entries)
+        )
+
+    for shard in shards:
+        if len(render_leaderboard_shard_bytes(shard)) > _MAX_DATA_FILE_BYTES:
+            raise SubmissionError("generated leaderboard shard exceeds the site data file limit")
+
+    index = {
+        "index_version": LEADERBOARD_INDEX_VERSION,
+        "schema_version": schema_version,
+        "entry_count": entry_count,
+        "shard_count": len(shards),
+    }
+    if len(render_leaderboard_bytes(index)) > _MAX_DATA_FILE_BYTES:
+        raise SubmissionError("leaderboard index exceeds the site data file limit")
+    return index, tuple(shards)
+
+
+def build_persisted_leaderboard(leaderboard: Mapping[str, Any]) -> dict[str, Any]:
+    """Use the legacy monolith while bounded, then switch to the compact index."""
+
+    try:
+        encoder = json.JSONEncoder(
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+        rendered_size = 1
+        for chunk in encoder.iterencode(leaderboard):
+            rendered_size += len(chunk)
+            if rendered_size > _MAX_DATA_FILE_BYTES:
+                break
+    except (TypeError, ValueError) as error:
+        raise SubmissionError("leaderboard is not strict JSON") from error
+    if rendered_size <= _MAX_DATA_FILE_BYTES:
+        return copy.deepcopy(dict(leaderboard))
+    index, _shards = build_leaderboard_bundle(leaderboard)
+    return index
 
 
 def render_leaderboard_bytes(value: Mapping[str, Any]) -> bytes:
@@ -1060,15 +1206,12 @@ def render_leaderboard_bytes(value: Mapping[str, Any]) -> bytes:
     return (rendered + "\n").encode("utf-8")
 
 
-def write_leaderboard(leaderboard: Mapping[str, Any], output: str | Path) -> None:
-    """Replace generated static data atomically with deterministic JSON."""
-
+def _write_leaderboard_bytes(rendered: bytes, output: str | Path) -> None:
     destination = Path(output)
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.parent.is_symlink() or not destination.parent.is_dir():
         raise SubmissionError("leaderboard output directory must be a regular directory")
-    rendered = render_leaderboard_bytes(leaderboard)
-    if len(rendered) > _MAX_DATASET_BYTES:
+    if len(rendered) > _MAX_DATA_FILE_BYTES:
         raise SubmissionError("generated leaderboard exceeds the site data limit")
     descriptor = -1
     temporary: Path | None = None
@@ -1095,3 +1238,41 @@ def write_leaderboard(leaderboard: Mapping[str, Any], output: str | Path) -> Non
         except OSError:
             pass
         raise SubmissionError("leaderboard data could not be written") from error
+
+
+def write_leaderboard(leaderboard: Mapping[str, Any], output: str | Path) -> None:
+    """Replace one bounded generated static-data file atomically."""
+
+    _write_leaderboard_bytes(render_leaderboard_bytes(leaderboard), output)
+
+
+def write_leaderboard_bundle(
+    leaderboard: Mapping[str, Any],
+    output_dir: str | Path,
+) -> tuple[Path, tuple[Path, ...]]:
+    """Write a bounded static index and deterministic ordinal shards."""
+
+    destination = Path(output_dir)
+    index, shards = build_leaderboard_bundle(leaderboard)
+    index_bytes = render_leaderboard_bytes(index)
+    if destination.exists():
+        if destination.is_symlink() or not destination.is_dir():
+            raise SubmissionError("leaderboard bundle directory must be a regular directory")
+        try:
+            if any(destination.iterdir()):
+                raise SubmissionError("leaderboard bundle directory must be empty")
+        except OSError as error:
+            raise SubmissionError("leaderboard bundle directory could not be inspected") from error
+    else:
+        try:
+            destination.mkdir(parents=True)
+        except OSError as error:
+            raise SubmissionError("leaderboard bundle directory could not be created") from error
+    index_path = destination / "leaderboard.json"
+    _write_leaderboard_bytes(index_bytes, index_path)
+    shard_paths: list[Path] = []
+    for shard in shards:
+        path = destination / f"leaderboard-{shard['shard_id']}.json"
+        _write_leaderboard_bytes(render_leaderboard_shard_bytes(shard), path)
+        shard_paths.append(path)
+    return index_path, tuple(shard_paths)

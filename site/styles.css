@@ -365,6 +365,12 @@ h3 {
   background: repeating-linear-gradient(90deg, var(--amber) 0 0.35rem, transparent 0.35rem 0.55rem);
 }
 
+.leaderboard-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.25rem;
+}
+
 .section-heading {
   display: flex;
   align-items: start;

@@ -170,3 +170,48 @@ It must remain removable from the standard workflow.
 The `artifacts/` directory is ignored except for its placeholder. Do not force-add real run records.
 If sharing a result is necessary, follow the deliberate export review in
 [security and privacy](security-and-privacy.md).
+
+## 10. Understand public leaderboard retention and delivery
+
+An accepted public submission is append-only source evidence. It stays under
+`site/data/submissions/<submission_id>.json`, uses submission schema `1.0`, and remains addressable by
+its canonical content digest. Corpus growth never authorizes deleting, rewriting, sampling, or
+silently dropping an accepted record. Corrections create a new reviewed submission.
+
+The repository deliberately separates that retention policy from browser delivery:
+
+- Once sharding is active, `site/data/leaderboard.json` is a constant-shape bounded deterministic
+  index containing exactly `index_version`, `schema_version`, `entry_count`, and `shard_count`. It is
+  the only generated leaderboard artifact committed to the repository.
+- A benchmark pull request still contains exactly one added digest-named submission plus the
+  regenerated canonical leaderboard transport file. Do not add generated shard files.
+- Pull-request checks rebuild that committed file and compare its bytes. On `main`, Pages repeats the
+  check before copying only the allowlisted static site files and generating the exact-key index and
+  shard pages in a temporary deployment artifact. The growing source-submission directory is not
+  duplicated into the Pages artifact.
+- The browser loads the index first and fetches bounded pages on demand. It derives only contiguous
+  one-based IDs from `000001` through the declared shard count and constructs only
+  `data/leaderboard-NNNNNN.json`; public JSON never supplies a URL or arbitrary path. Each closed
+  shard contains exactly `index_version`, `schema_version`, `shard_id`, `entry_count`, and `entries`.
+  Until every page is loaded, search, hardware filters, and alternate sorting are explicitly scoped
+  to loaded results, and an empty filtered view does not claim that no matching published row exists.
+
+The scale code rollout leaves the current six-entry legacy leaderboard monolith byte-identical so a
+mixed code-and-generated-data pull request cannot bypass the trusted boundary. The browser and
+builder accept both closed forms while it remains bounded. When a deterministic rebuild would cross
+the legacy cap, the committed output switches to the constant-shape index and the Pages artifact
+receives shards. Pages always deploys the generated index and shards, even while the source tree
+retains the legacy monolith. Early leaderboard-only activation is not supported by this stage: the
+committed transition occurs only when an otherwise valid append-only benchmark submission crosses
+the cap and still satisfies the exact two-file protected boundary.
+
+Global rank order and page order are deterministic. The publisher greedily splits that sequence at
+stable row boundaries according to the exact UTF-8 byte size of each rendered JSON page. It does not
+estimate from character counts or discard older rows. The union of all pages must contain every
+accepted submission digest exactly once.
+
+Hard caps remain on each submission, the committed transport file, and every fetched shard. The
+removed cap is the aggregate-corpus failure that would eventually prevent all later contributions.
+Valid growth creates more bounded pages; corrupt, duplicate, inconsistent, privacy-unsafe, or
+individually oversized records still fail closed. Temporary shards are disposable transport
+artifacts and are rebuilt from accepted submissions on each Pages deployment.

@@ -345,9 +345,9 @@ independent publication-gate test.
 
 ## Task Summary
 
-- Total tasks: 64
-- Completed: 64
-- Intentionally open: none
+- Total tasks: 70
+- Completed: 69
+- Intentionally open: 1 (hosted deployment verification)
 - Setup: 7
 - Foundation: 7
 - User Story 1: 11
@@ -387,3 +387,28 @@ without changing what the benchmark measures or changing hardware descriptor beh
   runtime stack; record that a separate bench may reuse this pipeline
 - [x] T064 Re-run the complete cross-platform unit, parity, deterministic-build, privacy, history,
   secret, and static-site safety gates before merging the hardening increment
+
+---
+
+## Phase 9: Post-release Stage 2 leaderboard scale hardening
+
+**Purpose**: Remove the aggregate publication time bomb without changing benchmark measurement,
+submission schema `1.0`, accepted evidence, or the exact benchmark pull-request boundary.
+
+- [x] T065 Amend both feature specifications, plans, data models, task lists, and `docs/guide.md` with
+  the bounded hybrid committed transport, compact exact-key index, temporary Pages-only shards,
+  append-only retention, deterministic UTF-8 byte pagination, and synthesized same-origin fetch
+  boundary
+- [x] T066 Add synthetic over-cap, exact-byte split, corruption, exact-coverage, deterministic-output,
+  fixed-path, per-file-cap, and unchanged benchmark-PR-boundary regression tests
+- [x] T067 Implement deterministic index and shard generation so valid aggregate growth paginates
+  instead of failing while malformed, duplicate, inconsistent, and individually oversized inputs
+  continue to fail closed
+- [x] T068 Update Pages to byte-check either canonical committed form before always generating the
+  exact-key index and uncommitted shards in a temporary site artifact, and update the browser to load
+  one-based contiguous shard IDs padded to at least six digits on demand without accepting arbitrary
+  paths or URLs
+- [x] T069 Run the complete local cross-platform unit, deterministic build, browser safety,
+  publication-boundary, privacy, history, and secret-scanning gates
+- [ ] T070 Verify required hosted checks, the trusted benchmark boundary, deployed on-demand shard
+  behavior, full accepted-record coverage, and absence of committed shards after protected merge

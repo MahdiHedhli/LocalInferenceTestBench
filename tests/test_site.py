@@ -4,6 +4,10 @@ from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 
 
@@ -29,6 +33,10 @@ class SiteSafetyTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.html = (SITE_ROOT / "index.html").read_text(encoding="utf-8")
         cls.javascript = (SITE_ROOT / "app.js").read_text(encoding="utf-8")
+        cls.javascript_sources = {
+            path.relative_to(SITE_ROOT).as_posix(): path.read_text(encoding="utf-8")
+            for path in sorted(SITE_ROOT.rglob("*.js"))
+        }
         cls.css = (SITE_ROOT / "styles.css").read_text(encoding="utf-8")
         cls.parser = StartTagCollector()
         cls.parser.feed(cls.html)
@@ -69,20 +77,201 @@ class SiteSafetyTests(unittest.TestCase):
         self.assertNotRegex(self.css, r"(?i)@import|url\s*\(")
 
     def test_untrusted_data_uses_text_only_dom_operations(self) -> None:
-        for prohibited in (
-            r"\.innerHTML\b",
-            r"\.outerHTML\b",
-            r"insertAdjacentHTML\s*\(",
-            r"document\.write\s*\(",
-            r"\beval\s*\(",
-            r"new\s+Function\b",
-        ):
-            self.assertNotRegex(self.javascript, prohibited)
+        self.assertTrue(self.javascript_sources)
+        for name, source in self.javascript_sources.items():
+            for prohibited in (
+                r"\.innerHTML\b",
+                r"\.outerHTML\b",
+                r"insertAdjacentHTML\s*\(",
+                r"document\.write\s*\(",
+                r"\beval\s*\(",
+                r"new\s+Function\b",
+            ):
+                with self.subTest(source=name, prohibited=prohibited):
+                    self.assertNotRegex(source, prohibited)
         self.assertIn(".textContent", self.javascript)
         self.assertIn('const DATA_URL = "./data/leaderboard.json";', self.javascript)
         self.assertEqual(len(re.findall(r"\bfetch\s*\(", self.javascript)), 1)
-        self.assertIn("fetch(DATA_URL", self.javascript)
         self.assertNotRegex(self.javascript, r"(?i)https?://|//[a-z0-9.-]+/")
+
+    def test_browser_uses_one_bounded_fetch_path_for_legacy_and_sharded_data(self) -> None:
+        self.assertIn("async function fetchBoundedJson(", self.javascript)
+        helper_start = self.javascript.index("async function fetchBoundedJson(")
+        helper_end = self.javascript.index("\n}\n", helper_start + 1) + 2
+        helper = self.javascript[helper_start:helper_end]
+        self.assertIn("fetch(", helper)
+        self.assertIn('cache: "no-cache"', helper)
+        self.assertIn('credentials: "omit"', helper)
+        self.assertIn('headers.get("content-length")', helper)
+        self.assertIn("MAX_DATA_BYTES", helper)
+        self.assertIn("TextEncoder", helper)
+        self.assertIn("response.text()", helper)
+
+        self.assertIn("fetchBoundedJson(DATA_URL)", self.javascript)
+        self.assertGreaterEqual(self.javascript.count("fetchBoundedJson("), 3)
+        self.assertRegex(
+            self.javascript,
+            r"hasExactKeys\(\s*[A-Za-z_$][A-Za-z0-9_$]*,\s*\[\s*\"index_version\",\s*"
+            r"\"schema_version\",\s*\"entry_count\",\s*\"shard_count\",?\s*\]",
+        )
+        self.assertRegex(
+            self.javascript,
+            r"hasExactKeys\(\s*[A-Za-z_$][A-Za-z0-9_$]*,\s*\[\s*\"index_version\",\s*"
+            r"\"schema_version\",\s*\"shard_id\",\s*\"entry_count\",\s*"
+            r"\"entries\",?\s*\]",
+        )
+        self.assertRegex(self.javascript, r"\.padStart\(6,\s*\"0\"\)")
+        self.assertIn('const SHARD_URL_PREFIX = "./data/leaderboard-";', self.javascript)
+        self.assertIn('const SHARD_URL_SUFFIX = ".json";', self.javascript)
+        self.assertRegex(
+            self.javascript,
+            r"SHARD_URL_PREFIX[^;\n]{0,160}SHARD_URL_SUFFIX",
+        )
+        self.assertRegex(
+            self.javascript,
+            r"isInteger\(\s*[A-Za-z_$][A-Za-z0-9_$]*\.shard_count,\s*0\s*\)",
+        )
+        self.assertRegex(
+            self.javascript,
+            r"\.shard_count\s*>\s*[A-Za-z_$][A-Za-z0-9_$]*\.entry_count",
+        )
+        self.assertNotRegex(
+            self.javascript,
+            r"(?i)(?:payload|index|descriptor)\.(?:url|path|href)\b",
+        )
+
+    def test_browser_fetches_time_out_and_shard_checks_stay_incremental(self) -> None:
+        helper_start = self.javascript.index("async function fetchBoundedJson(")
+        helper_end = self.javascript.index("\n}\n", helper_start + 1) + 2
+        helper = self.javascript[helper_start:helper_end]
+        for expected in (
+            "DATA_FETCH_TIMEOUT_MS",
+            "AbortController",
+            "setTimeout(",
+            "controller.abort()",
+            "signal: controller.signal",
+            "clearTimeout(",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, helper)
+
+        load_start = self.javascript.index("async function loadNextShard(")
+        load_end = self.javascript.index("\nfunction leaderboardUnavailable(", load_start)
+        load_next_shard = self.javascript[load_start:load_end]
+        self.assertIn("validateAndTrackShardRanking(", load_next_shard)
+        self.assertNotIn("const combined", load_next_shard)
+        self.assertNotIn("validateRanking(", load_next_shard)
+
+        reset_start = self.javascript.index("function resetLeaderboardState(")
+        reset_end = self.javascript.index("\n}\n", reset_start + 1) + 2
+        reset = self.javascript[reset_start:reset_end]
+        self.assertIn("createShardRankingState()", reset)
+        self.assertGreaterEqual(self.javascript.count("resetLeaderboardState();"), 2)
+
+    def test_shard_loading_state_enforces_cross_shard_boundaries(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable")
+        completed = subprocess.run(
+            [
+                node,
+                str(PROJECT_ROOT / "tests" / "js_leaderboard_loading_runner.js"),
+                str(SITE_ROOT / "app.js"),
+                str(SITE_ROOT / "data" / "leaderboard.json"),
+            ],
+            cwd=PROJECT_ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            json.loads(completed.stdout),
+            {
+                "bounded_timeout": True,
+                "duplicate_rejected_without_mutation": True,
+                "first_rank_required": True,
+                "fresh_state_accepts_previously_seen_id": True,
+                "incremental_segments": True,
+                "reversed_canonical_boundary_rejected": True,
+                "wrong_rank_boundary_rejected": True,
+            },
+        )
+
+    def test_paginated_controls_describe_the_loaded_result_scope(self) -> None:
+        visible_text = re.sub(r"<[^>]+>", " ", self.html)
+        visible_text = re.sub(r"\s+", " ", visible_text).casefold()
+        for expected in (
+            "search, hardware filters, and sorting apply only to results loaded so far",
+            "find a loaded model",
+            "loaded hardware",
+            "sort loaded results by",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, visible_text)
+        self.assertIn("No loaded results match these filters.", self.javascript)
+        self.assertIn("load more results to expand the searchable set", self.javascript)
+
+    def test_browser_validators_accept_both_closed_transport_forms(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable")
+        sources = sorted((SITE_ROOT / "data" / "submissions").glob("*.json"))
+        self.assertGreaterEqual(len(sources), 2)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            submissions = root / "submissions"
+            submissions.mkdir()
+            for source in sources[:2]:
+                shutil.copyfile(source, submissions / source.name)
+            legacy = root / "leaderboard.json"
+            built = subprocess.run(
+                [
+                    sys.executable,
+                    str(PROJECT_ROOT / "scripts" / "build_leaderboard.py"),
+                    "--submissions-dir",
+                    str(submissions),
+                    "--output",
+                    str(legacy),
+                ],
+                cwd=PROJECT_ROOT,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(built.returncode, 0, built.stderr)
+            completed = subprocess.run(
+                [
+                    node,
+                    str(PROJECT_ROOT / "tests" / "js_leaderboard_transport_runner.js"),
+                    str(SITE_ROOT / "app.js"),
+                    str(legacy),
+                ],
+                cwd=PROJECT_ROOT,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            json.loads(completed.stdout),
+            {
+                "legacy": True,
+                "index": True,
+                "index_extra_key": False,
+                "index_nonzero_entries_zero_shards": False,
+                "index_more_shards_than_entries": False,
+                "shard": True,
+                "shard_extra_key": False,
+                "shard_wrong_id": False,
+                "legacy_reordered_tie": False,
+            },
+        )
 
     def test_page_keeps_the_leaderboard_first_and_the_theme_accessible(self) -> None:
         self.assertLess(self.html.index('id="leaderboard"'), self.html.index('id="submit"'))
@@ -173,12 +362,21 @@ class SiteSafetyTests(unittest.TestCase):
             r"hash(?:es)?\b.{0,80}\bintegrity\b.{0,80}\bnot\b.{0,40}\bprovenance\b",
         )
 
-    def test_committed_dataset_is_strict_and_counted(self) -> None:
+    def test_committed_transport_accepts_only_a_closed_monolith_or_index(self) -> None:
         payload = json.loads((SITE_ROOT / "data" / "leaderboard.json").read_text(encoding="utf-8"))
 
-        self.assertEqual(set(payload), {"schema_version", "entry_count", "entries"})
         self.assertEqual(payload["schema_version"], "1.0")
-        self.assertEqual(payload["entry_count"], len(payload["entries"]))
+        if "entries" in payload:
+            self.assertEqual(set(payload), {"schema_version", "entry_count", "entries"})
+            self.assertEqual(payload["entry_count"], len(payload["entries"]))
+        else:
+            self.assertEqual(
+                set(payload),
+                {"index_version", "schema_version", "entry_count", "shard_count"},
+            )
+            self.assertEqual(payload["index_version"], "1.0")
+            self.assertEqual(payload["entry_count"] == 0, payload["shard_count"] == 0)
+            self.assertLessEqual(payload["shard_count"], payload["entry_count"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "leaderboard-index.schema.json",
+  "title": "Local Inference Test Bench leaderboard transport index",
+  "description": "A constant-shape index for deterministic, same-origin leaderboard shards.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "index_version",
+    "schema_version",
+    "entry_count",
+    "shard_count"
+  ],
+  "properties": {
+    "index_version": {
+      "const": "1.0"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "entry_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "shard_count": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "entry_count": {
+          "const": 0
+        },
+        "shard_count": {
+          "const": 0
+        }
+      }
+    },
+    {
+      "properties": {
+        "entry_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "shard_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  ],
+  "$comment": "The schema encodes the zero/zero and positive/positive branches. Standard JSON Schema cannot compare sibling numeric values, so the Python builder and browser additionally enforce shard_count <= entry_count. Shard paths are never supplied by public data."
+}

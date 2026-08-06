@@ -178,6 +178,11 @@ python3 scripts/build_leaderboard.py --check
 Commit the candidate and the regenerated `site/data/leaderboard.json`. Do not edit the generated
 leaderboard by hand.
 
+The committed generated file remains the canonical monolith while it fits the public per-file cap.
+When the corpus crosses that cap, the same command switches it deterministically to a compact index.
+Leaderboard shards are generated only in the trusted GitHub Pages artifact; contributors never add
+or commit shard files. Every accepted digest-named submission remains addressable in the repository.
+
 The automated PR path performs these steps in a private temporary directory cloned from the fixed
 canonical upstream. It stages only one new digest-named submission and the regenerated leaderboard,
 runs the same contract, deterministic-build, privacy, unit, and redacted secret checks, and uploads
