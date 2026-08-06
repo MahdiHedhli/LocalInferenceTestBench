@@ -265,6 +265,11 @@ jobs:
             local label="$1"
             local destination="${RUNNER_TEMP}/${label}"
             local live_base
+            gh api repos/MahdiHedhli/LocalInferenceTestBench \
+              > "${destination}-repository.json"
+            python3 "${helper}" repository \
+              --input "${destination}-repository.json" \
+              --require-auto-merge
             gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
               > "${destination}-base.json"
             python3 "${helper}" protection --input "${destination}-base.json"
@@ -303,7 +308,9 @@ jobs:
           gh api user > "${RUNNER_TEMP}/reviewer.json"
           python3 "${helper}" identity --input "${RUNNER_TEMP}/reviewer.json"
           gh api repos/MahdiHedhli/LocalInferenceTestBench > "${RUNNER_TEMP}/repository-final.json"
-          python3 "${helper}" repository --input "${RUNNER_TEMP}/repository-final.json"
+          python3 "${helper}" repository \
+            --input "${RUNNER_TEMP}/repository-final.json" \
+            --require-auto-merge
           gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
             > "${RUNNER_TEMP}/protection-final.json"
           python3 "${helper}" protection --input "${RUNNER_TEMP}/protection-final.json"

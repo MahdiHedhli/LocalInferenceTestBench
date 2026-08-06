@@ -132,8 +132,11 @@ authorization signal.
 - **FR-013**: Per-run authorization MUST distinguish observable evidence from repository setup. It
   verifies protected status, the app-bound required-check summary, and native review decision, but
   MUST NOT claim to inspect administration-only settings unavailable to its read-only identities.
-  Stale-review dismissal, last-push approval, conversation resolution, linear history, admin
-  enforcement, and force-push/deletion prohibitions remain mandatory operator prerequisites.
+  Native auto-merge may be omitted from the read-only repository response; when it is visible as
+  disabled the lane MUST reject it. After the reviewer credential is bound, the lane MUST require an
+  authoritative `allow_auto_merge: true` response immediately before each possible mutation. Native
+  auto-merge, stale-review dismissal, last-push approval, conversation resolution, linear history,
+  admin enforcement, and force-push/deletion prohibitions remain mandatory operator prerequisites.
 - **FR-014**: A transient unknown mergeability result MUST receive only bounded retries. Established
   `blocked`, `clean`, and `unstable` states MAY continue when `mergeable=true`; conflict, stale-base,
   draft, closed, and still-unknown states MUST fail closed. `unstable` MUST NOT be treated as a passed

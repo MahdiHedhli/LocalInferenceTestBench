@@ -543,15 +543,20 @@ def validate_branch_protection(value: Any) -> None:
             raise AutomationError("a trusted required status check is missing")
 
 
-def validate_repository_settings(value: Any) -> None:
-    """Require the fixed repository identity and native auto-merge capability."""
+def validate_repository_settings(
+    value: Any, *, require_auto_merge: bool = False
+) -> None:
+    """Require fixed identity and validate native auto-merge when observable."""
 
     repository = _object(value, "repository_settings")
     if not _repository_is_exact(repository):
         raise AutomationError("repository settings identity is ineligible")
     if repository.get("default_branch") != DEFAULT_BRANCH:
         raise AutomationError("repository default branch changed")
-    if repository.get("allow_auto_merge") is not True:
+    auto_merge_visible = "allow_auto_merge" in repository
+    if (require_auto_merge or auto_merge_visible) and repository.get(
+        "allow_auto_merge"
+    ) is not True:
         raise AutomationError("repository auto-merge is disabled")
 
 
@@ -703,6 +708,7 @@ def _parser() -> argparse.ArgumentParser:
 
     repository = commands.add_parser("repository")
     repository.add_argument("--input", type=Path, required=True)
+    repository.add_argument("--require-auto-merge", action="store_true")
 
     auto_merge = commands.add_parser("auto-merge-state")
     auto_merge.add_argument("--input", type=Path, required=True)
@@ -783,7 +789,10 @@ def _run(args: argparse.Namespace) -> None:
         validate_branch_protection(load_json(args.input))
         return
     if args.command == "repository":
-        validate_repository_settings(load_json(args.input))
+        validate_repository_settings(
+            load_json(args.input),
+            require_auto_merge=args.require_auto_merge,
+        )
         return
     if args.command == "auto-merge-state":
         state = validate_auto_merge_state(

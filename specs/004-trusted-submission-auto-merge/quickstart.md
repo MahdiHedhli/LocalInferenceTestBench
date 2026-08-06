@@ -22,8 +22,11 @@ python3 scripts/build_leaderboard.py --check
    linear history, admin enforcement, and force-push/deletion prohibitions enabled.
 
 The workflow proves the public app-bound required-check summary and native review decision on every
-run. GitHub does not expose all settings in steps 2 and 5 to its read-only identities, so an operator
-must verify them before enabling automation and again after any repository-protection change.
+run. GitHub does not expose all settings in steps 2, 3, and 5 to its read-only identities, so an
+operator must verify them before enabling automation and again after any repository-protection
+change. The final reviewer-credential step independently requires `allow_auto_merge: true`
+immediately before each possible mutation. If that setting is disabled or unconfirmable, the final
+required boundary remains failed.
 
 The base-controlled caller must map repository secret `ERNEST_REVIEW_TOKEN` explicitly to the local
 reusable workflow's `reviewer_token`; do not use `secrets: inherit`. Only the reusable workflow's
