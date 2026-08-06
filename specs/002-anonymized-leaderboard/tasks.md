@@ -61,3 +61,26 @@
 - [x] T020 Review the site at desktop and narrow widths, enable GitHub Pages, and verify the live URL
 - [x] T021 Verify remote continuous integration, Pages deployment, hosted secret scanning, push
   protection, and Dependabot state on the published commit
+
+## Phase 7: Post-release adversarial hardening
+
+**Sequence**: Complete T022–T026 as Stage 1. Plausibility and corroboration remain pending until the
+later aggregation work; they are not part of this no-schema-change increment.
+
+- [x] T022 Amend `spec.md`, `plan.md`, and `data-model.md` with model descriptor limits,
+  reviewer-injection resistance, hardware-behavior preservation, and honest
+  integrity-not-provenance framing
+- [x] T023 Add shared behavioral Python/browser rejection fixtures for the three model labels, including length,
+  URL, email, network, UUID/serial, reviewer instruction, bidi, and homoglyph cases, plus unchanged
+  hardware descriptor regression fixtures
+- [x] T024 Implement matching ASCII-only limits (`display_name` 160, `source` 240, `precision` 80)
+  and descriptor/reviewer-injection rejection in `submissions.py` and `site/app.js`; encode portable
+  ASCII/length boundaries in the current submission/dataset contracts while retaining
+  Python/browser authority for prohibited-pattern checks; do not change schema version
+- [x] T025 State in `site/index.html` and `README.md` that all entries are self-reported and
+  unverified and hashes prove content integrity rather than provenance or that a run occurred
+- [ ] T026 Run Python/JavaScript parity, text-only DOM, deterministic build, cross-platform unit,
+  privacy, history, and secret-scanning regression gates
+- [ ] T027 Add a computed, non-authoritative plausibility caution that never drops or gates an entry
+- [ ] T028 Add config-cell corroboration counts with an explicit definition that does not imply
+  independent operators merely from distinct accepted content hashes

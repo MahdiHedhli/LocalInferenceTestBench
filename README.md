@@ -103,8 +103,10 @@ See the full [operator guide](docs/guide.md) before comparing multiple models.
 
 The [GitHub Pages leaderboard](https://mahdihedhli.github.io/LocalInferenceTestBench/) puts the
 community results first. Quality rank uses semantic score, then exact-format score. Latency and
-throughput are shown with the hardware and runtime that produced them, but speed does not affect
-rank.
+throughput are shown with the hardware and runtime reported for them, but speed does not affect rank.
+Every entry is self-reported and unverified. Its content hash establishes that the accepted JSON has
+not changed; it does not prove who produced it, that a benchmark run occurred, or that the reported
+measurements are true.
 
 Leaderboard records include exact CPU, memory, accelerator, execution-mode, runtime name and
 version, and—when supplied—the configured context window, concurrency, speculative-decoding state,
@@ -172,6 +174,11 @@ The standard guide is intentionally small and portable. Long-context stress, rep
 observability export, dynamic agent environments, and cross-runtime equivalence live only in the
 [experimental notes](docs/experiments/README.md). Removing that directory does not affect the runner
 or quick start.
+
+Image and video generation are explicitly out of scope. Scoring generated media generally requires
+a similarity model or human preference, which conflicts with this project's judge-free,
+rule-based design, and generation uses a different runtime stack. A separate generation benchmark
+may reuse this project's submission pipeline, privacy gate, and validity model.
 
 ## Specification
 

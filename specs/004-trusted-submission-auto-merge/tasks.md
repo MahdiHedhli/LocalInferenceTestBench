@@ -10,6 +10,12 @@
 - [x] T006 Add workflow contract tests for pwn-request, local-caller provenance, explicit secret
   mapping, race, and bypass boundaries.
 - [x] T007 Update contributor, submission, and security documentation.
-- [ ] T008 After this base-controlled workflow revision reaches `main`, complete the hosted
-  end-to-end validation of the direct reusable-workflow path on the existing benchmark submission,
-  and confirm repository auto-merge remains configured.
+- [x] T008 After this base-controlled workflow revision reached `main`, complete the hosted
+  end-to-end validation of the direct reusable-workflow path on benchmark submission PR #15 and
+  confirm repository auto-merge through authoritative repository validation.
+  - Trusted workflow run: `31072182271`
+  - Protected squash merge: `ffd8d38da9e702677314647773ac71a70a1b7e0b`
+  - Pages run: `31072226059`
+  - Public Safety run: `31072226043`
+  - The reviewer identity authoritatively revalidated repository `allow_auto_merge: true`
+    immediately before the protected mutation; no administrative bypass was used.

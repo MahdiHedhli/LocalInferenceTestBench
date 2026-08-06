@@ -4,6 +4,9 @@ const DATA_URL = "./data/leaderboard.json";
 const MAX_DATA_BYTES = 2 * 1024 * 1024;
 const MAX_ENTRIES = 10_000;
 const MAX_SUBMISSION_BYTES = 256 * 1024;
+const MODEL_DISPLAY_NAME_MAX = 160;
+const MODEL_SOURCE_MAX = 240;
+const MODEL_PRECISION_MAX = 80;
 const STANDARD_CASE_IDS = [
   "structured-json",
   "python-ast",
@@ -57,27 +60,36 @@ const DESCRIPTOR_UUID = /(?:^|[^0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 const DESCRIPTOR_LABEL = /\b(?:s\s*\/?\s*n|serial(?:\s+(?:number|no|id))?|inventory\s+(?:id|tag)|asset\s+(?:id|tag)|device\s+uuid|machine\s+(?:id|name)|host\s*name|user\s*name|account\s+(?:id|name))\b/iu;
 const DESCRIPTOR_NETWORK = /(?:^|[^0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?:$|[^0-9.])|(?:^|[^0-9a-f:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?:%[a-z0-9_.-]+)?(?:$|[^0-9a-f:])/iu;
 const DESCRIPTOR_URL_OR_EMAIL = /\b[a-z][a-z0-9+.-]*:\/\/|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/iu;
+const MODEL_DESCRIPTOR_ASCII = /^[\x20-\x7e]+$/u;
+const MODEL_REVIEW_INJECTION = /(?:\b(?:ignore|disregard|override|bypass|forget|accept|approve|merge)\b|\b(?:instructions?|prompts?|codex|coderabbit(?:ai)?|reviewer|maintainer)\b|\b(?:system|assistant|developer|user)\s*:|\b(?:result|submission|benchmark)\b.{0,32}\b(?:safe|valid|verified|trusted|approved|pass(?:ed)?)\b|\b(?:mark|treat|label|classify)\b.{0,32}\b(?:safe|valid|verified|trusted|approved|pass(?:ed)?)\b|```|<!--|-->|<\s*\/?\s*script\b|\[\s*inst\s*\]|<<\s*sys\s*>>)/iu;
+const SCANNER_SUPPRESSION_MARKER = new RegExp(
+  "\\b" + "git" + "leaks\\s*:\\s*allow\\b",
+  "iu",
+);
 
-const elements = {
-  body: document.querySelector("#leaderboard-body"),
-  filters: document.querySelector("#leaderboard-filters"),
-  hardwareFilter: document.querySelector("#hardware-filter"),
-  search: document.querySelector("#model-search"),
-  sort: document.querySelector("#sort-results"),
-  status: document.querySelector("#leaderboard-status"),
-  table: document.querySelector("#leaderboard-table-shell"),
-  updated: document.querySelector("#leaderboard-updated"),
-  submissionFile: document.querySelector("#submission-file"),
-  submissionStatus: document.querySelector("#submission-status"),
-  submissionPreview: document.querySelector("#submission-preview"),
-  previewProfile: document.querySelector("#preview-profile"),
-  previewModel: document.querySelector("#preview-model"),
-  previewSuite: document.querySelector("#preview-suite"),
-  previewHardware: document.querySelector("#preview-hardware"),
-  copySubmission: document.querySelector("#copy-submission"),
-  downloadSubmission: document.querySelector("#download-submission"),
-  continueSubmission: document.querySelector("#continue-submission"),
-};
+const elements =
+  typeof document === "undefined"
+    ? {}
+    : {
+        body: document.querySelector("#leaderboard-body"),
+        filters: document.querySelector("#leaderboard-filters"),
+        hardwareFilter: document.querySelector("#hardware-filter"),
+        search: document.querySelector("#model-search"),
+        sort: document.querySelector("#sort-results"),
+        status: document.querySelector("#leaderboard-status"),
+        table: document.querySelector("#leaderboard-table-shell"),
+        updated: document.querySelector("#leaderboard-updated"),
+        submissionFile: document.querySelector("#submission-file"),
+        submissionStatus: document.querySelector("#submission-status"),
+        submissionPreview: document.querySelector("#submission-preview"),
+        previewProfile: document.querySelector("#preview-profile"),
+        previewModel: document.querySelector("#preview-model"),
+        previewSuite: document.querySelector("#preview-suite"),
+        previewHardware: document.querySelector("#preview-hardware"),
+        copySubmission: document.querySelector("#copy-submission"),
+        downloadSubmission: document.querySelector("#download-submission"),
+        continueSubmission: document.querySelector("#continue-submission"),
+      };
 
 let entries = [];
 let checkedSubmission = null;
@@ -109,7 +121,8 @@ function isPublicText(value, maximum = 500) {
     typeof value === "string" &&
     value.length >= 1 &&
     value.length <= maximum &&
-    !/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069\ud800-\udfff]/u.test(value)
+    !/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069\ud800-\udfff]/u.test(value) &&
+    !SCANNER_SUPPRESSION_MARKER.test(value)
   );
 }
 
@@ -120,6 +133,14 @@ function isPublicDescriptorText(value, maximum) {
     !DESCRIPTOR_LABEL.test(value) &&
     !DESCRIPTOR_NETWORK.test(value) &&
     !DESCRIPTOR_URL_OR_EMAIL.test(value)
+  );
+}
+
+function isModelDescriptorText(value, maximum) {
+  return (
+    isPublicDescriptorText(value, maximum) &&
+    MODEL_DESCRIPTOR_ASCII.test(value) &&
+    !MODEL_REVIEW_INJECTION.test(value)
   );
 }
 
@@ -136,9 +157,9 @@ function validateModel(model) {
   const identityFields = ["revision", "digest"].filter((key) => Object.hasOwn(model, key));
   return (
     identityFields.length === 1 &&
-    isPublicText(model.display_name) &&
-    isPublicText(model.source) &&
-    isPublicText(model.precision) &&
+    isModelDescriptorText(model.display_name, MODEL_DISPLAY_NAME_MAX) &&
+    isModelDescriptorText(model.source, MODEL_SOURCE_MAX) &&
+    isModelDescriptorText(model.precision, MODEL_PRECISION_MAX) &&
     isPublicText(model[identityFields[0]], 200) &&
     isInteger(model.declared_context_tokens, 1)
   );
@@ -809,7 +830,7 @@ function showCheckedSubmission(submission, source) {
   elements.downloadSubmission.disabled = false;
   elements.continueSubmission.hidden = false;
   setSubmissionStatus(
-    "The closed public shape looks right. This convenience check does not replace CLI and CI privacy checks, content-hash validation, or maintainer review.",
+    "The closed public shape looks right. This convenience check does not replace CLI and CI privacy checks or the trusted publication boundary. A matching content hash proves integrity, not that a run occurred.",
     "success",
   );
 }
@@ -899,12 +920,17 @@ async function loadLeaderboard() {
   }
 }
 
-elements.search.addEventListener("input", render);
-elements.hardwareFilter.addEventListener("change", render);
-elements.sort.addEventListener("change", render);
-elements.filters.addEventListener("submit", (event) => event.preventDefault());
-elements.submissionFile.addEventListener("change", checkSubmissionFile);
-elements.copySubmission.addEventListener("click", copyCheckedSubmission);
-elements.downloadSubmission.addEventListener("click", downloadCheckedSubmission);
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { validateModel };
+}
 
-loadLeaderboard();
+if (typeof document !== "undefined") {
+  elements.search.addEventListener("input", render);
+  elements.hardwareFilter.addEventListener("change", render);
+  elements.sort.addEventListener("change", render);
+  elements.filters.addEventListener("submit", (event) => event.preventDefault());
+  elements.submissionFile.addEventListener("change", checkSubmissionFile);
+  elements.copySubmission.addEventListener("click", copyCheckedSubmission);
+  elements.downloadSubmission.addEventListener("click", downloadCheckedSubmission);
+  loadLeaderboard();
+}

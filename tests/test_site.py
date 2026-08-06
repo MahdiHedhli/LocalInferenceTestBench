@@ -93,6 +93,86 @@ class SiteSafetyTests(unittest.TestCase):
         ids = [attrs["id"] for _, attrs in self.parser.tags if attrs.get("id")]
         self.assertEqual(len(ids), len(set(ids)))
 
+    def test_model_validator_mirrors_descriptor_hardening(self) -> None:
+        limits = {
+            "display_name": ("MODEL_DISPLAY_NAME_MAX", 160),
+            "source": ("MODEL_SOURCE_MAX", 240),
+            "precision": ("MODEL_PRECISION_MAX", 80),
+        }
+        for field, (constant, maximum) in limits.items():
+            with self.subTest(field=field, contract="maximum"):
+                self.assertRegex(
+                    self.javascript,
+                    rf"\bconst\s+{constant}\s*=\s*{maximum}\s*;",
+                )
+
+        validate_model_start = self.javascript.index("function validateModel(")
+        validate_model_end = self.javascript.index(
+            "\nfunction validateHardware(",
+            validate_model_start,
+        )
+        validate_model = self.javascript[validate_model_start:validate_model_end]
+        helper_match = re.search(
+            r"(?P<helper>[A-Za-z_$][A-Za-z0-9_$]*)\(\s*model\.display_name\s*,"
+            r"\s*MODEL_DISPLAY_NAME_MAX\s*\)",
+            validate_model,
+        )
+        self.assertIsNotNone(helper_match)
+        helper = helper_match.group("helper")
+        for field, (constant, _) in limits.items():
+            with self.subTest(field=field, contract="validator"):
+                self.assertRegex(
+                    validate_model,
+                    rf"{re.escape(helper)}\(\s*model\.{field}\s*,\s*{constant}\s*\)",
+                )
+
+        helper_start = self.javascript.index(f"function {helper}(")
+        helper_end = self.javascript.index("\nfunction ", helper_start + 1)
+        helper_source = self.javascript[helper_start:helper_end]
+        self.assertIn("isPublicDescriptorText(", helper_source)
+        self.assertRegex(self.javascript, r"\\x20-\\x7e")
+
+        lowered = self.javascript.casefold()
+        for required_pattern in (
+            "ignore",
+            "disregard",
+            "override",
+            "bypass",
+            "forget",
+            "accept",
+            "system",
+            "instructions",
+            "prompt",
+            "assistant",
+            "developer",
+            "reviewer",
+            "maintainer",
+            "codex",
+            "coderabbit",
+            "mark",
+            "safe",
+            "```",
+            "script",
+            "<!--",
+        ):
+            with self.subTest(required_pattern=required_pattern):
+                self.assertIn(required_pattern, lowered)
+        self.assertIn("@", lowered)
+        self.assertIn(r"\s*:", lowered)
+
+    def test_public_chrome_distinguishes_integrity_from_provenance(self) -> None:
+        visible_text = re.sub(r"<[^>]+>", " ", self.html)
+        visible_text = re.sub(r"\s+", " ", visible_text).casefold()
+
+        self.assertRegex(
+            visible_text,
+            r"self-reported.{0,60}unverified",
+        )
+        self.assertRegex(
+            visible_text,
+            r"hash(?:es)?\b.{0,80}\bintegrity\b.{0,80}\bnot\b.{0,40}\bprovenance\b",
+        )
+
     def test_committed_dataset_is_strict_and_counted(self) -> None:
         payload = json.loads((SITE_ROOT / "data" / "leaderboard.json").read_text(encoding="utf-8"))
 

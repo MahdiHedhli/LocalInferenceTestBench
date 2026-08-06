@@ -68,6 +68,30 @@ class PublishedContractTests(unittest.TestCase):
             environment["runtime_configuration"],
         )
 
+    def test_public_model_descriptor_contract_uses_field_specific_ascii_limits(self) -> None:
+        maximums = {
+            "display_name": 160,
+            "source": 240,
+            "precision": 80,
+        }
+        for field, maximum in maximums.items():
+            accepted = prepare_submission(valid_report(), public_environment())
+            accepted["model"][field] = "x" * maximum
+            with self.subTest(field=field, boundary="accepted"):
+                self.validator.validate(accepted, "leaderboard-submission.schema.json")
+
+            oversized = copy.deepcopy(accepted)
+            oversized["model"][field] += "x"
+            with self.subTest(field=field, boundary="oversized"):
+                with self.assertRaises(SchemaValidationError):
+                    self.validator.validate(oversized, "leaderboard-submission.schema.json")
+
+            non_ascii = copy.deepcopy(accepted)
+            non_ascii["model"][field] = "Model " + chr(0x03BB)
+            with self.subTest(field=field, boundary="non_ascii"):
+                with self.assertRaises(SchemaValidationError):
+                    self.validator.validate(non_ascii, "leaderboard-submission.schema.json")
+
     def test_every_accepted_record_matches_runtime_and_published_contracts(self) -> None:
         submissions = PROJECT_ROOT / "site" / "data" / "submissions"
         for path in sorted(submissions.glob("*.json")):

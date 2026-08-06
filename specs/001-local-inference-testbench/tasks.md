@@ -345,9 +345,9 @@ independent publication-gate test.
 
 ## Task Summary
 
-- Total tasks: 59
-- Completed at release validation: 59
-- Intentionally open: none
+- Total tasks: 64
+- Completed: 63
+- Intentionally open: T064 pending exact-head hosted checks
 - Setup: 7
 - Foundation: 7
 - User Story 1: 11
@@ -355,6 +355,7 @@ independent publication-gate test.
 - User Story 3: 8
 - User Story 4: 5
 - Polish and release gates: 8
+- Post-release Stage 1 adversarial hardening: 5
 - Suggested MVP: Phases 1–3
 - Suggested public-release minimum: Phases 1–4
 
@@ -363,3 +364,26 @@ client responses, force-added ignored artifacts, tracked environment files, runt
 mismatch, and baseline import without experiment packages. Hosted secret scanning and push
 protection were verified before the first push, and the full workflow passed from a clean temporary
 clone using the deterministic local stub coverage.
+
+---
+
+## Phase 8: Post-release Stage 1 adversarial hardening
+
+**Purpose**: Narrow reviewer-visible model labels and state the public evidence boundary honestly
+without changing what the benchmark measures or changing hardware descriptor behavior.
+
+- [x] T060 Amend `spec.md`, `plan.md`, and `data-model.md` with publication-only ASCII model
+  descriptor limits (`display_name` 160, `source` 240, `precision` 80), descriptor-grade rejection,
+  reviewer-injection resistance, and integrity-not-provenance framing
+- [x] T061 Add shared behavioral Python/browser fixtures for length limits, URLs, emails, network values,
+  UUID/serial labels, reviewer-directed instructions, bidi controls, and non-ASCII homoglyphs while
+  proving existing hardware descriptors remain accepted in `tests/`
+- [x] T062 Implement the same closed model-label validation in the Python submission path and browser
+  validator, encode the portable ASCII and field-length boundaries in the current leaderboard JSON
+  contracts, and retain Python/browser authority for descriptor and reviewer-pattern rejection,
+  without changing schema version or local manifest/run-record acceptance
+- [x] T063 State in `README.md` that image and video generation are out of scope because their
+  similarity/preference scoring conflicts with the judge-free rule design and uses a different
+  runtime stack; record that a separate bench may reuse this pipeline
+- [ ] T064 Re-run the complete cross-platform unit, parity, deterministic-build, privacy, history,
+  secret, and static-site safety gates before merging the hardening increment

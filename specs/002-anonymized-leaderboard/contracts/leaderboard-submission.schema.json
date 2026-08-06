@@ -74,17 +74,29 @@
     }
   },
   "$defs": {
-    "publicText500": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 500,
-      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u200E\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2066-\\u2069\\uD800-\\uDFFF]+$"
-    },
     "publicText200": {
       "type": "string",
       "minLength": 1,
       "maxLength": 200,
       "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u200E\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2066-\\u2069\\uD800-\\uDFFF]+$"
+    },
+    "modelDisplayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[ -~]+$"
+    },
+    "modelSource": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^[ -~]+$"
+    },
+    "modelPrecision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[ -~]+$"
     },
     "model": {
       "type": "object",
@@ -97,10 +109,10 @@
       ],
       "properties": {
         "display_name": {
-          "$ref": "#/$defs/publicText500"
+          "$ref": "#/$defs/modelDisplayName"
         },
         "source": {
-          "$ref": "#/$defs/publicText500"
+          "$ref": "#/$defs/modelSource"
         },
         "revision": {
           "$ref": "#/$defs/publicText200"
@@ -109,7 +121,7 @@
           "$ref": "#/$defs/publicText200"
         },
         "precision": {
-          "$ref": "#/$defs/publicText500"
+          "$ref": "#/$defs/modelPrecision"
         },
         "declared_context_tokens": {
           "type": "integer",
@@ -364,5 +376,5 @@
       ]
     }
   },
-  "$comment": "The Python validator is authoritative for canonical digest verification, safe text, arithmetic consistency, numeric precision, model and configured context output limits, unsafe routes, and the public data deny rules. Decimal precision is kept out of the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
+  "$comment": "The Python validator is authoritative for canonical digest verification, arithmetic consistency, numeric precision, and the public data deny rules. Python and browser validators enforce safe text, descriptor-grade machine-identifier and reviewer-injection rejection, model and configured-context output limits, and unsafe routes against shared behavioral fixtures. Decimal precision is kept out of the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
 }

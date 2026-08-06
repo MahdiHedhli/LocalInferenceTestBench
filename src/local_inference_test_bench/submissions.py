@@ -108,6 +108,23 @@ _EXECUTION_MODES = {"cpu_only", "accelerator_only", "hybrid", "unknown"}
 _SPECULATIVE_DECODING_MODES = {"enabled", "disabled", "unknown"}
 _OFFLOAD_MODES = {"none", "partial", "maximum", "not_applicable", "unknown"}
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
+_MODEL_DISPLAY_NAME_MAX = 160
+_MODEL_SOURCE_MAX = 240
+_MODEL_PRECISION_MAX = 80
+_MODEL_DESCRIPTOR_ASCII = re.compile(r"^[\x20-\x7e]+$")
+_MODEL_REVIEW_INJECTION = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"\b(?:ignore|disregard|override|bypass|forget|accept|approve|merge)\b|"
+    r"\b(?:instructions?|prompts?|codex|coderabbit(?:ai)?|reviewer|maintainer)\b|"
+    r"\b(?:system|assistant|developer|user)\s*:|"
+    r"\b(?:result|submission|benchmark)\b.{0,32}"
+    r"\b(?:safe|valid|verified|trusted|approved|pass(?:ed)?)\b|"
+    r"\b(?:mark|treat|label|classify)\b.{0,32}"
+    r"\b(?:safe|valid|verified|trusted|approved|pass(?:ed)?)\b|"
+    r"```|<!--|-->|<\s*/?\s*script\b|\[\s*inst\s*\]|<<\s*sys\s*>>"
+    r")"
+)
 
 
 class SubmissionError(ValueError):
@@ -182,6 +199,19 @@ def _descriptor_text(value: Any, path: str, *, maximum: int) -> str:
     return result
 
 
+def _model_descriptor_text(value: Any, path: str, *, maximum: int) -> str:
+    """Accept a compact public model label, never reviewer-directed content."""
+
+    result = _descriptor_text(value, path, maximum=maximum)
+    if not _MODEL_DESCRIPTOR_ASCII.fullmatch(result):
+        raise SubmissionError(f"{path} must use visible ASCII model descriptor text")
+    if _IPV4_CANDIDATE.search(result) or _IPV6_CANDIDATE.search(result):
+        raise SubmissionError(f"{path} contains prohibited network-shaped descriptor text")
+    if _MODEL_REVIEW_INJECTION.search(result):
+        raise SubmissionError(f"{path} contains prohibited reviewer-directed content")
+    return result
+
+
 def _integer(
     value: Any,
     path: str,
@@ -235,9 +265,21 @@ def _validate_model(value: Any, path: str) -> Mapping[str, Any]:
     if identity not in ({"revision"}, {"digest"}):
         raise SubmissionError(f"{path} must contain exactly one public revision identifier")
     model = _object(value, base | identity, path)
-    _text(model["display_name"], f"{path}.display_name")
-    _text(model["source"], f"{path}.source")
-    _text(model["precision"], f"{path}.precision")
+    _model_descriptor_text(
+        model["display_name"],
+        f"{path}.display_name",
+        maximum=_MODEL_DISPLAY_NAME_MAX,
+    )
+    _model_descriptor_text(
+        model["source"],
+        f"{path}.source",
+        maximum=_MODEL_SOURCE_MAX,
+    )
+    _model_descriptor_text(
+        model["precision"],
+        f"{path}.precision",
+        maximum=_MODEL_PRECISION_MAX,
+    )
     _integer(model["declared_context_tokens"], f"{path}.declared_context_tokens", minimum=1)
     identity_field = next(iter(identity))
     _text(model[identity_field], f"{path}.{identity_field}", maximum=200)

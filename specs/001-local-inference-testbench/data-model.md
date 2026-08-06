@@ -179,6 +179,17 @@ Contains display_name, source, exactly one revision or digest, precision, and
 declared_context_tokens copied from the Model Entry. It excludes runtime_model so a local alias or
 path is not carried into the report.
 
+When these retained fields are projected into a public leaderboard submission, `display_name`,
+`source`, and `precision` receive a stricter publication-only contract: 1–160, 1–240, and 1–80
+visible ASCII characters respectively; descriptor-grade UUID, serial/inventory-label, network, URL,
+and email shapes are rejected, as are reviewer mentions, role prefixes, and imperative
+instruction-injection shapes. This boundary prevents bidi and homoglyph ambiguity in
+reviewer-visible labels without changing local manifest/run-record or hardware descriptor behavior.
+
+A recorded digest establishes integrity of canonical retained content only. It does not establish
+the provenance or truth of a self-reported benchmark, attest that inference occurred, or verify the
+reported measurements.
+
 ### Value object: Model Summary
 
 | Field | Type | Rules |
