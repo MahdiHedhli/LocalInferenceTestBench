@@ -166,15 +166,17 @@ def _repository_is_exact(repository: Mapping[str, Any]) -> bool:
     )
 
 
-def _parse_codex_comment(comment_value: Any) -> tuple[int, str, str]:
+def _parse_codex_comment(comment_value: Any) -> tuple[int, str, datetime, str]:
     comment = _object(comment_value, "comment")
     comment_id = _integer(comment.get("id"), "comment.id")
     user = _object(comment.get("user"), "comment.user")
     if not _is_codex_identity(comment):
         raise AutomationError("comment author identity is ineligible")
-    created_at, _created = _timestamp(comment.get("created_at"), "comment.created_at")
+    created_rendered, created_at = _timestamp(
+        comment.get("created_at"), "comment.created_at"
+    )
     updated_rendered, _updated = _timestamp(comment.get("updated_at"), "comment.updated_at")
-    if updated_rendered != created_at:
+    if updated_rendered != created_rendered:
         raise AutomationError("edited review comments are ineligible")
     body = _string(comment.get("body"), "comment.body", maximum=20_000)
     if "\r" in body or body.count(_REVIEWED_MARKER) != 1:
@@ -186,7 +188,7 @@ def _parse_codex_comment(comment_value: Any) -> tuple[int, str, str]:
     reviewed_match = _REVIEWED_LINE.fullmatch(reviewed_line)
     if reviewed_match is None or not line_break or footer != _CLEAN_FOOTER:
         raise AutomationError("review comment footer is ineligible")
-    return comment_id, created_at, reviewed_match.group("prefix")
+    return comment_id, created_rendered, created_at, reviewed_match.group("prefix")
 
 
 def _is_codex_identity(comment: Mapping[str, Any]) -> bool:
@@ -219,7 +221,9 @@ def parse_review_signal(event_value: Any) -> ReviewSignal:
     pull = _object(issue.get("pull_request"), "event.issue.pull_request")
     if issue.get("repository_url") != repository_url or pull.get("url") != pull_url:
         raise AutomationError("review comment is not attached to the expected pull request")
-    comment_id, created_at, prefix = _parse_codex_comment(event.get("comment"))
+    comment_id, created_at, _created, prefix = _parse_codex_comment(
+        event.get("comment")
+    )
     return ReviewSignal(
         pull_request_number=number,
         reviewed_commit_prefix=prefix,
@@ -338,29 +342,31 @@ def validate_comment_chain(
     """Require a live unedited Codex reply after a trusted full-head request."""
 
     comments = _flatten_pages(comment_pages, "comments")
-    live_matches: list[tuple[str, int]] = []
-    requests: list[tuple[str, int]] = []
-    codex_comments: list[tuple[str, int]] = []
+    live_matches: list[tuple[datetime, int]] = []
+    requests: list[tuple[datetime, int]] = []
+    codex_comments: list[tuple[datetime, int]] = []
     for index, value in enumerate(comments):
         comment = _object(value, f"comments[{index}]")
         if comment.get("id") == signal.comment_id:
-            comment_id, created_at, prefix = _parse_codex_comment(comment)
+            comment_id, created_rendered, created_at, prefix = _parse_codex_comment(
+                comment
+            )
             if (
                 comment_id != signal.comment_id
-                or created_at != signal.created_at
+                or created_rendered != signal.created_at
                 or prefix != signal.reviewed_commit_prefix
             ):
                 raise AutomationError("live review comment changed")
             live_matches.append((created_at, comment_id))
         if _is_codex_identity(comment):
-            codex_time, _parsed = _timestamp(
+            _codex_rendered, codex_time = _timestamp(
                 comment.get("created_at"), "codex_comment.created_at"
             )
             codex_id = _integer(comment.get("id"), "codex_comment.id")
             codex_comments.append((codex_time, codex_id))
         if _is_trusted_request(comment, base_sha=base_sha, head_sha=head_sha):
             request_id = _integer(comment.get("id"), "request_comment.id")
-            request_time, _parsed = _timestamp(
+            _request_rendered, request_time = _timestamp(
                 comment.get("created_at"), "request_comment.created_at"
             )
             requests.append((request_time, request_id))
@@ -453,7 +459,7 @@ def validate_review_states(review_pages: Any) -> None:
         if not isinstance(state, str) or state not in _REVIEW_STATES:
             raise AutomationError("review state is malformed")
         if state == "PENDING":
-            raise AutomationError("pull request has an active changes-requested review")
+            raise AutomationError("pull request has an unsubmitted draft review")
         if state in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
             latest_decisive[identity] = state
     if any(state == "CHANGES_REQUESTED" for state in latest_decisive.values()):
@@ -634,6 +640,19 @@ def _write_outputs(path: Path, values: Mapping[str, str | int | bool]) -> None:
         raise AutomationError("workflow output could not be written") from error
 
 
+def _write_bounded_text(path: Path, value: str, *, maximum_bytes: int) -> None:
+    try:
+        encoded = value.encode("utf-8", errors="strict")
+    except UnicodeError as error:
+        raise AutomationError("bounded text output is not valid UTF-8") from error
+    if not encoded or len(encoded) > maximum_bytes or b"\x00" in encoded:
+        raise AutomationError("bounded text output is invalid")
+    try:
+        path.write_text(value, encoding="utf-8", newline="\n")
+    except OSError as error:
+        raise AutomationError("bounded text output could not be written") from error
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Validate trusted submission automation state.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -659,6 +678,7 @@ def _parser() -> argparse.ArgumentParser:
     request.add_argument("--base", required=True)
     request.add_argument("--head", required=True)
     request.add_argument("--output", type=Path, required=True)
+    request.add_argument("--body-output", type=Path, required=True)
 
     threads = commands.add_parser("threads")
     threads.add_argument("--input", type=Path, required=True)
@@ -735,10 +755,17 @@ def _run(args: argparse.Namespace) -> None:
         )
         return
     if args.command == "review-request":
+        if args.output.resolve() == args.body_output.resolve():
+            raise AutomationError("review request outputs must be distinct")
         exists = review_request_exists(
             load_json(args.input),
             base_sha=args.base,
             head_sha=args.head,
+        )
+        _write_bounded_text(
+            args.body_output,
+            _request_body(args.base, args.head),
+            maximum_bytes=512,
         )
         _write_outputs(args.output, {"exists": exists})
         return

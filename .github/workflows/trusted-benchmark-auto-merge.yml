@@ -55,28 +55,6 @@ jobs:
           REVIEWED_PREFIX: ${{ steps.signal.outputs.reviewed_commit_prefix }}
         run: |
           set -euo pipefail
-          fetch_mergeable_pull() {
-            local destination="$1"
-            local attempt
-            for attempt in 1 2 3 4 5; do
-              if gh api "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}" \
-                  > "${destination}" &&
-                jq -e '
-                  .mergeable == true and
-                  (
-                    .mergeable_state == "blocked" or
-                    .mergeable_state == "clean" or
-                    .mergeable_state == "unstable"
-                  )
-                ' "${destination}" > /dev/null; then
-                return 0
-              fi
-              if [ "${attempt}" -lt 5 ]; then
-                sleep 2
-              fi
-            done
-            return 1
-          }
           gh api repos/MahdiHedhli/LocalInferenceTestBench > "${RUNNER_TEMP}/repository.json"
           python3 scripts/trusted_submission_automation.py repository \
             --input "${RUNNER_TEMP}/repository.json"
@@ -84,7 +62,8 @@ jobs:
             > "${RUNNER_TEMP}/protection.json"
           python3 scripts/trusted_submission_automation.py protection \
             --input "${RUNNER_TEMP}/protection.json"
-          fetch_mergeable_pull "${RUNNER_TEMP}/pull-request.json"
+          bash scripts/fetch_mergeable_pull.sh \
+            "${PR_NUMBER}" "${RUNNER_TEMP}/pull-request.json"
           python3 scripts/trusted_submission_automation.py pull-request \
             --input "${RUNNER_TEMP}/pull-request.json" \
             --number "${PR_NUMBER}" \
@@ -134,7 +113,7 @@ jobs:
             -f owner=MahdiHedhli \
             -f name=LocalInferenceTestBench \
             -F number="${PR_NUMBER}" \
-            -f query='query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved}totalCount pageInfo{hasNextPage endCursor}}}}}' \
+            -F query=@"${GITHUB_WORKSPACE}/scripts/queries/review_threads.graphql" \
             > "${RUNNER_TEMP}/threads.json"
           python3 scripts/trusted_submission_automation.py threads \
             --input "${RUNNER_TEMP}/threads.json"
@@ -152,29 +131,8 @@ jobs:
           REVIEWED_PREFIX: ${{ steps.signal.outputs.reviewed_commit_prefix }}
         run: |
           set -euo pipefail
-          fetch_mergeable_pull() {
-            local destination="$1"
-            local attempt
-            for attempt in 1 2 3 4 5; do
-              if gh api "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}" \
-                  > "${destination}" &&
-                jq -e '
-                  .mergeable == true and
-                  (
-                    .mergeable_state == "blocked" or
-                    .mergeable_state == "clean" or
-                    .mergeable_state == "unstable"
-                  )
-                ' "${destination}" > /dev/null; then
-                return 0
-              fi
-              if [ "${attempt}" -lt 5 ]; then
-                sleep 2
-              fi
-            done
-            return 1
-          }
-          fetch_mergeable_pull "${RUNNER_TEMP}/pull-request-final.json"
+          bash scripts/fetch_mergeable_pull.sh \
+            "${PR_NUMBER}" "${RUNNER_TEMP}/pull-request-final.json"
           python3 scripts/trusted_submission_automation.py pull-request \
             --input "${RUNNER_TEMP}/pull-request-final.json" \
             --number "${PR_NUMBER}" \
@@ -193,18 +151,37 @@ jobs:
       issues: read
       pull-requests: read
     steps:
-      - name: Fetch exact trusted helper
+      - name: Fetch exact trusted helpers and queries
         env:
           BASE_SHA: ${{ needs.authorize.outputs.base_sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           [[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
-          gh api \
-            -H "Accept: application/vnd.github.raw+json" \
-            "repos/MahdiHedhli/LocalInferenceTestBench/contents/scripts/trusted_submission_automation.py?ref=${BASE_SHA}" \
-            > "${RUNNER_TEMP}/trusted_submission_automation.py"
+          fetch_trusted_file() {
+            local source="$1"
+            local destination="$2"
+            gh api \
+              -H "Accept: application/vnd.github.raw+json" \
+              "repos/MahdiHedhli/LocalInferenceTestBench/contents/${source}?ref=${BASE_SHA}" \
+              > "${destination}"
+          }
+          fetch_trusted_file \
+            scripts/trusted_submission_automation.py \
+            "${RUNNER_TEMP}/trusted_submission_automation.py"
+          fetch_trusted_file \
+            scripts/fetch_mergeable_pull.sh \
+            "${RUNNER_TEMP}/fetch_mergeable_pull.sh"
+          fetch_trusted_file \
+            scripts/queries/review_threads.graphql \
+            "${RUNNER_TEMP}/review_threads.graphql"
+          fetch_trusted_file \
+            scripts/queries/auto_merge_state.graphql \
+            "${RUNNER_TEMP}/auto_merge_state.graphql"
           python3 "${RUNNER_TEMP}/trusted_submission_automation.py" --help > /dev/null
+          bash -n "${RUNNER_TEMP}/fetch_mergeable_pull.sh"
+          test -s "${RUNNER_TEMP}/review_threads.graphql"
+          test -s "${RUNNER_TEMP}/auto_merge_state.graphql"
       - name: Revalidate without reviewer credential
         env:
           BASE_SHA: ${{ needs.authorize.outputs.base_sha }}
@@ -217,34 +194,15 @@ jobs:
         run: |
           set -euo pipefail
           helper="${RUNNER_TEMP}/trusted_submission_automation.py"
-          fetch_mergeable_pull() {
-            local destination="$1"
-            local attempt
-            for attempt in 1 2 3 4 5; do
-              if gh api "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}" \
-                  > "${destination}" &&
-                jq -e '
-                  .mergeable == true and
-                  (
-                    .mergeable_state == "blocked" or
-                    .mergeable_state == "clean" or
-                    .mergeable_state == "unstable"
-                  )
-                ' "${destination}" > /dev/null; then
-                return 0
-              fi
-              if [ "${attempt}" -lt 5 ]; then
-                sleep 2
-              fi
-            done
-            return 1
-          }
+          mergeable_helper="${RUNNER_TEMP}/fetch_mergeable_pull.sh"
+          review_threads_query="${RUNNER_TEMP}/review_threads.graphql"
           gh api repos/MahdiHedhli/LocalInferenceTestBench > "${RUNNER_TEMP}/repository.json"
           python3 "${helper}" repository --input "${RUNNER_TEMP}/repository.json"
           gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
             > "${RUNNER_TEMP}/protection.json"
           python3 "${helper}" protection --input "${RUNNER_TEMP}/protection.json"
-          fetch_mergeable_pull "${RUNNER_TEMP}/pull-request.json"
+          bash "${mergeable_helper}" \
+            "${PR_NUMBER}" "${RUNNER_TEMP}/pull-request.json"
           python3 "${helper}" pull-request \
             --input "${RUNNER_TEMP}/pull-request.json" \
             --number "${PR_NUMBER}" \
@@ -264,7 +222,7 @@ jobs:
             --head "${HEAD_SHA}"
           gh api graphql --paginate --slurp \
             -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
-            -f query='query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved}totalCount pageInfo{hasNextPage endCursor}}}}}' \
+            -F query=@"${review_threads_query}" \
             > "${RUNNER_TEMP}/threads.json"
           python3 "${helper}" threads --input "${RUNNER_TEMP}/threads.json"
           gh api --paginate --slurp \
@@ -283,27 +241,18 @@ jobs:
         run: |
           set -euo pipefail
           helper="${RUNNER_TEMP}/trusted_submission_automation.py"
-          fetch_mergeable_pull() {
+          mergeable_helper="${RUNNER_TEMP}/fetch_mergeable_pull.sh"
+          review_threads_query="${RUNNER_TEMP}/review_threads.graphql"
+          auto_merge_query="${RUNNER_TEMP}/auto_merge_state.graphql"
+          validate_live_base() {
             local destination="$1"
-            local attempt
-            for attempt in 1 2 3 4 5; do
-              if gh api "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}" \
-                  > "${destination}" &&
-                jq -e '
-                  .mergeable == true and
-                  (
-                    .mergeable_state == "blocked" or
-                    .mergeable_state == "clean" or
-                    .mergeable_state == "unstable"
-                  )
-                ' "${destination}" > /dev/null; then
-                return 0
-              fi
-              if [ "${attempt}" -lt 5 ]; then
-                sleep 2
-              fi
-            done
-            return 1
+            local live_base
+            gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
+              > "${destination}"
+            python3 "${helper}" protection --input "${destination}"
+            live_base="$(jq -er '.commit.sha | strings' "${destination}")"
+            [[ "${live_base}" =~ ^[0-9a-f]{40}$ ]]
+            test "${live_base}" = "${BASE_SHA}"
           }
           gh api user > "${RUNNER_TEMP}/reviewer.json"
           python3 "${helper}" identity --input "${RUNNER_TEMP}/reviewer.json"
@@ -312,7 +261,8 @@ jobs:
           gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
             > "${RUNNER_TEMP}/protection-final.json"
           python3 "${helper}" protection --input "${RUNNER_TEMP}/protection-final.json"
-          fetch_mergeable_pull "${RUNNER_TEMP}/pull-request-final.json"
+          bash "${mergeable_helper}" \
+            "${PR_NUMBER}" "${RUNNER_TEMP}/pull-request-final.json"
           python3 "${helper}" pull-request \
             --input "${RUNNER_TEMP}/pull-request-final.json" \
             --number "${PR_NUMBER}" \
@@ -332,7 +282,7 @@ jobs:
             --head "${HEAD_SHA}"
           gh api graphql --paginate --slurp \
             -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
-            -f query='query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved}totalCount pageInfo{hasNextPage endCursor}}}}}' \
+            -F query=@"${review_threads_query}" \
             > "${RUNNER_TEMP}/threads-final.json"
           python3 "${helper}" threads --input "${RUNNER_TEMP}/threads-final.json"
           gh api --paginate --slurp \
@@ -345,7 +295,7 @@ jobs:
             --output "${RUNNER_TEMP}/approval-state.out"
           gh api graphql \
             -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
-            -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id headRefOid state isDraft reviewDecision autoMergeRequest{mergeMethod commitHeadline commitBody enabledBy{login ... on User{databaseId}}}}}}' \
+            -F query=@"${auto_merge_query}" \
             > "${RUNNER_TEMP}/auto-merge-before.json"
           python3 "${helper}" auto-merge-state \
             --input "${RUNNER_TEMP}/auto-merge-before.json" \
@@ -362,6 +312,7 @@ jobs:
             fi
             headline="data: add benchmark submission ${SUBMISSION_ID:0:12}"
             commit_body="Schema-validated self-reported benchmark record; run unverified."
+            validate_live_base "${RUNNER_TEMP}/base-before-auto-merge.json"
             gh api graphql \
               -f id="${PR_NODE_ID}" \
               -f head="${HEAD_SHA}" \
@@ -381,7 +332,8 @@ jobs:
             exit 0
           fi
           test "$(jq -r '.state' "${RUNNER_TEMP}/pull-request-after-arm.json")" = "open"
-          fetch_mergeable_pull "${RUNNER_TEMP}/pull-request-before-approval.json"
+          bash "${mergeable_helper}" \
+            "${PR_NUMBER}" "${RUNNER_TEMP}/pull-request-before-approval.json"
           python3 "${helper}" pull-request \
             --input "${RUNNER_TEMP}/pull-request-before-approval.json" \
             --number "${PR_NUMBER}" \
@@ -391,7 +343,7 @@ jobs:
           grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request-before-approval.out"
           gh api graphql \
             -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
-            -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id headRefOid state isDraft reviewDecision autoMergeRequest{mergeMethod commitHeadline commitBody enabledBy{login ... on User{databaseId}}}}}}' \
+            -F query=@"${auto_merge_query}" \
             > "${RUNNER_TEMP}/auto-merge-armed.json"
           python3 "${helper}" auto-merge-state \
             --input "${RUNNER_TEMP}/auto-merge-armed.json" \
@@ -402,11 +354,12 @@ jobs:
           grep -Fqx "enabled=true" "${RUNNER_TEMP}/auto-merge-armed.out"
           gh api graphql --paginate --slurp \
             -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
-            -f query='query($owner:String!,$name:String!,$number:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$endCursor){nodes{id isResolved}totalCount pageInfo{hasNextPage endCursor}}}}}' \
+            -F query=@"${review_threads_query}" \
             > "${RUNNER_TEMP}/threads-before-approval.json"
           python3 "${helper}" threads --input "${RUNNER_TEMP}/threads-before-approval.json"
           if grep -Fqx "exists=false" "${RUNNER_TEMP}/approval-state.out"; then
             approval_body="Exact-head approval after trusted benchmark authorization."
+            validate_live_base "${RUNNER_TEMP}/base-before-approval.json"
             gh api graphql \
               -f id="${PR_NODE_ID}" \
               -f head="${HEAD_SHA}" \
@@ -430,7 +383,7 @@ jobs:
             test "${final_state}" = "open"
             gh api graphql \
               -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
-              -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id headRefOid state isDraft reviewDecision autoMergeRequest{mergeMethod commitHeadline commitBody enabledBy{login ... on User{databaseId}}}}}}' \
+              -F query=@"${auto_merge_query}" \
               > "${RUNNER_TEMP}/auto-merge-after.json"
             python3 "${helper}" auto-merge-state \
               --input "${RUNNER_TEMP}/auto-merge-after.json" \

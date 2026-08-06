@@ -6,6 +6,11 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WORKFLOWS = sorted(
+    path
+    for pattern in ("*.yml", "*.yaml")
+    for path in (ROOT / ".github/workflows").glob(pattern)
+)
 
 
 class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
@@ -17,17 +22,29 @@ class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
         self.assertIn("pull_request_target:", workflow)
         self.assertIn("issues: write", workflow)
         self.assertIn("change boundary passed: benchmark-only", workflow)
-        self.assertIn("@codex review", workflow)
-        self.assertIn("@coderabbitai review", workflow)
-        self.assertIn("litb-review-request:", workflow)
+        self.assertIn(
+            "python3 scripts/trusted_submission_automation.py review-request",
+            workflow,
+        )
+        self.assertIn("--body-output", workflow)
+        self.assertNotIn("@codex review", workflow)
+        self.assertNotIn("@coderabbitai review", workflow)
+        self.assertNotIn("litb-review-request:", workflow)
+        self.assertNotIn('"github-actions[bot]"', workflow)
         self.assertIn("needs: boundary", workflow)
         self.assertIn("needs.boundary.outputs.classification == 'benchmark-only'", workflow)
         self.assertIn('classification="benchmark-manual"', workflow)
         self.assertIn("HEAD_REF: ${{ github.event.pull_request.head.ref }}", workflow)
         self.assertIn('^litb/submission-([0-9a-f]{64})$', workflow)
         self.assertIn("--expected-submission-id", workflow)
-        self.assertLess(workflow.index("--expected-submission-id"), workflow.index("@codex review"))
-        self.assertIn("persist-credentials: false", workflow)
+        self.assertLess(
+            workflow.index("--expected-submission-id"),
+            workflow.index(
+                "python3 scripts/trusted_submission_automation.py review-request"
+            ),
+        )
+        self.assertEqual(workflow.count("persist-credentials: false"), 2)
+        self.assertEqual(workflow.count("contents: read"), 2)
         self.assertNotIn("github.event.pull_request.body", workflow)
         self.assertNotIn("github.event.comment.body", workflow)
         self.assertRegex(workflow, r"actions/checkout@[0-9a-f]{40}")
@@ -36,6 +53,13 @@ class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/trusted-benchmark-auto-merge.yml").read_text(
             encoding="utf-8"
         )
+        review_threads_query = (
+            ROOT / "scripts/queries/review_threads.graphql"
+        ).read_text(encoding="utf-8")
+        auto_merge_query = (
+            ROOT / "scripts/queries/auto_merge_state.graphql"
+        ).read_text(encoding="utf-8")
+        trusted_contract = "\n".join((workflow, review_threads_query, auto_merge_query))
 
         self.assertIn("issue_comment:", workflow)
         self.assertRegex(workflow, r"types:\s*\n\s*- created")
@@ -46,16 +70,19 @@ class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
         self.assertIn('git show "${BASE_SHA}:scripts/validate_benchmark_change.py"', workflow)
         self.assertIn("--require-benchmark", workflow)
         self.assertIn("--check-content", workflow)
-        self.assertIn("reviewThreads", workflow)
-        self.assertNotIn("nodes{isResolved}", workflow)
-        self.assertEqual(workflow.count("nodes{id isResolved}"), 4)
+        self.assertIn("scripts/queries/review_threads.graphql", workflow)
+        self.assertIn("scripts/queries/auto_merge_state.graphql", workflow)
+        self.assertIn("reviewThreads", review_threads_query)
+        self.assertIn("id", review_threads_query)
+        self.assertIn("isResolved", review_threads_query)
+        self.assertNotIn("nodes{isResolved}", trusted_contract)
         self.assertIn("enablePullRequestAutoMerge", workflow)
         self.assertIn("expectedHeadOid", workflow)
         self.assertIn("mergeMethod:SQUASH", workflow)
         self.assertIn("commitOID", workflow)
-        self.assertIn("reviewDecision", workflow)
-        self.assertIn("commitHeadline", workflow)
-        self.assertIn("commitBody", workflow)
+        self.assertIn("reviewDecision", auto_merge_query)
+        self.assertIn("commitHeadline", trusted_contract)
+        self.assertIn("commitBody", trusted_contract)
         self.assertIn("data: add benchmark submission", workflow)
         self.assertIn('grep -Fqx "review_decision=APPROVED"', workflow)
         self.assertIn('grep -Fqx "review_decision=REVIEW_REQUIRED"', workflow)
@@ -76,15 +103,88 @@ class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/trusted-benchmark-auto-merge.yml").read_text(
             encoding="utf-8"
         )
+        helper = (ROOT / "scripts/fetch_mergeable_pull.sh").read_text(
+            encoding="utf-8"
+        )
 
-        self.assertEqual(workflow.count("fetch_mergeable_pull()"), 4)
-        self.assertEqual(workflow.count("fetch_mergeable_pull \"${RUNNER_TEMP}"), 5)
-        self.assertEqual(workflow.count("for attempt in 1 2 3 4 5; do"), 4)
+        self.assertNotIn("fetch_mergeable_pull()", workflow)
+        self.assertEqual(workflow.count("bash scripts/fetch_mergeable_pull.sh"), 2)
+        self.assertEqual(workflow.count('bash "${mergeable_helper}"'), 3)
+        self.assertIn("scripts/fetch_mergeable_pull.sh", workflow)
+        self.assertEqual(helper.count("for attempt in 1 2 3 4 5; do"), 1)
         for state in ("blocked", "clean", "unstable"):
-            self.assertEqual(workflow.count(f'.mergeable_state == "{state}"'), 4)
-        self.assertNotIn('.mergeable_state == "dirty"', workflow)
-        self.assertNotIn('.mergeable_state == "behind"', workflow)
-        self.assertIn("sleep 2", workflow)
+            self.assertEqual(helper.count(f'.mergeable_state == "{state}"'), 1)
+        self.assertNotIn('.mergeable_state == "dirty"', helper)
+        self.assertNotIn('.mergeable_state == "behind"', helper)
+        self.assertIn("^[1-9][0-9]*$", helper)
+        self.assertIn("sleep 2", helper)
+
+    def test_reused_graphql_queries_are_loaded_from_trusted_base_files(self) -> None:
+        workflow = (ROOT / ".github/workflows/trusted-benchmark-auto-merge.yml").read_text(
+            encoding="utf-8"
+        )
+        review_threads_query = (
+            ROOT / "scripts/queries/review_threads.graphql"
+        ).read_text(encoding="utf-8")
+        auto_merge_query = (
+            ROOT / "scripts/queries/auto_merge_state.graphql"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("reviewThreads(first:", workflow)
+        self.assertEqual(
+            workflow.count(
+                '-F query=@"${GITHUB_WORKSPACE}/scripts/queries/review_threads.graphql"'
+            ),
+            1,
+        )
+        self.assertEqual(workflow.count('-F query=@"${review_threads_query}"'), 3)
+        self.assertEqual(workflow.count('-F query=@"${auto_merge_query}"'), 3)
+        self.assertIn("scripts/queries/review_threads.graphql", workflow)
+        self.assertIn("scripts/queries/auto_merge_state.graphql", workflow)
+        self.assertIn("?ref=${BASE_SHA}", workflow)
+        self.assertNotIn("?ref=${HEAD_SHA}", workflow)
+        self.assertLess(
+            workflow.index('git checkout --detach "${BASE_SHA}"'),
+            workflow.index(
+                '-F query=@"${GITHUB_WORKSPACE}/scripts/queries/review_threads.graphql"'
+            ),
+        )
+        self.assertIn("$endCursor: String", review_threads_query)
+        self.assertIn("nodes", review_threads_query)
+        self.assertIn("id", review_threads_query)
+        self.assertIn("isResolved", review_threads_query)
+        self.assertIn("totalCount", review_threads_query)
+        self.assertIn("hasNextPage", review_threads_query)
+        self.assertIn("endCursor", review_threads_query)
+        self.assertEqual(auto_merge_query.count("autoMergeRequest"), 1)
+        self.assertIn("reviewDecision", auto_merge_query)
+
+    def test_live_default_branch_must_still_match_before_each_mutation(self) -> None:
+        workflow = (ROOT / ".github/workflows/trusted-benchmark-auto-merge.yml").read_text(
+            encoding="utf-8"
+        )
+
+        identity = workflow.index('python3 "${helper}" identity')
+        auto_merge_check = workflow.index(
+            'validate_live_base "${RUNNER_TEMP}/base-before-auto-merge.json"'
+        )
+        auto_merge_mutation = workflow.index("enablePullRequestAutoMerge")
+        approval_check = workflow.index(
+            'validate_live_base "${RUNNER_TEMP}/base-before-approval.json"'
+        )
+        approval_mutation = workflow.index("addPullRequestReview")
+
+        self.assertEqual(workflow.count("validate_live_base()"), 1)
+        self.assertEqual(
+            workflow.count('validate_live_base "${RUNNER_TEMP}/base-before-'), 2
+        )
+        self.assertIn("repos/MahdiHedhli/LocalInferenceTestBench/branches/main", workflow)
+        self.assertIn(".commit.sha | strings", workflow)
+        self.assertIn('test "${live_base}" = "${BASE_SHA}"', workflow)
+        self.assertLess(identity, auto_merge_check)
+        self.assertLess(auto_merge_check, auto_merge_mutation)
+        self.assertLess(auto_merge_mutation, approval_check)
+        self.assertLess(approval_check, approval_mutation)
 
     def test_reviewer_secret_is_confined_to_the_final_mutation_step(self) -> None:
         workflow = (ROOT / ".github/workflows/trusted-benchmark-auto-merge.yml").read_text(
@@ -94,7 +194,7 @@ class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
         secret_reference = "secrets.ERNEST_REVIEW_TOKEN"
         self.assertEqual(workflow.count(secret_reference), 1)
         self.assertLess(workflow.index("Revalidate without reviewer credential"), workflow.index(secret_reference))
-        self.assertLess(workflow.index("reviewThreads"), workflow.index(secret_reference))
+        self.assertLess(workflow.index("review_threads.graphql"), workflow.index(secret_reference))
         self.assertLess(workflow.index("--require-benchmark"), workflow.index(secret_reference))
         prefix, suffix = workflow.split(secret_reference, 1)
         self.assertNotIn("ERNEST_REVIEW_TOKEN", prefix)
@@ -116,7 +216,8 @@ class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
         self.assertIn("Schema-validated self-reported benchmark record; run unverified.", workflow)
 
     def test_event_expressions_are_never_interpolated_inside_shell_programs(self) -> None:
-        for path in (ROOT / ".github/workflows").glob("*.yml"):
+        self.assertTrue(WORKFLOWS)
+        for path in WORKFLOWS:
             lines = path.read_text(encoding="utf-8").splitlines()
             run_indent: int | None = None
             for line_number, line in enumerate(lines, 1):
@@ -131,7 +232,7 @@ class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
                         self.assertNotIn("${{", line)
 
     def test_all_workflow_actions_are_sha_pinned(self) -> None:
-        for path in (ROOT / ".github/workflows").glob("*.yml"):
+        for path in WORKFLOWS:
             text = path.read_text(encoding="utf-8")
             for action in re.findall(r"(?m)^\s*uses:\s*([^\s#]+)", text):
                 with self.subTest(workflow=path.name, action=action):

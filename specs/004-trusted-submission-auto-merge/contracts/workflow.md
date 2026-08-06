@@ -26,8 +26,9 @@
 - Mutation: arm native squash auto-merge with `expectedHeadOid` and fixed metadata, then submit the
   reviewer account's `commitOID`-bound approval. On a fully revalidated partial-run retry, a latest
   decisive exact-head reviewer approval may be reused and a missing native auto-merge request may be
-  re-armed. A stale, dismissed, changes-requested, or other-commit approval is never reusable. No
-  direct merge operation is permitted.
+  re-armed. Immediately before either possible mutation, the live default-branch tip must still
+  equal the authorized base SHA. A stale, dismissed, changes-requested, or other-commit approval is
+  never reusable. No direct merge operation is permitted.
 - Failure: leave the PR open and emit only a categorical workflow failure.
 
 ## Operator prerequisites

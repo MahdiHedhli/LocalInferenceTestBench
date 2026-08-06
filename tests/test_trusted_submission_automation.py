@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
 
 
@@ -314,6 +317,80 @@ class ReviewStateTests(unittest.TestCase):
             review_request_exists(comments, base_sha=BASE_SHA, head_sha=HEAD_SHA)
         )
 
+    def test_review_request_cli_writes_canonical_bounded_body_and_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            comments = root / "comments.json"
+            state = root / "state.env"
+            body = root / "body.txt"
+            comments.write_text(json.dumps([[]]), encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(
+                        Path(__file__).resolve().parents[1]
+                        / "scripts"
+                        / "trusted_submission_automation.py"
+                    ),
+                    "review-request",
+                    "--input",
+                    str(comments),
+                    "--base",
+                    BASE_SHA,
+                    "--head",
+                    HEAD_SHA,
+                    "--output",
+                    str(state),
+                    "--body-output",
+                    str(body),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(state.read_text(encoding="utf-8"), "exists=false\n")
+            self.assertEqual(body.read_text(encoding="utf-8"), request_comment()["body"])
+            self.assertLessEqual(body.stat().st_size, 512)
+
+    def test_comment_chain_orders_mixed_timestamp_precision_chronologically(self) -> None:
+        whole_second_event = event_fixture()
+        whole_second_signal = parse_review_signal(whole_second_event)
+        validate_comment_chain(
+            [[
+                request_comment("2026-08-06T12:00:00.500Z"),
+                whole_second_event["comment"],
+            ]],
+            signal=whole_second_signal,
+            base_sha=BASE_SHA,
+            head_sha=HEAD_SHA,
+        )
+
+        event = event_fixture()
+        event["comment"]["created_at"] = "2026-08-06T12:00:00.500Z"
+        event["comment"]["updated_at"] = "2026-08-06T12:00:00.500Z"
+        signal = parse_review_signal(event)
+
+        validate_comment_chain(
+            [[request_comment("2026-08-06T12:00:00Z"), event["comment"]]],
+            signal=signal,
+            base_sha=BASE_SHA,
+            head_sha=HEAD_SHA,
+        )
+
+        with self.assertRaisesRegex(AutomationError, "missing or stale"):
+            validate_comment_chain(
+                [[
+                    request_comment("2026-08-06T12:01:00.500Z"),
+                    whole_second_event["comment"],
+                ]],
+                signal=whole_second_signal,
+                base_sha=BASE_SHA,
+                head_sha=HEAD_SHA,
+            )
+
     def test_contributor_marker_missing_marker_and_marker_after_review_are_rejected(self) -> None:
         signal = parse_review_signal(event_fixture())
         contributor_marker = request_comment()
@@ -448,6 +525,11 @@ class ReviewStateTests(unittest.TestCase):
         blocked[0][0]["state"] = "CHANGES_REQUESTED"
         with self.assertRaisesRegex(AutomationError, "changes-requested"):
             validate_review_states(blocked)
+
+        pending = copy.deepcopy(reviews)
+        pending[0][0]["state"] = "PENDING"
+        with self.assertRaisesRegex(AutomationError, "unsubmitted draft review"):
+            validate_review_states(pending)
 
         still_blocked = copy.deepcopy(blocked)
         still_blocked[0].append(

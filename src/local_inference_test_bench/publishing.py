@@ -867,7 +867,10 @@ def publish_submission(
     identity: PublicationIdentity,
     denylist_bytes: bytes,
 ) -> PublicationResult:
-    """Create one public branch and PR containing only minimized data."""
+    """Publish minimized data, reusing a publication PR when one already exists.
+
+    A new PR contains only the minimized submission and generated leaderboard.
+    """
 
     validate_submission(submission)
     submission_id = submission.get("submission_id")

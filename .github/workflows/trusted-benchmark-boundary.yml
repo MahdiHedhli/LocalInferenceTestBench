@@ -83,8 +83,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read
       issues: write
     steps:
+      - name: Check out trusted base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
       - name: Request Codex and CodeRabbit once for the exact base and head
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -100,39 +107,18 @@ jobs:
           gh api --paginate --slurp \
             "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments?per_page=100" \
             > "${comments_file}"
-          exists="$(python3 - "${comments_file}" "${BASE_SHA}" "${HEAD_SHA}" <<'PY'
-          import json
-          from pathlib import Path
-          import sys
-
-          source = Path(sys.argv[1])
-          if not source.is_file() or source.stat().st_size > 8 * 1024 * 1024:
-              raise SystemExit(1)
-          pages = json.loads(source.read_text(encoding="utf-8"))
-          body = (
-              "@codex review\n@coderabbitai review\n\n"
-              f"<!-- litb-review-request:base={sys.argv[2]};head={sys.argv[3]} -->"
-          )
-          matches = [
-              comment
-              for page in pages
-              if isinstance(page, list)
-              for comment in page
-              if isinstance(comment, dict)
-              and comment.get("body") == body
-              and isinstance(comment.get("user"), dict)
-              and comment["user"].get("id") == 41898282
-              and comment["user"].get("login") == "github-actions[bot]"
-              and comment["user"].get("type") == "Bot"
-          ]
-          print("true" if matches else "false")
-          PY
-          )"
-          if [ "${exists}" = "true" ]; then
+          request_state="${RUNNER_TEMP}/litb-review-request.env"
+          request_body="${RUNNER_TEMP}/litb-review-request.txt"
+          python3 scripts/trusted_submission_automation.py review-request \
+            --input "${comments_file}" \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}" \
+            --output "${request_state}" \
+            --body-output "${request_body}"
+          if grep -Fqx "exists=true" "${request_state}"; then
             exit 0
           fi
-          [ "${exists}" = "false" ]
-          request_body="$(printf '@codex review\n@coderabbitai review\n\n<!-- litb-review-request:base=%s;head=%s -->' "${BASE_SHA}" "${HEAD_SHA}")"
+          grep -Fqx "exists=false" "${request_state}"
           gh api --silent --method POST \
             "repos/MahdiHedhli/LocalInferenceTestBench/issues/${PR_NUMBER}/comments" \
-            --raw-field body="${request_body}"
+            --raw-field body="$(< "${request_body}")"

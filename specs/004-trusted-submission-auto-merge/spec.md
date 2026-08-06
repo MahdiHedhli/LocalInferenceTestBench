@@ -73,7 +73,8 @@ check.
   branch digest, author, exact diff, safe file modes, canonical content, comment chronology, active
   review state, the publicly observable app-bound required checks, a native review decision
   consistent with either a fresh authorization or a validated partial-run retry, complete
-  pagination, and zero unresolved threads.
+  pagination, and zero unresolved threads. The live default-branch tip MUST still equal the
+  authorized base SHA immediately before each possible credentialed mutation.
 - **FR-007**: Reviewer credentials MUST be available only to the final trusted job, MUST never enter
   command arguments or logs, and MUST be identity-checked before mutation.
 - **FR-008**: The reviewer bot MUST NOT approve its own PR and MUST pin the review to the full current

@@ -15,9 +15,10 @@
 6. Reject unresolved threads, changes-requested state, missing app-bound checks or native review
    requirement, conflicts, exhausted mergeability retries, and self-review;
    identity-check the reviewer account; arm squash auto-merge with a fixed digest-derived commit
-   message and full-SHA guard; then approve that same full SHA. On a partial-run retry, reuse only a
-   latest decisive approval for that full SHA and re-arm missing auto-merge after complete
-   revalidation.
+   message and full-SHA guard; then approve that same full SHA. Recheck that the live default-branch
+   tip still equals the authorized base immediately before either mutation. On a partial-run retry,
+   reuse only a latest decisive approval for that full SHA and re-arm missing auto-merge after
+   complete revalidation.
 
 ## Security model
 

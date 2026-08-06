@@ -61,7 +61,8 @@ digest, duplicate status, and deterministic leaderboard before requesting Codex 
 A same-head clean Codex signal starts another fail-closed revalidation and may arm GitHub's protected
 squash auto-merge. Branch protection still requires the publication and trusted-boundary checks plus
 an exact-head approval from the configured reviewer account. Findings, unresolved threads, stale
-data, general code changes, and rate-limit notices never enter this lane.
+data, and general code changes never enter this lane. CodeRabbit review requests are best-effort:
+rate-limit notices are neither approvals nor disqualifiers when all required gates pass.
 
 Per-run automation checks public protected status, the GitHub-Actions-bound required-check summary,
 and native review decision. Administration-only protection settings remain repository-operator

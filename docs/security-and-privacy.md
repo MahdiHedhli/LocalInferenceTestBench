@@ -126,9 +126,10 @@ the repository's remaining configured protections. The workflow does not claim p
 into administration-only settings; stale-review dismissal, last-push approval, conversation
 resolution, linear history, admin enforcement, and force-push/deletion prohibitions are mandatory
 operator prerequisites. The workflow arms native squash auto-merge with a full-head guard and fixed
-digest-derived commit metadata before adding a full-head approval. It never performs a direct merge,
-admin bypass, head checkout, force-push, or push to `main`. CodeRabbit review is requested but a
-rate-limit status never authorizes a merge.
+digest-derived commit metadata before adding a full-head approval. It freshly requires the live
+`main` tip to equal the authorized base SHA immediately before either possible mutation. It never
+performs a direct merge, admin bypass, head checkout, force-push, or push to `main`. CodeRabbit
+review is requested but a rate-limit status never authorizes a merge.
 
 The automated lane requires `litb/submission-<submission-id>` as the live head ref, with the digest
 matching the sole added file and canonical content ID. GitHub's transient unknown mergeability gets
