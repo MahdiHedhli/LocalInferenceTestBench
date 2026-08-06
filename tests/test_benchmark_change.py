@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from validate_benchmark_change import (  # noqa: E402
     ChangeError,
+    _require_current_added_submission,
     validate_benchmark_content,
     validate_benchmark_modes,
     validate_changes,
@@ -24,6 +25,23 @@ LEADERBOARD = "site/data/leaderboard.json"
 
 
 class BenchmarkChangeBoundaryTests(unittest.TestCase):
+    def test_new_benchmark_candidate_must_use_schema_1_1(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "candidate.json"
+            path.write_text('{"schema_version":"1.1"}\n', encoding="utf-8")
+            _require_current_added_submission(path)
+
+            path.write_text('{"schema_version":"1.0"}\n', encoding="utf-8")
+            with self.assertRaisesRegex(ChangeError, "schema 1.1"):
+                _require_current_added_submission(path)
+
+            path.write_text(
+                '{"schema_version":"1.1","schema_version":"1.1"}\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ChangeError, "strict JSON"):
+                _require_current_added_submission(path)
+
     def test_general_change_does_not_enter_the_benchmark_only_lane(self) -> None:
         self.assertFalse(validate_changes([("M", "README.md"), ("A", "docs/new.md")]))
         self.assertFalse(

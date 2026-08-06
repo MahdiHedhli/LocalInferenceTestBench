@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import copy
 from contextlib import redirect_stdout
+import hashlib
 import io
+import inspect
 import json
 import os
 from pathlib import Path
@@ -17,21 +19,35 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from local_inference_test_bench.submissions import (  # noqa: E402
+    CONFIG_KEY_DIMENSIONS,
+    DEFAULT_FACET,
+    FACET_GRADUATION_POLICY,
     SubmissionError,
+    FacetSelector,
     build_leaderboard,
     ensure_submission,
     load_json_object,
+    load_measurement_evidence_file,
     load_public_environment_file,
     load_saved_submission,
-    prepare_submission,
-    prepare_submissions,
+    prepare_submission as _prepare_submission,
+    prepare_submissions as _prepare_submissions,
     render_submission_bytes,
     validate_submission,
+    validate_accepted_submission,
+    validate_measurement_evidence,
     write_leaderboard,
     write_submission,
 )
 from local_inference_test_bench import submissions as submissions_module  # noqa: E402
 from local_inference_test_bench import cli as cli_module  # noqa: E402
+from local_inference_test_bench import runner as runner_module  # noqa: E402
+from local_inference_test_bench.reporting import validate_report  # noqa: E402
+from local_inference_test_bench.suites import (  # noqa: E402
+    PUBLIC_SUITE_REGISTRY,
+    SuiteCase,
+    resolve_public_suite,
+)
 
 
 CASE_IDS = (
@@ -41,6 +57,15 @@ CASE_IDS = (
     "read-only-tool",
     "unapproved-change-boundary",
 )
+
+
+def legacy_submission_fixture() -> tuple[Path, dict]:
+    submissions = Path(__file__).resolve().parents[1] / "site" / "data" / "submissions"
+    for path in sorted(submissions.glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("schema_version") == "1.0":
+            return path, payload
+    raise AssertionError("repository has no schema 1.0 submission fixture")
 
 
 def public_environment(*, cpu_model: str = "Example CPU") -> dict:
@@ -183,6 +208,88 @@ def valid_report(
     }
 
 
+def measurement_evidence(report: dict, *, validity: str = "clean") -> dict:
+    pre_categories: list[str] = []
+    post_categories: list[str] = []
+    if validity == "nonquiescent":
+        pre_categories = ["sustained_load"]
+        post_categories = ["sustained_load"]
+    elif validity == "degraded_midrun":
+        post_categories = ["swap"]
+    return {
+        "schema_version": "1.0",
+        "source_run_id": report["run_id"],
+        "models": [
+            {
+                "model_id": model["model_id"],
+                "validity": validity,
+                "measurement_conditions": {
+                    "pre": {
+                        "outcome": (
+                            "threshold_crossed"
+                            if pre_categories
+                            else "within_thresholds"
+                        ),
+                        "categories": pre_categories,
+                    },
+                    "post": {
+                        "outcome": (
+                            "threshold_crossed"
+                            if post_categories
+                            else "within_thresholds"
+                        ),
+                        "categories": post_categories,
+                    },
+                    "hard_threshold_crossed": bool(
+                        pre_categories or post_categories
+                    ),
+                },
+            }
+            for model in report["models"]
+        ],
+    }
+
+
+def prepare_submission(
+    report: dict,
+    environment: dict,
+    model_id: str | None = None,
+    *,
+    evidence: dict | None = None,
+) -> dict:
+    return _prepare_submission(
+        report,
+        environment,
+        model_id,
+        measurement_evidence=evidence or measurement_evidence(report),
+    )
+
+
+def prepare_submissions(
+    report: dict,
+    environment: dict,
+    model_ids: tuple[str, ...] | None = None,
+    *,
+    evidence: dict | None = None,
+) -> tuple[dict, ...]:
+    return _prepare_submissions(
+        report,
+        environment,
+        model_ids,
+        measurement_evidence=evidence or measurement_evidence(report),
+    )
+
+
+def rehash_submission(submission: dict) -> dict:
+    payload = {
+        key: copy.deepcopy(value)
+        for key, value in submission.items()
+        if key != "submission_id"
+    }
+    submission["submission_id"] = submissions_module._submission_digest(payload)
+    return submission
+
+
 def report_with_model_field(field: str, value: str) -> dict:
     report = valid_report()
     report["models"][0]["provenance"][field] = value
@@ -223,6 +330,20 @@ def materialize_model_descriptor_fixture(builder: dict) -> str:
 
 
 class SubmissionTests(unittest.TestCase):
+    def test_prepare_submission_file_preserves_model_selection_positionally(self) -> None:
+        parameters = inspect.signature(
+            submissions_module.prepare_submission_file
+        ).parameters
+
+        self.assertEqual(
+            parameters["model_ids"].kind,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+        self.assertEqual(
+            parameters["measurement_evidence_path"].kind,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+
     def test_prepare_cli_defaults_to_an_ignored_local_output_directory(self) -> None:
         parser = cli_module.build_parser()
         args = parser.parse_args(
@@ -250,7 +371,11 @@ class SubmissionTests(unittest.TestCase):
             "--hardware",
             ".local/hardware.json",
         ]
-        for count, expected in ((1, "submission ready: 1 file\n"), (2, "submission ready: 2 files\n")):
+        expectations = (
+            (1, "submission ready: 1 file\n"),
+            (2, "submission ready: 2 files\n"),
+        )
+        for count, expected in expectations:
             with self.subTest(count=count):
                 output = io.StringIO()
                 with (
@@ -299,13 +424,490 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(first["hardware"], public_environment()["hardware"])
         self.assertEqual(first["runtime"], public_environment()["runtime"])
 
+    def test_schema_1_1_records_measurement_month_validity_and_case_taxonomy(self) -> None:
+        report = valid_report()
+        submission = prepare_submission(report, public_environment())
+
+        self.assertEqual(submission["schema_version"], "1.1")
+        self.assertEqual(submission["measurement_period"], "2026-01")
+        self.assertEqual(submission["validity"], "clean")
+        self.assertEqual(
+            submission["measurement_conditions"],
+            measurement_evidence(report)["models"][0]["measurement_conditions"],
+        )
+        self.assertNotIn(report["validity"], {"clean", "nonquiescent", "degraded_midrun"})
+        self.assertEqual(
+            [case["capability"] for case in submission["cases"]],
+            [
+                "structured_output",
+                "coding",
+                "cyber_triage",
+                "agent_tool_use",
+                "safety_boundary",
+            ],
+        )
+        self.assertTrue(all(case["modality"] == "text" for case in submission["cases"]))
+
+    def test_measurement_evidence_is_required_and_validity_is_derived(self) -> None:
+        report = valid_report()
+        with self.assertRaises(TypeError):
+            _prepare_submission(report, public_environment())
+
+        inconsistent = measurement_evidence(report, validity="clean")
+        inconsistent["models"][0]["measurement_conditions"]["post"] = {
+            "outcome": "threshold_crossed",
+            "categories": ["swap"],
+        }
+        inconsistent["models"][0]["measurement_conditions"][
+            "hard_threshold_crossed"
+        ] = True
+        with self.assertRaisesRegex(SubmissionError, "validity"):
+            validate_measurement_evidence(inconsistent)
+
+        degraded = measurement_evidence(report, validity="degraded_midrun")
+        validate_measurement_evidence(degraded)
+        submission = prepare_submission(
+            report,
+            public_environment(),
+            evidence=degraded,
+        )
+        self.assertEqual(submission["validity"], "degraded_midrun")
+
+        mismatched = measurement_evidence(report)
+        mismatched["models"][0]["model_id"] = "different-report-model"
+        with self.assertRaisesRegex(SubmissionError, "outside the source report"):
+            prepare_submission(
+                report,
+                public_environment(),
+                evidence=mismatched,
+            )
+
+        duplicate = measurement_evidence(report)
+        duplicate["models"].append(copy.deepcopy(duplicate["models"][0]))
+        with self.assertRaisesRegex(SubmissionError, "must be unique"):
+            validate_measurement_evidence(duplicate)
+
+        stale = measurement_evidence(report)
+        stale["source_run_id"] = "different-source-run"
+        with self.assertRaisesRegex(SubmissionError, "source run"):
+            prepare_submission(report, public_environment(), evidence=stale)
+
+        oversized = measurement_evidence(report)
+        template = oversized["models"][0]
+        oversized["models"] = [
+            {**copy.deepcopy(template), "model_id": f"model-{index}"}
+            for index in range(1001)
+        ]
+        with self.assertRaisesRegex(SubmissionError, "between 1 and 1000"):
+            validate_measurement_evidence(oversized)
+
+    def test_new_post_threshold_takes_precedence_over_existing_nonquiescence(self) -> None:
+        report = valid_report()
+        evidence = measurement_evidence(report, validity="degraded_midrun")
+        result = evidence["models"][0]
+        result["measurement_conditions"]["pre"] = {
+            "outcome": "threshold_crossed",
+            "categories": ["sustained_load"],
+        }
+        result["measurement_conditions"]["post"] = {
+            "outcome": "threshold_crossed",
+            "categories": ["sustained_load", "swap"],
+        }
+        validate_measurement_evidence(evidence)
+
+    def test_optional_determinism_is_closed_and_verdict_consistent(self) -> None:
+        report = valid_report()
+        evidence = measurement_evidence(report)
+        evidence["models"][0]["determinism"] = {
+            "n_runs": 3,
+            "semantic_pass_rate": 1.0,
+            "envelope_class_stable": True,
+            "finish_reason_stable": True,
+            "fingerprint_stable": False,
+            "verdict": "warning",
+        }
+        submission = prepare_submission(
+            report,
+            public_environment(),
+            evidence=evidence,
+        )
+        self.assertEqual(submission["determinism"]["verdict"], "warning")
+
+        invalid = copy.deepcopy(submission)
+        invalid["determinism"]["verdict"] = "stable"
+        rehash_submission(invalid)
+        with self.assertRaisesRegex(SubmissionError, "verdict"):
+            validate_submission(invalid)
+
+        impossible = copy.deepcopy(evidence)
+        impossible["models"][0]["determinism"].update(
+            {
+                "semantic_pass_rate": 0.2,
+                "fingerprint_stable": True,
+                "verdict": "blocking_instability",
+            }
+        )
+        with self.assertRaisesRegex(SubmissionError, "n_runs"):
+            validate_measurement_evidence(impossible)
+
+    def test_measurement_period_rejects_future_months(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        submission["measurement_period"] = "9999-12"
+        rehash_submission(submission)
+        with self.assertRaisesRegex(SubmissionError, "future"):
+            validate_submission(submission)
+
+    def test_not_applicable_is_excluded_from_every_public_score_denominator(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        submission["cases"][-1]["outcome"] = "not_applicable"
+        submission["cases"][-1]["route"] = "not_applicable"
+        submission["cases"][-1]["termination"] = "not_applicable"
+        submission["metrics"].update(
+            {
+                "semantic_pass_count": 4,
+                "exact_format_pass_count": 4,
+                "scored_case_count": 4,
+                "usage_coverage_cases": 4,
+                "completion_tokens_per_second": None,
+            }
+        )
+        rehash_submission(submission)
+        validate_submission(submission)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / f"{submission['submission_id']}.json").write_bytes(
+                render_submission_bytes(submission)
+            )
+            leaderboard = build_leaderboard(directory)
+        self.assertEqual(leaderboard["entries"][0]["metrics"]["semantic_score_percent"], 100.0)
+        self.assertEqual(leaderboard["entries"][0]["metrics"]["scored_case_count"], 4)
+
+    def test_no_applicable_case_is_absent_from_a_selected_facet(self) -> None:
+        report = valid_report()
+        report["profile"] = "synthetic-mixed"
+        report["suite_version"] = "9.1"
+        report["models"][0]["cases"] = report["models"][0]["cases"][:2]
+        report["models"][0]["cases"][0].update(
+            {
+                "semantic_success": False,
+                "exact_format": False,
+                "outcome": "not_applicable",
+                "route": "not_applicable",
+                "termination": "not_applicable",
+                "latency_ms": 0.0,
+                "completion_tokens_per_second": None,
+                "usage": {
+                    "prompt_tokens": None,
+                    "completion_tokens": None,
+                    "total_tokens": None,
+                },
+            }
+        )
+        report["models"][0]["summary"] = runner_module._summarize(
+            report["models"][0]["cases"]
+        )
+        suite = (
+            SuiteCase("structured-json", "structured_output", "text"),
+            SuiteCase("python-ast", "coding", "vision"),
+        )
+        vision_facet = FacetSelector(
+            facet_id="all-cases-vision",
+            capabilities=None,
+            modalities=frozenset({"vision"}),
+        )
+
+        with (
+            mock.patch.dict(
+                PUBLIC_SUITE_REGISTRY,
+                {("synthetic-mixed", "9.1"): suite},
+            ),
+            tempfile.TemporaryDirectory() as temporary,
+        ):
+            submission = prepare_submission(report, public_environment())
+            directory = Path(temporary)
+            (directory / f"{submission['submission_id']}.json").write_bytes(
+                render_submission_bytes(submission)
+            )
+            text_board = build_leaderboard(directory)
+            vision_board = build_leaderboard(directory, facet=vision_facet)
+
+        self.assertEqual(text_board["entry_count"], 0)
+        self.assertEqual(vision_board["entry_count"], 1)
+
+    def test_public_submission_requires_at_least_one_scored_case(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        for case in submission["cases"]:
+            case["outcome"] = "not_applicable"
+            case["route"] = "not_applicable"
+            case["termination"] = "not_applicable"
+        submission["metrics"].update(
+            {
+                "semantic_pass_count": 0,
+                "exact_format_pass_count": 0,
+                "scored_case_count": 0,
+                "usage_coverage_cases": 0,
+                "latency_ms_mean": 0.0,
+                "completion_tokens_per_second": None,
+            }
+        )
+        rehash_submission(submission)
+
+        with self.assertRaisesRegex(SubmissionError, "at least one scored"):
+            validate_submission(submission)
+
+    def test_all_not_applicable_summary_uses_zero_latency_without_scoring(self) -> None:
+        cases = copy.deepcopy(valid_report()["models"][0]["cases"])
+        for case in cases:
+            case["outcome"] = "not_applicable"
+            case["route"] = "not_applicable"
+            case["termination"] = "not_applicable"
+            case["semantic_success"] = False
+            case["exact_format"] = False
+            case["latency_ms"] = 0.0
+            case["completion_tokens_per_second"] = None
+            case["usage"] = {
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "total_tokens": None,
+            }
+
+        summary = runner_module._summarize(cases)
+
+        self.assertEqual(summary["scored_case_count"], 0)
+        self.assertEqual(summary["latency_ms_total"], 0.0)
+        self.assertEqual(summary["latency_ms_mean"], 0.0)
+        self.assertIsNone(summary["completion_tokens_per_second_weighted"])
+
+        report = valid_report()
+        report["models"][0]["cases"] = cases
+        report["models"][0]["summary"] = summary
+        validate_report(report)
+
+    def test_default_facet_is_explicit_and_reproduces_the_shipped_ranking(self) -> None:
+        first = prepare_submission(
+            valid_report(display_name="Zulu Model"),
+            public_environment(),
+        )
+        second = prepare_submission(
+            valid_report(display_name="Alpha Model", latency_ms=20.0),
+            public_environment(),
+        )
+        explicit = FacetSelector(
+            facet_id="all-cases-text",
+            capabilities=None,
+            modalities=frozenset({"text"}),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for submission in (first, second):
+                (directory / f"{submission['submission_id']}.json").write_bytes(
+                    render_submission_bytes(submission)
+                )
+            default_board = build_leaderboard(directory)
+            explicit_board = build_leaderboard(directory, facet=explicit)
+
+        self.assertEqual(DEFAULT_FACET, explicit)
+        self.assertEqual(default_board, explicit_board)
+        self.assertIsNotNone(default_board["entries"][0]["metrics"]["latency_ms_mean"])
+
+    def test_non_default_facet_payload_remains_browser_valid(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable")
+        submission = prepare_submission(valid_report(), public_environment())
+        coding_facet = FacetSelector(
+            facet_id="coding-text",
+            capabilities=frozenset({"coding"}),
+            modalities=frozenset({"text"}),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / f"{submission['submission_id']}.json").write_bytes(
+                render_submission_bytes(submission)
+            )
+            leaderboard = build_leaderboard(directory, facet=coding_facet)
+            payload = directory / "leaderboard.json"
+            payload.write_text(json.dumps(leaderboard), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    node,
+                    str(Path(__file__).resolve().parent / "js_payload_validator_runner.js"),
+                    str(Path(__file__).resolve().parents[1] / "site" / "app.js"),
+                    str(payload),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            metrics = leaderboard["entries"][0]["metrics"]
+            self.assertEqual(metrics["case_count"], 1)
+            self.assertEqual(metrics["usage_coverage_cases"], 0)
+            self.assertIsNone(metrics["latency_ms_mean"])
+            self.assertIsNone(metrics["completion_tokens_per_second"])
+            self.assertEqual(completed.stdout, "accepted\n")
+
+            metrics["latency_ms_mean"] = submission["metrics"]["latency_ms_mean"]
+            payload.write_text(json.dumps(leaderboard), encoding="utf-8")
+            rejected = subprocess.run(
+                [
+                    node,
+                    str(Path(__file__).resolve().parent / "js_payload_validator_runner.js"),
+                    str(Path(__file__).resolve().parents[1] / "site" / "app.js"),
+                    str(payload),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(rejected.stdout, "rejected\n")
+
+    def test_dimension_and_graduation_seams_are_named_and_versioned(self) -> None:
+        self.assertEqual(CONFIG_KEY_DIMENSIONS["version"], "1.0")
+        self.assertEqual(
+            CONFIG_KEY_DIMENSIONS["fields"],
+            (
+                "hardware",
+                "model_identity",
+                "precision",
+                "runtime",
+                "runtime_configuration",
+                "settings",
+            ),
+        )
+        self.assertEqual(
+            FACET_GRADUATION_POLICY,
+            {
+                "version": "1.0",
+                "minimum_entries": 25,
+                "minimum_model_families": 5,
+            },
+        )
+
+    def test_synthetic_second_suite_uses_only_the_registry_definition(self) -> None:
+        report = valid_report()
+        report["profile"] = "synthetic-two"
+        report["suite_version"] = "9.0"
+        report["models"][0]["cases"] = report["models"][0]["cases"][:2]
+        report["models"][0]["summary"] = runner_module._summarize(
+            report["models"][0]["cases"]
+        )
+        suite = (
+            SuiteCase("structured-json", "structured_output"),
+            SuiteCase("python-ast", "coding"),
+        )
+        with mock.patch.dict(
+            PUBLIC_SUITE_REGISTRY,
+            {("synthetic-two", "9.0"): suite},
+        ):
+            submission = prepare_submission(report, public_environment())
+            validate_submission(submission)
+
+        self.assertEqual(submission["metrics"]["case_count"], 2)
+        self.assertEqual(
+            [case["case_id"] for case in submission["cases"]],
+            [case.case_id for case in suite],
+        )
+        node = shutil.which("node")
+        if node is None:
+            return
+        repository = Path(__file__).resolve().parents[1]
+        registry = {
+            "synthetic-two@9.0": [
+                {
+                    "case_id": case.case_id,
+                    "capability": case.capability,
+                    "modality": case.modality,
+                }
+                for case in suite
+            ]
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            submission_path = root / "submission.json"
+            registry_path = root / "registry.json"
+            submission_path.write_text(json.dumps(submission), encoding="utf-8")
+            registry_path.write_text(json.dumps(registry), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    node,
+                    str(repository / "tests" / "js_suite_registry_runner.js"),
+                    str(repository / "site" / "app.js"),
+                    str(submission_path),
+                    str(registry_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(completed.stdout, "accepted\n")
+
+    def test_malformed_suite_registry_is_rejected_in_python_and_javascript(self) -> None:
+        with self.assertRaisesRegex(ValueError, "case id"):
+            SuiteCase("", "coding")
+
+        duplicate_suite = tuple(
+            SuiteCase("duplicate-case", "coding") for _index in range(5)
+        )
+        with mock.patch.dict(
+            PUBLIC_SUITE_REGISTRY,
+            {("duplicate", "9.2"): duplicate_suite},
+        ):
+            with self.assertRaisesRegex(ValueError, "must be unique"):
+                resolve_public_suite("duplicate", "9.2")
+
+        node = shutil.which("node")
+        if node is None:
+            return
+        repository = Path(__file__).resolve().parents[1]
+        submission = prepare_submission(valid_report(), public_environment())
+        duplicate_registry = {
+            "standard@1.0": [
+                {
+                    "case_id": "duplicate-case",
+                    "capability": "coding",
+                    "modality": "text",
+                }
+                for _index in range(5)
+            ]
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            submission_path = root / "submission.json"
+            registry_path = root / "registry.json"
+            submission_path.write_text(json.dumps(submission), encoding="utf-8")
+            registry_path.write_text(json.dumps(duplicate_registry), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    node,
+                    str(repository / "tests" / "js_suite_registry_runner.js"),
+                    str(repository / "site" / "app.js"),
+                    str(submission_path),
+                    str(registry_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(completed.stdout, "rejected\n")
+
     def test_prepare_keeps_only_minimized_case_categories(self) -> None:
         submission = prepare_submission(valid_report(), public_environment())
         case = submission["cases"][0]
 
         self.assertEqual(
             set(case),
-            {"case_id", "outcome", "route", "termination"},
+            {
+                "case_id",
+                "capability",
+                "modality",
+                "outcome",
+                "route",
+                "termination",
+            },
         )
         serialized = json.dumps(submission)
         for forbidden in (
@@ -354,6 +956,115 @@ class SubmissionTests(unittest.TestCase):
         with self.assertRaises(SubmissionError):
             prepare_submission(report, public_environment())
 
+    def test_legacy_records_remain_accepted_but_new_candidates_require_1_1(self) -> None:
+        legacy_path, legacy = legacy_submission_fixture()
+        legacy_bytes = legacy_path.read_bytes()
+
+        validate_accepted_submission(legacy)
+        with self.assertRaisesRegex(SubmissionError, "regenerated"):
+            validate_submission(legacy)
+        self.assertEqual(legacy_path.read_bytes(), legacy_bytes)
+
+        current = prepare_submission(valid_report(), public_environment())
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / legacy_path.name).write_bytes(legacy_bytes)
+            (directory / f"{current['submission_id']}.json").write_bytes(
+                render_submission_bytes(current)
+            )
+            leaderboard = build_leaderboard(directory)
+
+        self.assertEqual(leaderboard["schema_version"], "1.1")
+        self.assertEqual(
+            {entry["submission_schema_version"] for entry in leaderboard["entries"]},
+            {"1.0", "1.1"},
+        )
+        legacy_entry = next(
+            entry
+            for entry in leaderboard["entries"]
+            if entry["submission_schema_version"] == "1.0"
+        )
+        self.assertEqual(legacy_entry["validity"], "legacy_unreported")
+        self.assertIsNone(legacy_entry["measurement_period"])
+        self.assertIsNone(legacy_entry["measurement_conditions"])
+
+    def test_filtered_current_record_does_not_relabel_legacy_projection(self) -> None:
+        legacy_path, legacy = legacy_submission_fixture()
+        current = prepare_submission(valid_report(), public_environment())
+        legacy_identity = submissions_module._facet_dimensions(legacy)["model_identity"]
+        self.assertNotEqual(
+            submissions_module._facet_dimensions(current)["model_identity"],
+            legacy_identity,
+        )
+        facet = FacetSelector(
+            facet_id="legacy-only-text",
+            capabilities=None,
+            modalities=frozenset({"text"}),
+            dimension_filters=(("model_identity", legacy_identity),),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / legacy_path.name).write_text(json.dumps(legacy), encoding="utf-8")
+            (directory / f"{current['submission_id']}.json").write_bytes(
+                render_submission_bytes(current)
+            )
+            leaderboard = build_leaderboard(directory, facet=facet)
+
+        self.assertEqual(leaderboard["schema_version"], "1.0")
+        self.assertEqual(leaderboard["entry_count"], 1)
+        self.assertNotIn("submission_schema_version", leaderboard["entries"][0])
+
+    def test_legacy_subset_facet_uses_a_browser_valid_versioned_projection(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        legacy_path, _ = legacy_submission_fixture()
+        facet = FacetSelector(
+            facet_id="legacy-coding-text",
+            capabilities=frozenset({"coding"}),
+            modalities=frozenset({"text"}),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / legacy_path.name).write_bytes(legacy_path.read_bytes())
+            leaderboard = build_leaderboard(directory, facet=facet)
+            payload = directory / "leaderboard.json"
+            payload.write_text(json.dumps(leaderboard), encoding="utf-8")
+            node = shutil.which("node")
+            if node is not None:
+                completed = subprocess.run(
+                    [
+                        node,
+                        str(Path(__file__).resolve().parent / "js_payload_validator_runner.js"),
+                        str(repository / "site" / "app.js"),
+                        str(payload),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(completed.stdout, "accepted\n")
+
+        self.assertEqual(leaderboard["schema_version"], "1.1")
+        self.assertEqual(leaderboard["entry_count"], 1)
+        entry = leaderboard["entries"][0]
+        self.assertEqual(entry["submission_schema_version"], "1.0")
+        self.assertEqual(entry["validity"], "legacy_unreported")
+        self.assertIsNone(entry["metrics"]["latency_ms_mean"])
+
+    def test_all_legacy_leaderboard_transport_remains_byte_identical(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        committed = repository / "site" / "data" / "leaderboard.json"
+        expected_digest = "0d7dbe67be25d3bd425344181a5901a18dd64da4c1a1064b1e04ead11276af43"
+
+        self.assertEqual(hashlib.sha256(committed.read_bytes()).hexdigest(), expected_digest)
+        rebuilt = build_leaderboard(repository / "site" / "data" / "submissions")
+        self.assertEqual(rebuilt["schema_version"], "1.0")
+        self.assertEqual(
+            submissions_module.render_leaderboard_bytes(rebuilt),
+            committed.read_bytes(),
+        )
+
     def test_closed_shape_content_hash_and_counts_are_enforced(self) -> None:
         original = prepare_submission(valid_report(), public_environment())
         unknown = copy.deepcopy(original)
@@ -388,7 +1099,7 @@ class SubmissionTests(unittest.TestCase):
         incomplete["metrics"]["exact_format_pass_count"] = 4
         incomplete["metrics"]["scored_case_count"] = 4
 
-        with self.assertRaisesRegex(SubmissionError, "every standard case"):
+        with self.assertRaisesRegex(SubmissionError, "attempted case"):
             validate_submission(incomplete)
 
     def test_local_identifiers_and_unrounded_observations_are_rejected(self) -> None:
@@ -541,6 +1252,138 @@ class SubmissionTests(unittest.TestCase):
 
         self.assertEqual(python_results, expected)
         self.assertEqual(javascript_results, expected)
+
+    def test_python_and_javascript_submission_schema_fixtures_have_parity(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable")
+        repository = Path(__file__).resolve().parents[1]
+        fixture_path = repository / "tests" / "fixtures" / "submission-schema-parity.json"
+        fixtures = json.loads(fixture_path.read_text(encoding="utf-8"))
+        base = prepare_submission(valid_report(), public_environment())
+        python_results: dict[str, bool] = {}
+
+        for fixture in fixtures["cases"]:
+            candidate = copy.deepcopy(base)
+            for operation in fixture["operations"]:
+                parent = candidate
+                for part in operation["path"][:-1]:
+                    parent = parent[part]
+                key = operation["path"][-1]
+                if operation["op"] == "delete":
+                    del parent[key]
+                elif operation["op"] == "set":
+                    parent[key] = copy.deepcopy(operation["value"])
+                else:
+                    self.fail("unsupported fixture operation")
+            rehash_submission(candidate)
+            try:
+                validate_submission(candidate)
+            except SubmissionError:
+                accepted = False
+            else:
+                accepted = True
+            self.assertEqual(accepted, fixture["expected"], fixture["name"])
+            python_results[fixture["name"]] = accepted
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base_path = Path(temporary) / "submission.json"
+            base_path.write_text(json.dumps(base), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    node,
+                    str(repository / "tests" / "js_submission_validator_runner.js"),
+                    str(repository / "site" / "app.js"),
+                    str(base_path),
+                    str(fixture_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        self.assertEqual(json.loads(completed.stdout), python_results)
+
+    def test_browser_raw_json_check_rejects_duplicate_keys_and_digest_drift(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable")
+        repository = Path(__file__).resolve().parents[1]
+        submission = prepare_submission(valid_report(), public_environment())
+        canonical = render_submission_bytes(submission)
+        small_float_report = valid_report()
+        small_float_report["models"][0]["settings"]["temperature"] = 0.000001
+        small_float = render_submission_bytes(
+            prepare_submission(small_float_report, public_environment())
+        )
+        tampered = canonical.replace(
+            b'"display_name": "Example Model"',
+            b'"display_name": "Changed Model"',
+            1,
+        )
+        duplicate = canonical.replace(
+            b'  "validity": "clean"\n',
+            b'  "validity": "clean",\n  "validity": "clean"\n',
+            1,
+        )
+        integer_as_float = canonical.replace(
+            b'"logical_cores": 16',
+            b'"logical_cores": 16.0',
+            1,
+        )
+        integer_as_exponent = canonical.replace(
+            b'"logical_cores": 16',
+            b'"logical_cores": 1.6e1',
+            1,
+        )
+        bom_prefixed = b"\xef\xbb\xbf" + canonical
+        invalid_utf8 = canonical.replace(b"Example Model", b"Example \xffModel", 1)
+        self.assertNotEqual(tampered, canonical)
+        self.assertNotEqual(duplicate, canonical)
+        self.assertNotEqual(integer_as_float, canonical)
+        self.assertNotEqual(integer_as_exponent, canonical)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paths = []
+            python_results = []
+            for name, content in (
+                ("valid.json", canonical),
+                ("small-float.json", small_float),
+                ("tampered.json", tampered),
+                ("duplicate.json", duplicate),
+                ("integer-float.json", integer_as_float),
+                ("integer-exponent.json", integer_as_exponent),
+                ("bom.json", bom_prefixed),
+                ("invalid-utf8.json", invalid_utf8),
+            ):
+                path = root / name
+                path.write_bytes(content)
+                paths.append(path)
+                try:
+                    validate_submission(load_json_object(path))
+                except SubmissionError:
+                    python_results.append(False)
+                else:
+                    python_results.append(True)
+
+            completed = subprocess.run(
+                [
+                    node,
+                    str(repository / "tests" / "js_raw_submission_validator_runner.js"),
+                    str(repository / "site" / "app.js"),
+                    *(str(path) for path in paths),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(
+            python_results,
+            [True, True, False, False, False, False, False, False],
+        )
+        self.assertEqual(json.loads(completed.stdout), python_results)
 
     def test_public_text_rejects_secret_scanner_suppression_marker(self) -> None:
         marker = "git" + "leaks:allow"
@@ -729,20 +1572,11 @@ class SubmissionTests(unittest.TestCase):
             with self.assertRaises(SubmissionError):
                 prepare_submission(valid_report(), descriptor)
 
-    def test_non_ascii_hardware_descriptor_has_a_stable_content_id(self) -> None:
+    def test_non_ascii_hardware_descriptor_is_rejected(self) -> None:
         descriptor = public_environment(cpu_model="Processeur λ")
 
-        first = prepare_submission(
-            valid_report(),
-            descriptor,
-        )
-        second = prepare_submission(
-            valid_report(),
-            copy.deepcopy(descriptor),
-        )
-
-        self.assertEqual(first["hardware"]["cpu"]["model"], "Processeur λ")
-        self.assertEqual(first["submission_id"], second["submission_id"])
+        with self.assertRaisesRegex(SubmissionError, "visible ASCII"):
+            prepare_submission(valid_report(), descriptor)
 
     def test_json_loader_rejects_duplicate_fields_and_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -798,6 +1632,52 @@ class SubmissionTests(unittest.TestCase):
             if link is not None:
                 with self.assertRaisesRegex(SubmissionError, "regular"):
                     load_public_environment_file(link)
+
+    def test_measurement_evidence_file_must_be_ignored_owner_only_and_regular(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        ignored_parent = repository / ".local"
+        ignored_parent.mkdir(exist_ok=True)
+        evidence = measurement_evidence(valid_report())
+        encoded = json.dumps(evidence)
+        with (
+            tempfile.TemporaryDirectory(prefix="evidence-", dir=ignored_parent) as ignored,
+            tempfile.TemporaryDirectory(prefix=".evidence-", dir=repository) as visible,
+        ):
+            ignored_directory = Path(ignored)
+            accepted = ignored_directory / "measurement-evidence.json"
+            accepted.write_text(encoded, encoding="utf-8")
+            accepted.chmod(0o600)
+            visible_file = Path(visible) / "measurement-evidence.json"
+            visible_file.write_text(encoded, encoding="utf-8")
+            visible_file.chmod(0o600)
+
+            missing = ignored_directory / "missing.json"
+            malformed = ignored_directory / "malformed.json"
+            malformed.write_text('{"schema_version":"1.0",', encoding="utf-8")
+            malformed.chmod(0o600)
+
+            self.assertEqual(load_measurement_evidence_file(accepted), evidence)
+            with self.assertRaisesRegex(SubmissionError, "Git-ignored"):
+                load_measurement_evidence_file(visible_file)
+            with self.assertRaisesRegex(SubmissionError, "regular"):
+                load_measurement_evidence_file(missing)
+            with self.assertRaisesRegex(SubmissionError, "strict UTF-8 JSON"):
+                load_measurement_evidence_file(malformed)
+
+            if os.name != "nt":
+                accepted.chmod(0o644)
+                with self.assertRaisesRegex(SubmissionError, "owner-only"):
+                    load_measurement_evidence_file(accepted)
+                accepted.chmod(0o600)
+
+            link = ignored_directory / "linked-evidence.json"
+            try:
+                link.symlink_to(accepted)
+            except (NotImplementedError, OSError):
+                link = None
+            if link is not None:
+                with self.assertRaisesRegex(SubmissionError, "regular"):
+                    load_measurement_evidence_file(link)
 
     def test_saved_submission_loader_requires_exact_secure_canonical_candidate(self) -> None:
         repository = Path(__file__).resolve().parents[1]
@@ -980,6 +1860,10 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(entries[0]["metrics"]["semantic_score_percent"], 100.0)
         self.assertEqual(entries[2]["metrics"]["semantic_score_percent"], 80.0)
         self.assertNotIn("cases", entries[0])
+
+    def test_score_percent_uses_language_neutral_half_up_rounding(self) -> None:
+        self.assertEqual(submissions_module._score_percent(1, 16), 6.3)
+        self.assertEqual(submissions_module._score_percent(15, 16), 93.8)
 
     def test_leaderboard_rejects_a_filename_that_does_not_match_content(self) -> None:
         submission = prepare_submission(valid_report(), public_environment())

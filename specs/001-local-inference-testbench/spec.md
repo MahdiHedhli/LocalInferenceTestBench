@@ -149,19 +149,20 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - **FR-017**: The repository MUST retain the license notice for copied Spec Kit materials.
 - **FR-018**: Tests MUST prove scoring, data minimization, endpoint safety, manifest validation, and
   identifier detection behavior.
-- **FR-019**: When retained model evidence is projected into a public leaderboard submission, its
-  `display_name`, `source`, and `precision` labels MUST be ASCII-only, bounded to 160, 240, and 80
-  characters respectively, and MUST reject the descriptor-grade UUID, serial/inventory-label,
-  network, URL, and email patterns plus explicit automated-reviewer or instruction-injection shapes.
-  This public-projection rule applies only to these three model labels and MUST NOT change local
-  manifest/run-record acceptance or hardware-descriptor behavior.
+- **FR-019**: When retained evidence is projected into a public leaderboard submission, every public
+  hardware, runtime, model-label, and artifact revision/digest descriptor MUST use visible ASCII and
+  MUST reject descriptor-grade UUID, serial/inventory-label, network, URL, email, private-host, and
+  automated-reviewer/instruction-injection shapes. `display_name`, `source`, and `precision` remain
+  bounded to 160, 240, and 80 characters respectively. Local manifest/run-record acceptance remains
+  unchanged; this is a public-projection boundary.
 - **FR-020**: Any public presentation of benchmark results MUST state that the measurements are
   self-reported and unverified. A content digest may be described only as evidence of content
   integrity; it MUST NOT be described as provenance, attestation, or proof that a run occurred.
-- **FR-021**: Public-result scale handling MUST preserve append-only schema `1.0` submissions and the
-  exact benchmark pull-request boundary. A valid corpus that exceeds one aggregate payload MUST be
-  paginated into a bounded deterministic committed index and bounded Pages-delivery shards rather
-  than rejected or pruned.
+- **FR-021**: Public-result scale handling MUST preserve the then-accepted append-only schema `1.0`
+  submissions and the exact benchmark pull-request boundary. A valid corpus that exceeds one
+  aggregate payload MUST be paginated into a bounded deterministic committed index and bounded
+  Pages-delivery shards rather than rejected or pruned. Later schema evolution MUST retain those
+  source bytes and the same pull-request file boundary.
 - **FR-022**: Pages-delivery shards MUST be generated only after the canonical committed leaderboard
   transport file passes its byte check, in a temporary deployment artifact, and MUST never become
   accepted source evidence. The artifact MUST contain allowlisted static site chrome and generated
@@ -169,7 +170,9 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
   per-shard byte caps and all corrupt-input failures MUST remain fail-closed.
 - **FR-023**: Public shard identifiers and pagination MUST be deterministic. Browser fetch targets
   MUST be one-based contiguous IDs padded to at least six digits and synthesized as
-  `data/leaderboard-NNNNNN.json`, never a path or URL supplied by public records.
+  `data/leaderboard-NNNNNN.json`, never a path or URL supplied by public records. Every fetched
+  legacy monolith, index, and shard MUST use fatal UTF-8 decoding, reject byte-order marks, and pass
+  through the strict duplicate-member-rejecting parser before transport or entry validation.
 - **FR-024**: The mixed scale-code rollout MUST leave the current bounded legacy monolith
   byte-identical and support both closed transport shapes. The deterministic builder MUST switch to
   the constant-shape index when the monolith cap would otherwise be crossed. A leaderboard-only
@@ -177,6 +180,94 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
   benchmark boundary. Pages MUST always emit an index with exactly
   `{index_version, schema_version, entry_count, shard_count}` and shards with exactly
   `{index_version, schema_version, shard_id, entry_count, entries}` in its temporary artifact.
+- **FR-025**: Suite selection MUST resolve through a registry keyed by `(profile, suite_version)`.
+  Validation, case ordering, counts, and percentages MUST derive from the resolved suite rather than
+  a module-level five-case constant. The only registered public suite in this increment remains
+  `standard` / `1.0`; `smoke` remains a local report profile and is not publicly submit-eligible.
+- **FR-026**: Every schema `1.1` public case MUST record a closed `capability` value of
+  `structured_output`, `coding`, `agent_tool_use`, `cyber_triage`, or `safety_boundary` and a closed
+  `modality` value of `text` or `vision`. The current five cases MUST retain their existing behavior
+  and be tagged `text`; this metadata MUST NOT create capability scores, columns, pages, or new test
+  cases in this increment.
+- **FR-027**: `not_applicable` MUST be distinct from `not_scored`. A not-applicable case MUST be
+  excluded from scored counts and every score denominator, and a result with no applicable case in a
+  selected facet MUST be absent from that facet rather than ranked as zero. The complete resolved
+  public suite still requires `scored_case_count` plus the number of `not_applicable` outcomes to
+  equal its resolved length and at least one case to be scored; an attempted `not_scored` case and a
+  whole-suite all-not-applicable result are not public-submission eligible. Outcome, route, and
+  termination MUST all use the `not_applicable` sentinel for an inapplicable case, and MUST all avoid
+  it for every other outcome.
+- **FR-028**: Local run execution validity (`valid`, `limited`, or `invalid`) and public measurement
+  validity (`clean`, `nonquiescent`, or `degraded_midrun`) MUST remain separate concepts. Public
+  preparation MUST first require fully valid execution evidence and then require a separate ignored,
+  owner-only categorical measurement-evidence sidecar. Missing, unsafe, incomplete, or inconsistent
+  sidecar evidence MUST fail closed; the exporter MUST NOT infer `clean` from execution validity.
+  The sidecar MUST contain a top-level `source_run_id` that exactly equals the Run Record's `run_id`
+  and a bounded list of 1–1000 unique model entries. That private binding ID MUST NOT enter the public
+  submission or leaderboard projection.
+- **FR-029**: New public submissions MUST use schema `1.1` and carry required `validity`, closed
+  `measurement_conditions`, and UTC month-resolution `measurement_period` (`YYYY-MM`) fields.
+  Conditions MUST contain only pre/post threshold outcomes, a hard-threshold-crossed boolean, and
+  closed categories for memory pressure, thermal state, sustained load, swap, and resident models;
+  they MUST contain no raw sample values or free text. An optional closed determinism block MAY carry
+  3–5-run aggregate stability evidence.
+- **FR-030**: Accepted schema `1.0` submissions MUST remain byte-for-byte retained and
+  digest-addressable, but a newly added benchmark pull request MUST use schema `1.1`. Legacy rows in
+  a mixed `1.1` projection MUST be labeled `legacy_unreported` with absent measurement period and
+  conditions rather than receiving synthesized evidence. The current all-legacy six-entry monolith
+  MUST remain byte-identical until the first accepted `1.1` submission causes the deterministic
+  mixed projection.
+- **FR-031**: Ranking MUST expose a facet-selector seam over capability subsets, modality, and named
+  dimension filters. This increment MUST ship only the `all-cases-text` facet. Configuration
+  dimensions MUST be defined once in a versioned `1.0` structure covering hardware, model identity
+  including revision or digest, precision, runtime name/version/backend, runtime configuration, and
+  settings so later config-cell collapse does not require redefining identity.
+  Browser dataset validation MUST accept registry-bounded subset counts emitted by a non-default
+  selector even though no additional selector is published in this increment.
+- **FR-032**: The versioned facet-graduation policy MUST be recorded as `1.0` with a threshold of at
+  least 25 entries across at least five distinct model families. Nothing MUST read or enforce that
+  policy in this increment. The leaderboard transport `index_version` MUST remain `1.0`, independent
+  of the public submission and projected-row schema bump to `1.1`.
+- **FR-033**: The public site MUST render `measurement_period` as an “as of” month and support month
+  filtering and recency sorting. On a paginated board those controls, like other client-side
+  controls, MUST be labeled as applying to loaded rows until every shard is present.
+- **FR-034**: Non-interactive single-command run-and-export on POSIX MUST use an explicitly selected local
+  measurement-sampler executable. The runner MUST accept only a validated preallocated UUIDv4/UTC
+  identity, and the CLI MUST pass that identity plus the ordered public model IDs to synchronous
+  closed `pre` and `post` adapter calls around the complete run, with `post` required only after a
+  successful `pre` sample and a successfully returned complete benchmark. A runner exception MUST
+  produce no `post` call and no export. Responses MUST echo the exact
+  binding and contain only the existing categorical sample. Invocation MUST use no shell, an
+  allowlisted credential-free environment, discarded stderr, a timeout, and an in-flight stdout
+  cap, isolated execution, and bounded process-tree cleanup. A dedicated standard-library
+  supervisor MUST start the snapshot in its own process group, observe leader exit without reaping
+  it, signal that group before reaping its leader, and never signal the numeric PGID after that
+  leader has been reaped. Supported macOS Python versions MAY use `kqueue` when `waitid` is absent;
+  they MUST retain the same non-reaping ordering. On Linux the supervisor MUST fail
+  closed unless it can become a child subreaper and MUST boundedly reap adopted descendants. The
+  trusted sampler MUST remain synchronous and MUST NOT daemonize, create another session or process
+  group, or otherwise deliberately escape the supervisor boundary. The executable MUST be at most 16 MiB,
+  regular, non-symlinked, executable, not group/world-writable, and identity/content rechecked at
+  launch. Only a private non-writable snapshot of the approved bytes MAY execute. Its directory MUST
+  be owner-only and its backing filesystem MUST be writable and permit execution; an operator MAY
+  select an owner-controlled location through `TMPDIR`, but MUST NOT use a tracked or shared
+  repository directory. Before writing approved bytes, the runner MUST resolve the selected temp
+  base and reject an ordinary or linked worktree, Git directory, or bare repository using
+  filesystem repository markers, and MUST reject active repository-routing `GIT_*` state. Every
+  resolved ancestor MUST be owned by root or the current user; a group/world-writable ancestor MUST
+  have the sticky bit. Directory creation and sampler-byte writes MUST be anchored to open directory
+  descriptors. Cleanup MUST nonblockingly inspect without following links, compare the exact created
+  identity/type immediately before descriptor-relative removal, and fail closed on a mismatch. The
+  contract MUST state that portable POSIX cannot make pathname removal atomically
+  identity-conditional and does not contain root or same-UID adversaries. Windows MUST fail
+  this option closed and retain the two-step exact-bound sidecar path. A sampler or evidence failure
+  after the benchmark returns MUST leave the completed private report intact while blocking export;
+  a runner exception follows the existing no-completed-report path. Missing samples and clean
+  conditions MUST never be synthesized. Cleanup failure MUST be surfaced without masking a primary
+  failure. A handled cleanup failure, `SIGKILL`, or a host crash MAY leave the owner-only private
+  snapshot until local or system temporary-file cleanup; the snapshot path and bytes MUST never be
+  published. Static exact-bound sidecars remain supported by the separate
+  two-step preparation command.
 
 ### Key Entities
 
@@ -207,6 +298,19 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - **SC-008**: A synthetic public corpus larger than the former aggregate cap produces byte-identical,
   individually bounded index and shard outputs with every accepted digest present exactly once and
   no committed shard files.
+- **SC-009**: Shared Python/browser fixtures prove registry-based suite resolution, required
+  capability/modality tags, `not_applicable` denominator behavior, categorical measurement validity,
+  month validation, and `1.0` legacy handling remain in lockstep without changing the five current
+  benchmark cases.
+- **SC-010**: Tests prove stale source-run evidence and a model-evidence list outside 1–1000 are
+  rejected, the source run ID is absent from public bytes, and every browser-fetched leaderboard
+  transport rejects invalid UTF-8, a byte-order mark, and duplicate JSON member names.
+- **SC-011**: Tests prove single-command measurement ordering is pre → run → post only after a
+  successfully returned run, adapter responses are exact-bound and byte-bounded during execution,
+  malformed identities fail before preflight, credential values do not cross the process boundary,
+  Linux descendants are adopted and reaped without post-reap PGID signaling, macOS Python 3.11 and
+  3.12 observe exit without reaping, retained evidence is atomic and owner-only, and sampler failure
+  preserves a completed private report while producing no candidate.
 
 ## Assumptions
 

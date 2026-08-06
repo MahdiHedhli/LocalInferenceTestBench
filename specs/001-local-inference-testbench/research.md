@@ -219,3 +219,68 @@ reduces the chance that force-added files expose raw or identifying context.
   deterministic pass criteria.
 - The public repository can be useful without a real result corpus; synthetic fixtures and contract
   tests are sufficient to validate the published process.
+
+## Stage 3 decision: registry and taxonomy are seams, not new measurements
+
+**Decision**: Resolve cases from a registry keyed by `(profile, suite_version)`. Record a closed task
+capability and modality on each public case, and distinguish denominator-excluded `not_applicable`
+from an attempted but unscored case. Keep `standard` / `1.0` as the only public suite and all current
+cases as text. Represent an inapplicable case with the same `not_applicable` sentinel in outcome,
+route, and termination, and require at least one scored case before public submission.
+
+**Rationale**: Literal profile and five-case assertions turn future suite expansion into a schema
+rewrite. Recording taxonomy now makes expansion additive without publishing statistically empty
+capability scores from the present one-case-per-task floor.
+
+**Rejected**: Add a new suite, vision case, capability score, or capability page during the schema
+migration; treat vision as a sixth task capability; or score an inapplicable modality as failure.
+
+## Stage 3 decision: measurement evidence fails closed outside execution validity
+
+**Decision**: Keep `valid` / `limited` / `invalid` on the Run Record as execution integrity. Require
+a separate ignored owner-only categorical sidecar before public schema `1.1` preparation and derive
+clean, nonquiescent, or degraded-midrun only from its pre/post categories. Bind the sidecar to one
+Run Record with a required top-level `source_run_id` exact-matched to `report.run_id`, cap its unique
+model evidence rows at 1–1000, and remove the binding ID from the public projection.
+
+**Rationale**: The baseline report does not contain host-quiescence observations. Inferring clean
+from transport and identity success would misrepresent absent evidence, while publishing raw sampler
+values would expand the fingerprinting boundary.
+
+**Rejected**: Synthesize clean; add raw host telemetry to the Run Record; accept a free-form operator
+assertion; accept unbound or stale-run evidence; allow an unbounded model list; publish the run
+binding; or discard non-clean evidence.
+
+## Post-review decision: preallocate identity for a synchronous local sampler
+
+**Decision**: For non-interactive POSIX single-command export, create and validate the ordinary UUIDv4/UTC
+run identity before endpoint access. Invoke one explicitly selected adapter synchronously for a
+closed pre sample, execute the complete benchmark with that identity, then, when pre succeeded,
+invoke it for the closed post sample only if the benchmark returns successfully. A runner exception
+produces neither a post sample nor an export. Require exact run/model/phase echo, derive only the
+existing categorical fields, and
+atomically retain the resulting ordinary sidecar before passing the same object to preparation.
+Cap the selected executable at 16 MiB, execute only a private non-writable snapshot of the approved
+bytes, and place a dedicated standard-library supervisor between the CLI and snapshot. It preserves
+the existing bounded standard streams, kills the adapter group before reaping the leader, never
+signals the PGID after reaping, and on Linux fails closed unless it can adopt and boundedly reap
+descendants as a child subreaper. Leader exit is observed without reaping: `waitid` where available,
+or `kqueue` `NOTE_EXIT` on supported macOS Python versions that omit `os.waitid`. macOS keeps the same
+ordering without a subreaper facility. Darwin registration `ESRCH` counts as observed exit only under
+the dedicated helper's invariant that it is the sole waiter, has restored `SIGCHLD` to default, and
+has not polled or waited, so the zombie still pins the PID/PGID. Require
+the trusted sampler to stay synchronous and not daemonize or deliberately leave its session/process
+group. Require an owner-only snapshot directory on a writable filesystem that permits execution,
+allowing `TMPDIR` to select an owner-controlled non-repository location when the default is `noexec`. Fail the single-command option closed
+on Windows while retaining two-step preparation.
+
+**Rationale**: A sidecar cannot honestly contain a fresh unpredictable run ID and real post-run
+conditions before the run occurs. Providing the identity to a bounded collector before both samples
+eliminates the rewrite race without turning digest integrity or source binding into attestation.
+
+**Rejected**: Replace an arbitrary sidecar's ID after inference; derive report identity from
+pre-existing results; accept missing samples; inherit credentials; execute shell fragments; capture
+unbounded output; signal a potentially reused process group after reaping its leader; enable a
+process-wide subreaper in the long-lived CLI; claim portable containment for a sampler that
+deliberately daemonizes or escapes; or suppress an otherwise complete private report when the
+optional sampler fails.

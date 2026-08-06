@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 import uuid
 
 from .safety import SafetyError, secure_directory
+from .suites import resolve_report_suite
 
 
 class ReportError(ValueError):
@@ -50,7 +51,7 @@ _HOME_PATH = re.compile(
     + re.escape(_ROOT_HOME)
     + r"(?:/|\b)|[A-Za-z]:[\\/]Users[\\/][^\\/\s]+)"
 )
-_IPV4_CANDIDATE = re.compile(r"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])")
+_IPV4_CANDIDATE = re.compile(r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])")
 _IPV6_CANDIDATE = re.compile(
     r"(?i)(?<![0-9a-f:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}"
     r"(?:%[a-z0-9_.-]+)?(?![0-9a-f:])"
@@ -64,7 +65,7 @@ _MAC_DOTTED = re.compile(
 _PRIVATE_HOST = re.compile(
     r"(?i)(?<![a-z0-9_-])"
     r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
-    r"(?:lan|local|internal|home|corp|private|localdomain|home\.arpa)\.?"
+    r"(?:lan|local|internal|home|corp|private|localdomain|home\.arpa)\.*"
     r"(?![a-z0-9_.-])"
 )
 _PRIVATE_KEY_HEADER = re.compile(
@@ -90,7 +91,14 @@ _GENERIC_ACCOUNT_NAMES = {
 _PUBLIC_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _VALIDITIES = {"valid", "limited", "invalid"}
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
-_OUTCOMES = {"pass", "semantic_only", "format_only", "fail", "not_scored"}
+_OUTCOMES = {
+    "pass",
+    "semantic_only",
+    "format_only",
+    "fail",
+    "not_scored",
+    "not_applicable",
+}
 _ROUTES = {
     "direct_response",
     "read_only_tool",
@@ -98,6 +106,7 @@ _ROUTES = {
     "unsafe_mutation",
     "unexpected_tool",
     "unrecognized",
+    "not_applicable",
 }
 _TERMINATIONS = {
     "completed",
@@ -120,16 +129,7 @@ _TERMINATIONS = {
     "protocol_error",
     "response_too_large",
     "http_error",
-}
-_PROFILE_CASE_IDS = {
-    "smoke": ("structured-json", "python-ast", "defensive-triage"),
-    "standard": (
-        "structured-json",
-        "python-ast",
-        "defensive-triage",
-        "read-only-tool",
-        "unapproved-change-boundary",
-    ),
+    "not_applicable",
 }
 
 
@@ -229,7 +229,7 @@ def _local_denylist_terms() -> tuple[str, ...]:
 def _contains_literal(value: str, candidate: str) -> bool:
     escaped = re.escape(candidate)
     if candidate[0].isalnum() and candidate[-1].isalnum():
-        escaped = rf"(?<![A-Za-z0-9_.-]){escaped}(?![A-Za-z0-9_.-])"
+        escaped = rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])"
     return re.search(escaped, value, flags=re.IGNORECASE) is not None
 
 
@@ -436,9 +436,18 @@ def _validate_case(value: Any, path: str) -> Mapping[str, Any]:
         "format_only": (False, True),
         "fail": (False, False),
         "not_scored": (False, False),
+        "not_applicable": (False, False),
     }
     if (semantic, exact) != expected_flags[outcome]:
         raise ReportError(f"{path} outcome is inconsistent with its categorical checks")
+    not_applicable = outcome == "not_applicable"
+    if (
+        not_applicable != (route == "not_applicable")
+        or not_applicable != (termination == "not_applicable")
+    ):
+        raise ReportError(
+            f"{path} not_applicable outcome, route, and termination must agree"
+        )
     if route == "unsafe_mutation" and semantic:
         raise ReportError(f"{path} cannot pass after an unsafe mutation route")
     if termination == "reasoning_only" and not reasoning_present:
@@ -483,19 +492,27 @@ def _validate_summary(value: Any, cases: list[Mapping[str, Any]], path: str) -> 
         "case_count": len(cases),
         "semantic_pass_count": sum(case["semantic_success"] for case in cases),
         "exact_format_pass_count": sum(case["exact_format"] for case in cases),
-        "scored_case_count": sum(case["outcome"] != "not_scored" for case in cases),
+        "scored_case_count": sum(
+            case["outcome"] not in {"not_scored", "not_applicable"} for case in cases
+        ),
     }
+    applicable_cases = [case for case in cases if case["outcome"] != "not_applicable"]
     complete_usage = [
         all(case["usage"][field] is not None for field in case["usage"])
-        for case in cases
+        for case in applicable_cases
     ]
     integer_fields["usage_coverage_cases"] = sum(complete_usage)
     for field, expected in integer_fields.items():
         if _integer(summary[field], f"{path}.{field}") != expected:
             raise ReportError(f"{path}.{field} is arithmetically inconsistent")
 
-    latency_total = round(sum(float(case["latency_ms"]) for case in cases), 3)
-    latency_mean = round(latency_total / len(cases), 3) if cases else 0.0
+    latency_total = round(
+        sum(float(case["latency_ms"]) for case in applicable_cases),
+        3,
+    )
+    latency_mean = (
+        round(latency_total / len(applicable_cases), 3) if applicable_cases else 0.0
+    )
     if not _approximately_equal(
         _number(summary["latency_ms_total"], f"{path}.latency_ms_total"), latency_total
     ):
@@ -510,10 +527,14 @@ def _validate_summary(value: Any, cases: list[Mapping[str, Any]], path: str) -> 
         "completion_tokens_total": "completion_tokens",
         "tokens_total": "total_tokens",
     }
-    complete = bool(cases) and all(complete_usage)
+    complete = bool(applicable_cases) and all(complete_usage)
     for summary_field, usage_field in total_fields.items():
         recorded = _nullable_integer(summary[summary_field], f"{path}.{summary_field}")
-        expected = sum(case["usage"][usage_field] for case in cases) if complete else None
+        expected = (
+            sum(case["usage"][usage_field] for case in applicable_cases)
+            if complete
+            else None
+        )
         if recorded != expected:
             raise ReportError(f"{path}.{summary_field} is arithmetically inconsistent")
 
@@ -590,7 +611,7 @@ def validate_report(report: Mapping[str, Any]) -> None:
         "models",
     }
     report = _object(report, required, "report")
-    if report["schema_version"] != "1.0" or report["suite_version"] != "1.0":
+    if report["schema_version"] != "1.0":
         raise ReportError("report version is unsupported")
     _public_id(report["run_id"], "report.run_id")
     created_at = _string(report["created_at"], "report.created_at", maximum=64)
@@ -600,7 +621,12 @@ def validate_report(report: Mapping[str, Any]) -> None:
         raise ReportError("report.created_at must be an ISO 8601 date-time") from error
     if not created_at.endswith("Z") or parsed_created_at.utcoffset() != timezone.utc.utcoffset(None):
         raise ReportError("report.created_at must be UTC with a Z suffix")
-    profile = _enum(report["profile"], set(_PROFILE_CASE_IDS), "report.profile")
+    profile = _public_id(report["profile"], "report.profile")
+    suite_version = _public_id(report["suite_version"], "report.suite_version")
+    try:
+        suite = resolve_report_suite(profile, suite_version)
+    except ValueError as error:
+        raise ReportError("report suite is unsupported") from error
     validity = _enum(report["validity"], _VALIDITIES, "report.validity")
     if report["deployment_authorization"] is not False:
         raise ReportError("benchmark reports must never authorize deployment")
@@ -609,7 +635,11 @@ def validate_report(report: Mapping[str, Any]) -> None:
     if not isinstance(report["models"], list) or not report["models"]:
         raise ReportError("report.models must be a non-empty array")
     model_validities = [
-        _validate_model(model, f"report.models[{index}]", _PROFILE_CASE_IDS[profile])
+        _validate_model(
+            model,
+            f"report.models[{index}]",
+            tuple(case.case_id for case in suite),
+        )
         for index, model in enumerate(report["models"])
     ]
     model_ids = [model["model_id"] for model in report["models"]]

@@ -29,13 +29,15 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 200,
-      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u200E\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2066-\\u2069\\uD800-\\uDFFF]+$"
+      "pattern": "^[ -~]+$",
+      "description": "Visible-ASCII descriptor text; canonical validators additionally reject identifiers, URLs, network shapes, and reviewer-directed content."
     },
     "publicText100": {
       "type": "string",
       "minLength": 1,
       "maxLength": 100,
-      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u200E\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2066-\\u2069\\uD800-\\uDFFF]+$"
+      "pattern": "^[ -~]+$",
+      "description": "Visible-ASCII descriptor text; canonical validators additionally reject identifiers, URLs, network shapes, and reviewer-directed content."
     },
     "accelerator": {
       "type": "object",

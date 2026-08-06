@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -131,7 +132,38 @@ def _git_bytes(repository: Path, *arguments: str) -> bytes:
     return completed.stdout
 
 
-def validate_benchmark_content(repository: Path, head: str, trusted_root: Path) -> None:
+def _reject_duplicate_pairs(values: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in values:
+        if key in result:
+            raise ValueError("duplicate field")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(_value: str) -> None:
+    raise ValueError("unsupported constant")
+
+
+def _require_current_added_submission(path: Path) -> None:
+    try:
+        pairs = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=_reject_json_constant,
+        )
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+        raise ChangeError("added benchmark submission is not strict JSON") from error
+    if not isinstance(pairs, dict) or pairs.get("schema_version") != "1.1":
+        raise ChangeError("new benchmark submissions must use schema 1.1")
+
+
+def validate_benchmark_content(
+    repository: Path,
+    head: str,
+    trusted_root: Path,
+    added_submission_path: str | None = None,
+) -> None:
     """Run trusted schema, digest, duplicate, and byte-exact rebuild checks on head data."""
 
     builder = trusted_root / "scripts" / "build_leaderboard.py"
@@ -189,6 +221,11 @@ def validate_benchmark_content(repository: Path, head: str, trusted_root: Path) 
                 raise ChangeError("benchmark content could not be materialized") from error
         if not found_leaderboard:
             raise ChangeError("generated leaderboard is missing")
+        if added_submission_path is not None:
+            candidate = PurePosixPath(added_submission_path)
+            if candidate.parent != SUBMISSIONS or not SUBMISSION_NAME.fullmatch(candidate.name):
+                raise ChangeError("added benchmark submission path is malformed")
+            _require_current_added_submission(destination.joinpath(*candidate.parts))
         try:
             completed = subprocess.run(
                 [
@@ -290,11 +327,21 @@ def main() -> int:
             require_benchmark=args.require_benchmark,
         )
         if is_benchmark:
+            added_submission_path = next(
+                path
+                for status, path in changes
+                if status == "A" and PurePosixPath(path).parent == SUBMISSIONS
+            )
             if args.expected_submission_id is not None:
                 validate_expected_submission(changes, args.expected_submission_id)
             validate_benchmark_modes(args.repository, args.head)
             if args.check_content:
-                validate_benchmark_content(args.repository, args.head, args.trusted_root)
+                validate_benchmark_content(
+                    args.repository,
+                    args.head,
+                    args.trusted_root,
+                    added_submission_path,
+                )
     except ChangeError as error:
         print(f"benchmark change rejected: {error}", file=sys.stderr)
         return 1

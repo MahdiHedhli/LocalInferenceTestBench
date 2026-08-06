@@ -4,13 +4,17 @@ Submission ID:
 
 Model:
 
+Submission schema: `1.1`
+
 Suite version: `1.0`
 
 Automated-lane branch: `litb/submission-<submission-id>`
 
 ## Contributor checks
 
-- [ ] I created this file with `litb prepare-submission` from a valid current-standard report.
+- [ ] I created this schema `1.1` file with `litb prepare-submission` from a valid registered-suite
+  report and owner-only categorical measurement evidence. Open schema `1.0` submissions must be
+  regenerated; accepted historical files must not be rewritten.
 - [ ] I read the entire submitted JSON file.
 - [ ] The hardware descriptor lists the exact devices used for inference and no unused inventory.
 - [ ] The record contains no hostname, account, network value, serial number, inventory ID, device
@@ -19,6 +23,8 @@ Automated-lane branch: `litb/submission-<submission-id>`
 - [ ] I understand that this result is self-reported and unverified; its digest establishes content
   integrity, not provenance or attestation that the run occurred.
 - [ ] I understand that this pull request and my GitHub account are public.
+- [ ] I verified that `measurement_period` is month-only, measurement conditions contain no raw host
+  values, and execution validity was not treated as proof of clean conditions.
 - [ ] I regenerated `site/data/leaderboard.json` without editing it by hand.
 - [ ] `python3 scripts/build_leaderboard.py --check` passes.
 - [ ] `python3 -m unittest discover -s tests -v` passes.

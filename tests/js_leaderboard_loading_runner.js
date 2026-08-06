@@ -42,6 +42,24 @@ if (!appSource || !leaderboardSource) {
     }
   }
 
+  async function fetchedBytesAreAccepted(bytes) {
+    const originalFetch = global.fetch;
+    global.fetch = async () => ({
+      ok: true,
+      headers: { get: () => String(bytes.byteLength) },
+      arrayBuffer: async () =>
+        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    });
+    try {
+      await fetchBoundedJson("./data/leaderboard.json", 50);
+      return true;
+    } catch (error) {
+      return false;
+    } finally {
+      global.fetch = originalFetch;
+    }
+  }
+
   async function main() {
     if (!Array.isArray(leaderboard.entries) || leaderboard.entries.length < 4) {
       throw new Error("The loading fixture requires at least four ranked entries.");
@@ -90,6 +108,18 @@ if (!appSource || !leaderboardSource) {
 
     const results = {
       bounded_timeout: await timeoutIsBounded(),
+      fetched_valid_utf8_accepted: await fetchedBytesAreAccepted(
+        Buffer.from('{"value":1}', "utf8"),
+      ),
+      fetched_duplicate_rejected: !(await fetchedBytesAreAccepted(
+        Buffer.from('{"value":1,"value":1}', "utf8"),
+      )),
+      fetched_bom_rejected: !(await fetchedBytesAreAccepted(
+        Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('{"value":1}')]),
+      )),
+      fetched_invalid_utf8_rejected: !(await fetchedBytesAreAccepted(
+        Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0xff, 0x7d]),
+      )),
       duplicate_rejected_without_mutation:
         duplicateRejected && duplicate.entryCount === 1,
       first_rank_required: !validateAndTrackShardRanking(wrongFirstRank, [wrongFirst]),

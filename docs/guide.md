@@ -84,7 +84,9 @@ configuration. The baseline runner intentionally has no model-state API. Before 
 
 Put the public values in the owner-only hardware descriptor's `runtime` and optional
 `runtime_configuration` objects. Use `null` or `unknown` when the runtime cannot verify a setting.
-Keep private load logs and machine inventory out of the repository.
+Keep private load logs and machine inventory out of the repository. Public hardware/runtime labels
+and model artifact identity values must be compact visible-ASCII product or revision labels; URLs,
+network/host shapes, identifiers, and reviewer-directed prose are rejected.
 
 For large candidates, test sequentially. Release a model through the same runtime control you used to
 load it. A runtime load error or HTTP 500 can be a backend/model compatibility failure; verify the
@@ -148,6 +150,47 @@ Repeat `check` → `smoke` → `standard` whenever the model artifact, runtime/b
 generation settings, reasoning mode, concurrency, speculation, or offload policy changes. Each such
 change describes a different candidate result.
 
+Before public schema `1.1` preparation, obtain categorical pre/post measurement evidence from a
+compatible local sampler or adapter. On POSIX, non-interactive single-command save/PR uses
+`--measurement-sampler <executable>`. The CLI allocates the run ID before endpoint access, invokes
+the adapter synchronously before the run and, only when that pre-sample and the complete benchmark
+both return successfully, after the run. If benchmark execution raises, no post-sample or public
+export is attempted. The CLI verifies the echoed run/model/phase
+binding, and atomically retains the closed sidecar at `--measurement-evidence`. The executable must
+be at most 16 MiB, regular, non-symlinked, and not group- or world-writable. Its approved bytes are
+copied into a private non-writable snapshot for execution while the source identity/content are
+rechecked for every launch. Adapter stdout is bounded strict JSON; stderr and inherited
+credentials are not captured or forwarded. A dedicated standard-library supervisor keeps the
+sampler process launched from the snapshot and its descendants in one process group, kills that
+group before reaping its leader, and on Linux fails closed unless child-subreaper setup succeeds,
+then adopts and boundedly reaps descendants. The sampler must remain synchronous: it must not daemonize,
+call `setsid`/`setpgid`, or otherwise deliberately escape the process group. Snapshot creation uses
+an owner-only directory under the system temporary location; on a host where its filesystem is
+mounted `noexec`, set `TMPDIR` to an owner-controlled, non-repository directory on a writable
+filesystem that permits execution. Do not relocate snapshots into a tracked or shared repository
+directory; the CLI resolves the selected temporary base and rejects ordinary worktrees, linked
+worktrees, Git directories, bare repositories, and repository-routing `GIT_*` state before writing
+the approved bytes. Every resolved ancestor must be owned by root or the current user, and any
+shared-writable ancestor must use the sticky bit. Creation and writes use open directory descriptors
+so an untrusted different-UID path swap cannot redirect sampler bytes into a repository. Cleanup performs
+non-following, nonblocking exact-identity checks immediately before descriptor-relative removal.
+Root and same-UID adversaries are outside this boundary; portable POSIX cannot make final pathname
+removal identity-conditional, and those processes can already access the approved bytes. A handled
+cleanup failure, `SIGKILL`, or a host crash can leave the owner-only private snapshot until local or
+system temporary-file cleanup. The snapshot path and bytes remain local and are never published.
+Windows uses the separate exact-bound sidecar plus `prepare-submission` until equivalent safe
+process-tree containment is available.
+
+The retained file is ignored and owner-only, carries the exact report `run_id`, and contains one
+unique row for every exported model with only threshold outcomes and the closed categories for
+memory pressure, thermal state, sustained load, swap, and resident models. Use `--submission-model`
+or the two-step command's `--model` to export fewer rows. Raw readings, process names, inventory,
+paths, additional timestamps, and free text stay local. A missing, stale-run, oversized, unsafe, or
+incomplete sampler result blocks export without invalidating the private report. A static sidecar
+from another compatible sampler remains valid for two-step `prepare-submission`; the tracked example
+is deliberately nonquiescent and is never a clean-run template. The binding ID is validation-only
+and absent from public JSON.
+
 ## 7. Compare results responsibly
 
 - Compare semantic and envelope behavior using the same suite and generation settings.
@@ -174,9 +217,11 @@ If sharing a result is necessary, follow the deliberate export review in
 ## 10. Understand public leaderboard retention and delivery
 
 An accepted public submission is append-only source evidence. It stays under
-`site/data/submissions/<submission_id>.json`, uses submission schema `1.0`, and remains addressable by
-its canonical content digest. Corpus growth never authorizes deleting, rewriting, sampling, or
-silently dropping an accepted record. Corrections create a new reviewed submission.
+`site/data/submissions/<submission_id>.json` and remains addressable by its canonical content digest.
+New proposals use submission schema `1.1`. The accepted `1.0` corpus remains byte-for-byte legacy
+evidence; open or locally saved `1.0` candidates must be regenerated, never hand-migrated. Corpus
+growth never authorizes deleting, rewriting, sampling, or silently dropping an accepted record.
+Corrections create a new reviewed submission.
 
 The repository deliberately separates that retention policy from browser delivery:
 
@@ -193,17 +238,18 @@ The repository deliberately separates that retention policy from browser deliver
   one-based IDs from `000001` through the declared shard count and constructs only
   `data/leaderboard-NNNNNN.json`; public JSON never supplies a URL or arbitrary path. Each closed
   shard contains exactly `index_version`, `schema_version`, `shard_id`, `entry_count`, and `entries`.
+  The legacy monolith, index, and every shard pass through fatal UTF-8 decoding with byte-order-mark
+  rejection and the same strict duplicate-member-rejecting JSON parser before shape validation.
   Until every page is loaded, search, hardware filters, and alternate sorting are explicitly scoped
   to loaded results, and an empty filtered view does not claim that no matching published row exists.
 
-The scale code rollout leaves the current six-entry legacy leaderboard monolith byte-identical so a
-mixed code-and-generated-data pull request cannot bypass the trusted boundary. The browser and
-builder accept both closed forms while it remains bounded. When a deterministic rebuild would cross
-the legacy cap, the committed output switches to the constant-shape index and the Pages artifact
-receives shards. Pages always deploys the generated index and shards, even while the source tree
-retains the legacy monolith. Early leaderboard-only activation is not supported by this stage: the
-committed transition occurs only when an otherwise valid append-only benchmark submission crosses
-the cap and still satisfies the exact two-file protected boundary.
+The current six-entry all-legacy leaderboard monolith remains byte-identical until the first
+accepted schema `1.1` submission creates a mixed projection. In that projection, legacy rows are
+explicitly `legacy_unreported` with no synthesized month or condition evidence. The browser and
+builder accept both closed transport forms. When a deterministic rebuild would cross the monolith
+cap, the committed output switches to the constant-shape index and the Pages artifact receives
+shards. Pages always deploys the generated index and shards. The transport `index_version` stays
+`1.0`; it is independent of projected entry schema `1.1`.
 
 Global rank order and page order are deterministic. The publisher greedily splits that sequence at
 stable row boundaries according to the exact UTF-8 byte size of each rendered JSON page. It does not
@@ -215,3 +261,17 @@ removed cap is the aggregate-corpus failure that would eventually prevent all la
 Valid growth creates more bounded pages; corrupt, duplicate, inconsistent, privacy-unsafe, or
 individually oversized records still fail closed. Temporary shards are disposable transport
 artifacts and are rebuilt from accepted submissions on each Pages deployment.
+
+The public suite registry currently contains only `standard` / `1.0`; all five cases are text and
+carry capability metadata for future expansion. The only shipped facet is `all-cases-text`.
+An inapplicable case records `not_applicable` as its outcome, route, and termination and is excluded
+from denominators. A whole-suite all-not-applicable result remains valid private evidence but cannot
+be published because every public candidate needs at least one scored case.
+Configuration dimensions are fixed as version `1.0`: hardware, model identity including revision or
+digest, precision, runtime name/version/backend, runtime configuration, and settings. A documented
+but intentionally unused graduation policy requires at least 25 entries across five distinct model
+families before a facet earns a dedicated page. No capability view or score exists yet.
+
+The site displays schema `1.1` periods as an “as of” month and supports month filtering and recency
+sorting. These controls, like other browser filters and sorts, apply only to loaded rows until every
+shard has been fetched.

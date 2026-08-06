@@ -29,7 +29,7 @@ from local_inference_test_bench.reporting import (  # noqa: E402
     validate_report,
     write_report,
 )
-from local_inference_test_bench.runner import BenchmarkRunner  # noqa: E402
+from local_inference_test_bench.runner import BenchmarkRunner, RunnerError  # noqa: E402
 from local_inference_test_bench.scoring import (  # noqa: E402
     BOUNDARY_EXPECTED,
     DEFENSIVE_EXPECTED,
@@ -364,6 +364,72 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn("response_sha256", serialized)
         self.assertNotIn("runtime_identity_sha256", serialized)
 
+    def test_preallocated_run_identity_is_preserved_for_sampler_binding(self) -> None:
+        identity = (
+            "-".join(("11111111", "2222", "4333", "8444", "555555555555")),
+            "2026-08-06T12:00:00Z",
+        )
+        report = BenchmarkRunner(
+            StubClient(passing_completions()[:3]),
+            manifest(),
+            profile="smoke",
+            clock=StepClock(),
+        ).run(run_identity=identity)
+
+        validate_report(report)
+        self.assertEqual((report["run_id"], report["created_at"]), identity)
+
+    def test_malformed_preallocated_identity_fails_before_preflight(self) -> None:
+        runner = BenchmarkRunner(
+            StubClient(passing_completions()[:3]),
+            manifest(),
+            profile="smoke",
+        )
+        invalid_identities = (
+            ("not-a-uuid", "2026-08-06T12:00:00Z"),
+            (
+                "-".join(("11111111", "2222", "3333", "8444", "555555555555")),
+                "2026-08-06T12:00:00Z",
+            ),
+            (
+                "-".join(("11111111", "2222", "4333", "8444", "555555555555")),
+                "2026-08-06T08:00:00-04:00",
+            ),
+            (
+                "-".join(("AAAAAAAA", "BBBB", "4CCC", "8DDD", "EEEEEEEEEEEE")),
+                "2026-08-06T12:00:00Z",
+            ),
+            (
+                "-".join(("11111111", "2222", "4333", "8444", "555555555555")),
+                "2026-08-06T12:00:00.500000Z",
+            ),
+        )
+        with mock.patch.object(runner, "preflight") as preflight:
+            for identity in invalid_identities:
+                with self.subTest(identity=identity), self.assertRaisesRegex(
+                    RunnerError, "preallocated run identity"
+                ):
+                    runner.run(run_identity=identity)
+
+        preflight.assert_not_called()
+
+    def test_not_applicable_route_and_termination_are_reserved_for_that_outcome(self) -> None:
+        report = BenchmarkRunner(
+            StubClient(passing_completions()),
+            manifest(),
+            profile="standard",
+            clock=StepClock(),
+        ).run()
+
+        for field in ("route", "termination"):
+            invalid = copy.deepcopy(report)
+            invalid["models"][0]["cases"][0][field] = "not_applicable"
+            with self.subTest(field=field), self.assertRaisesRegex(
+                ReportError,
+                "must agree",
+            ):
+                validate_report(invalid)
+
     def test_reasoning_only_is_categorical_and_text_is_never_retained(self) -> None:
         completions = passing_completions()[:3]
         completions[0] = Completion(
@@ -466,6 +532,31 @@ class RunnerTests(unittest.TestCase):
             with self.subTest(index=index):
                 with self.assertRaises(ReportError):
                     validate_report(invalid)
+
+    def test_runtime_and_denylist_literals_reject_punctuation_boundaries(self) -> None:
+        report = BenchmarkRunner(
+            StubClient(passing_completions()[:3]), manifest(), profile="smoke", clock=StepClock()
+        ).run()
+        sensitive = "private" + "-node"
+
+        for value in (sensitive + ".", "x." + sensitive, sensitive + "_suffix"):
+            invalid = copy.deepcopy(report)
+            invalid["models"][0]["provenance"]["source"] = value
+            with (
+                self.subTest(value=value),
+                mock.patch.object(
+                    reporting_module,
+                    "_runtime_identifiers",
+                    return_value=(sensitive,),
+                ),
+                mock.patch.object(
+                    reporting_module,
+                    "_local_denylist_terms",
+                    return_value=(sensitive,),
+                ),
+                self.assertRaises(ReportError),
+            ):
+                validate_report(invalid)
 
     def test_public_manifest_hash_not_raw_manifest_hash_is_reported(self) -> None:
         configured = manifest()

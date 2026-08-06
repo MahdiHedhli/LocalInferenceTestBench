@@ -345,9 +345,9 @@ independent publication-gate test.
 
 ## Task Summary
 
-- Total tasks: 70
-- Completed: 69
-- Intentionally open: 1 (hosted deployment verification)
+- Total tasks: 78
+- Completed: 77
+- Intentionally open: 1 (hosted Stage 3 deployment verification)
 - Setup: 7
 - Foundation: 7
 - User Story 1: 11
@@ -356,6 +356,9 @@ independent publication-gate test.
 - User Story 4: 5
 - Polish and release gates: 8
 - Post-release Stage 1 adversarial hardening: 5
+- Post-release Stage 2 scale hardening: 6
+- Post-release Stage 3 public evidence schema: 5
+- Exact-bound single-command measurement integration: 3
 - Suggested MVP: Phases 1–3
 - Suggested public-release minimum: Phases 1–4
 
@@ -410,5 +413,59 @@ submission schema `1.0`, accepted evidence, or the exact benchmark pull-request 
   paths or URLs
 - [x] T069 Run the complete local cross-platform unit, deterministic build, browser safety,
   publication-boundary, privacy, history, and secret-scanning gates
-- [ ] T070 Verify required hosted checks, the trusted benchmark boundary, deployed on-demand shard
+- [x] T070 Verify required hosted checks, the trusted benchmark boundary, deployed on-demand shard
   behavior, full accepted-record coverage, and absence of committed shards after protected merge
+
+---
+
+## Phase 10: Post-release Stage 3 public evidence schema
+
+**Purpose**: Coordinate public schema `1.1` and structural seams without changing the five measured
+cases or adding capability views.
+
+- [x] T071 Amend feature specifications, plans, data models, task lists, operator documentation,
+  contribution guidance, and the benchmark PR template with the execution/measurement validity
+  split, owner-only evidence sidecar, month-resolution period, legacy policy, suite taxonomy, facet
+  seam, configuration dimensions, and unused graduation threshold
+- [x] T072 Replace literal suite/profile assumptions with a `(profile, suite_version)` registry; add
+  required capability/modality metadata and denominator-excluded, three-sentinel `not_applicable`
+  behavior while preserving current standard behavior and requiring one scored public case
+- [x] T073 Bump new public submissions and projected rows to schema `1.1`, require categorical
+  measurement evidence bound by exact private source run ID with 1–1000 model rows and `YYYY-MM`,
+  strip the binding from public output, support optional determinism, retain accepted `1.0` bytes,
+  and reject newly proposed `1.0` submissions
+- [x] T074 Mirror every schema rule in Python and browser validation—including strict raw JSON,
+  fatal UTF-8/BOM rejection for candidate and fetched leaderboard bytes, duplicate-member rejection,
+  canonical digest recomputation, and visible-ASCII/reviewer-neutral public descriptors—and add
+  shared parity, source-run binding/bounds, migration, suite-registry, `not_applicable`, month,
+  categorical-validity, punctuation-boundary, and unchanged-monolith regressions
+- [ ] T075 Run the complete cross-platform, deterministic-build, browser-safety, privacy, history,
+  secret, exact-boundary, and hosted Pages validation before merging Stage 3
+
+---
+
+## Phase 11: Exact-bound single-command measurement integration
+
+**Purpose**: Remove the run-ID rewrite race from scripted save/PR while retaining real pre/post
+categorical evidence and preserving the private report on optional sampler failure.
+
+- [x] T076 Add regression tests for validated preallocated run identity, pre/run/post ordering,
+  exact adapter binding, in-flight output bounds, executable safety, credential-free invocation,
+  approved-byte snapshot execution, no-post behavior after a runner exception, Linux subreaper and
+  zombie cleanup, Darwin `kqueue` non-reaping fallback, kill-before-reap/PID-reuse safety, POSIX
+  process-tree cleanup, marker and `GIT_*` repository-backed temp rejection, nonsticky shared-parent
+  rejection, descriptor-anchored path-swap resistance before sampler-byte writes, hard-link/FIFO
+  cleanup replacement rejection with bounded exact pre-removal checks, Windows fail-closed behavior,
+  atomic owner-only retention, and private-report
+  preservation in `tests/test_runner.py`, `tests/test_measurement.py`, and `tests/test_cli.py`
+- [x] T077 Implement the POSIX synchronous adapter bridge, approved-byte snapshot, dedicated
+  standard-library supervisor, Linux child-subreaper descendant reaping, Darwin `kqueue` observer,
+  kill-before-reap process-group cleanup, repository-routing/marker rejection, trusted ancestor
+  permissions, descriptor-anchored snapshot creation/write, non-following/nonblocking identity-checked
+  cleanup with an explicit same-UID limitation, exact-bound evidence construction, atomic local retention,
+  Windows two-step fallback, and same-object export handoff in
+  `src/local_inference_test_bench/measurement.py`, `_measurement_supervisor.py`, `runner.py`, and
+  `cli.py`
+- [x] T078 Document the single-command sampler and separate static-sidecar flow across the feature
+  specifications, CLI contract, README, and operator guidance, including the synchronous no-escape
+  boundary and owner-controlled executable `TMPDIR` requirement

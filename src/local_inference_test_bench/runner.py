@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import statistics
 import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
+import uuid
 
 from .client import ClientError, Completion, OpenAICompatibleClient, Usage
 from .models import Manifest, ModelSpec
@@ -178,6 +179,29 @@ PROFILE_CASES: dict[str, tuple[BaselineCase, ...]] = {
 }
 
 
+def _validate_run_identity(value: tuple[str, str]) -> tuple[str, str]:
+    if not isinstance(value, tuple) or len(value) != 2:
+        raise RunnerError("preallocated run identity is invalid")
+    run_id, created_at = value
+    if not isinstance(run_id, str) or not isinstance(created_at, str):
+        raise RunnerError("preallocated run identity is invalid")
+    try:
+        parsed_id = uuid.UUID(run_id)
+        parsed_time = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise RunnerError("preallocated run identity is invalid") from error
+    canonical_time = parsed_time.astimezone(timezone.utc).isoformat(timespec="seconds")
+    if (
+        parsed_id.version != 4
+        or str(parsed_id) != run_id
+        or not created_at.endswith("Z")
+        or parsed_time.utcoffset() != timezone.utc.utcoffset(None)
+        or canonical_time.replace("+00:00", "Z") != created_at
+    ):
+        raise RunnerError("preallocated run identity is invalid")
+    return run_id, created_at
+
+
 class BenchmarkRunner:
     """Run baseline cases sequentially and minimize each response immediately."""
 
@@ -216,10 +240,17 @@ class BenchmarkRunner:
             statuses[model.id] = "verified"
         return statuses
 
-    def run(self) -> dict[str, Any]:
+    def run(
+        self,
+        *,
+        run_identity: tuple[str, str] | None = None,
+    ) -> dict[str, Any]:
+        if run_identity is None:
+            now_value = self._now() if self._now is not None else None
+            run_id, created_at = new_run_identity(now_value)
+        else:
+            run_id, created_at = _validate_run_identity(run_identity)
         preflight = self.preflight()
-        now_value = self._now() if self._now is not None else None
-        run_id, created_at = new_run_identity(now_value)
         model_reports = [self._run_model(model, preflight[model.id]) for model in self.models]
         states = {model["validity"] for model in model_reports}
         if "invalid" in states:
@@ -357,8 +388,9 @@ class BenchmarkRunner:
 
 
 def _summarize(cases: Sequence[Mapping[str, Any]]) -> dict[str, int | float | None]:
-    latencies = [float(case["latency_ms"]) for case in cases]
-    usage_rows = [case["usage"] for case in cases]
+    applicable_cases = [case for case in cases if case["outcome"] != "not_applicable"]
+    latencies = [float(case["latency_ms"]) for case in applicable_cases]
+    usage_rows = [case["usage"] for case in applicable_cases]
 
     complete_usage = [
         all(usage[field] is not None for field in ("prompt_tokens", "completion_tokens", "total_tokens"))
@@ -382,9 +414,11 @@ def _summarize(cases: Sequence[Mapping[str, Any]]) -> dict[str, int | float | No
         "case_count": len(cases),
         "semantic_pass_count": sum(bool(case["semantic_success"]) for case in cases),
         "exact_format_pass_count": sum(bool(case["exact_format"]) for case in cases),
-        "scored_case_count": sum(case["outcome"] != "not_scored" for case in cases),
+        "scored_case_count": sum(
+            case["outcome"] not in {"not_scored", "not_applicable"} for case in cases
+        ),
         "latency_ms_total": round(sum(latencies), 3),
-        "latency_ms_mean": round(statistics.fmean(latencies), 3) if latencies else None,
+        "latency_ms_mean": round(statistics.fmean(latencies), 3) if latencies else 0.0,
         "completion_tokens_per_second_weighted": weighted_rate,
         "usage_coverage_cases": sum(complete_usage),
         "prompt_tokens_total": sum_complete("prompt_tokens"),

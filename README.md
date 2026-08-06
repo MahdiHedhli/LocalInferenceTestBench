@@ -66,6 +66,24 @@ litb run \
 Use `--profile standard` after smoke passes. Run artifacts stay ignored under `artifacts/` and are
 restricted to aggregate-safe fields.
 
+Public schema `1.1` export also requires categorical measurement-condition evidence produced by a
+compatible local sampler or adapter. A valid benchmark report proves the execution and scoring path
+worked; it does not prove the host was quiescent, so the exporter never invents a clean measurement
+state when evidence is absent. On POSIX, a single-command run-and-export flow can pass an explicitly
+trusted executable of at most 16 MiB with `--measurement-sampler`. The CLI allocates the private run
+ID before endpoint access, collects one synchronous categorical sample immediately before the run
+and, only when the pre sample and complete benchmark both return successfully, one immediately after
+the run. It requires the adapter to echo the exact run/model/phase binding, executes only a private
+approved-byte snapshot, then retains the closed result owner-only at
+`.local/measurement-evidence.json`. Raw readings and free text are never accepted.
+
+For two-step preparation, a compatible sampler may instead produce the ignored owner-only sidecar
+directly. Its `source_run_id` must equal the report's exact `run_id`, and it must contain one unique
+evidence row for every exported model. Select a subset with `--submission-model` during a run or
+`--model` during `prepare-submission`; otherwise every report model needs a row. The tracked example
+is deliberately nonquiescent so an unchanged copy cannot accidentally claim clean conditions. The
+private binding ID is checked locally and omitted from every public candidate.
+
 At the end of a valid interactive standard run, the bench now offers three choices: keep the report
 private, save identifier-minimized JSON, or open a reviewed public pull request. Enter keeps the
 result private. Nothing is uploaded merely because a run finished.
@@ -78,10 +96,35 @@ litb run \
   --endpoint http://127.0.0.1:1234/v1 \
   --profile standard \
   --hardware .local/hardware.json \
+  --measurement-sampler .local/bin/measurement-sampler \
+  --measurement-evidence .local/measurement-evidence.json \
   --submission save
 ```
 
-To automate the public contribution path, use `--submission pr`. The tool saves and displays the
+Non-interactive `run --submission save` and `run --submission pr` require the sampler option; an
+already-produced static sidecar belongs to the two-step `prepare-submission` path. The adapter must
+be a regular non-symlink executable and must not be group- or world-writable. A dedicated
+standard-library supervisor keeps the sampler process launched from the approved snapshot and its
+descendants in one process group and terminates that group before reaping its leader. On Linux the
+single-command path fails closed unless child-subreaper setup succeeds; only then does it adopt and
+boundedly reap descendants so a conforming sampler does not leave zombies under a minimal PID 1.
+The sampler must stay synchronous
+and must not daemonize or deliberately escape that group; uninterruptible kernel tasks can only fail
+closed after a bounded wait. Snapshot creation uses an owner-only directory under the system
+temporary location; if its filesystem is mounted `noexec`, set `TMPDIR` to an owner-controlled,
+non-repository directory on a writable filesystem that permits execution. Repository-backed temp
+bases and repository-routing `GIT_*` state are rejected before approved sampler bytes are written.
+The resolved ancestor chain must be root/current-user owned; shared-writable directories require
+the sticky bit. Directory creation and sampler-byte writes are anchored to open directory
+descriptors. Cleanup uses non-following, nonblocking exact-identity checks immediately before
+descriptor-relative removal. A root or same-UID process is outside this containment boundary because
+it can race any portable POSIX pathname and already has access to the sampler bytes. A handled cleanup
+failure, `SIGKILL`, or a host crash can leave the owner-only private snapshot until local or system
+temporary-file cleanup; its path and bytes are never published. This cleanup boundary is currently
+POSIX-only. Windows users retain the two-step
+`prepare-submission` path.
+
+To automate the public contribution path, replace `save` with `pr`. The tool saves and displays the
 complete minimized record, runs the privacy and secret gates in an isolated clone, then creates a
 feature branch and pull request through an authenticated GitHub CLI. It never pushes directly to
 `main`. Non-interactive publication also requires `--confirm-public`.
@@ -111,10 +154,16 @@ measurements are true.
 Leaderboard records include exact CPU, memory, accelerator, execution-mode, runtime name and
 version, and—when supplied—the configured context window, concurrency, speculative-decoding state,
 and offload mode because performance without that context is not useful. Unknown numeric values are
-reported as `null`; categorical uncertainty is reported as `unknown`, never inferred. Records omit
-direct machine identifiers, source run IDs, timestamps, local model selectors, raw prompts,
-completions, reasoning, and tool arguments. Hardware plus performance can still make a setup
-recognizable, and the GitHub account used to open a submission pull request is public.
+reported as `null`; categorical uncertainty is reported as `unknown`, never inferred. Records carry
+a coarse UTC measurement month and categorical clean, nonquiescent, or degraded-midrun conditions.
+They omit direct machine identifiers, source run IDs, precise timestamps, local model selectors, raw
+prompts, completions, reasoning, and tool arguments. Hardware plus performance can still make a
+setup recognizable, and the GitHub account used to open a submission pull request is public.
+
+The leaderboard defaults to clean measurement evidence. This makes self-reported conditions easier
+to compare; it does not verify that the conditions or measurements are true. Accepted schema `1.0`
+files remain unchanged and appear as legacy-unreported once mixed with `1.1` evidence. New benchmark
+pull requests must use `1.1`.
 
 To prepare a result from a valid standard run:
 
@@ -125,15 +174,17 @@ chmod 600 .local/hardware.json
 litb prepare-submission \
   --report artifacts/<run-record>.json \
   --hardware .local/hardware.json \
+  --measurement-evidence .local/measurement-evidence.json \
   --model <report-model-id>
 ```
 
 Review the generated file before sharing it. The complete process is in
 [submitting a benchmark](docs/submitting-benchmarks.md).
 
-The same preparation and review happen automatically after `litb run --profile standard` when you
-choose the save or public-PR option. “Identifier-minimized” is deliberate: exact hardware,
-performance, the public pull request, and its GitHub account can still link a result to its source.
+With `--measurement-sampler`, the same preparation and review happen automatically after
+`litb run --profile standard` when you choose the save or public-PR option. “Identifier-minimized”
+is deliberate: exact hardware, performance, the public pull request, and its GitHub account can
+still link a result to its source.
 
 ## Method at a glance
 
@@ -178,7 +229,9 @@ or quick start.
 Image and video generation are explicitly out of scope. Scoring generated media generally requires
 a similarity model or human preference, which conflicts with this project's judge-free,
 rule-based design, and generation uses a different runtime stack. A separate generation benchmark
-may reuse this project's submission pipeline, privacy gate, and validity model.
+may reuse this project's submission pipeline, privacy gate, and validity model. The reserved
+`vision` modality means image input to a rule-scored language task; it does not bring image or video
+generation into this benchmark.
 
 ## Specification
 

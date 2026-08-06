@@ -9,18 +9,26 @@ import sys
 from typing import Sequence
 
 from .client import ClientError, OpenAICompatibleClient
+from .measurement import (
+    LocalMeasurementSampler,
+    MeasurementError,
+    build_measurement_evidence,
+    write_measurement_evidence,
+)
 from .models import ManifestError, load_manifest
 from .publishing import (
     PublicationError,
     publication_preflight,
     publish_submission,
 )
-from .reporting import ReportError, write_report
+from .reporting import ReportError, new_run_identity, write_report
 from .runner import BenchmarkRunner, RunnerError
 from .safety import SafetyError, load_credential
+from .suites import resolve_public_suite
 from .submissions import (
     SubmissionError,
     ensure_submissions,
+    load_measurement_evidence_file,
     load_saved_submission,
     load_public_environment_file,
     prepare_submissions,
@@ -91,6 +99,23 @@ def build_parser() -> argparse.ArgumentParser:
                 ),
             )
             command.add_argument(
+                "--measurement-evidence",
+                type=Path,
+                default=Path(".local") / "measurement-evidence.json",
+                help=(
+                    "owner-only ignored categorical quiescence evidence "
+                    "(default: .local/measurement-evidence.json)"
+                ),
+            )
+            command.add_argument(
+                "--measurement-sampler",
+                type=Path,
+                help=(
+                    "trusted POSIX executable adapter (maximum 16 MiB) that synchronously "
+                    "returns closed pre/post categorical evidence for this run"
+                ),
+            )
+            command.add_argument(
                 "--submission-model",
                 help="source report model id to save or publish from a multi-model run",
             )
@@ -118,6 +143,15 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         type=Path,
         help="ignored public hardware/runtime/configuration descriptor JSON",
+    )
+    submission.add_argument(
+        "--measurement-evidence",
+        type=Path,
+        default=Path(".local") / "measurement-evidence.json",
+        help=(
+            "owner-only ignored categorical quiescence evidence "
+            "(default: .local/measurement-evidence.json)"
+        ),
     )
     submission.add_argument(
         "--model",
@@ -151,6 +185,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="confirm public GitHub account, branch, and pull-request disclosure",
     )
     return parser
+
+
+def _eligible_public_report(report: object) -> bool:
+    if not isinstance(report, dict) or report.get("validity") != "valid":
+        return False
+    try:
+        resolve_public_suite(
+            str(report.get("profile", "")),
+            str(report.get("suite_version", "")),
+        )
+    except ValueError:
+        return False
+    return True
 
 
 def _runner_from_args(args: argparse.Namespace) -> BenchmarkRunner:
@@ -231,11 +278,19 @@ def _save_post_run_submissions(
     *,
     action: str,
     interactive: bool,
+    measurement_evidence: dict | None = None,
 ) -> int:
     hardware_path = _prompt_hardware_path(args.hardware) if interactive else args.hardware
     descriptor = load_public_environment_file(hardware_path)
+    if measurement_evidence is None:
+        measurement_evidence = load_measurement_evidence_file(args.measurement_evidence)
     selected_models = (args.submission_model,) if args.submission_model else None
-    submissions = prepare_submissions(report, descriptor, selected_models)
+    submissions = prepare_submissions(
+        report,
+        descriptor,
+        selected_models,
+        measurement_evidence=measurement_evidence,
+    )
     paths = ensure_submissions(submissions, args.submission_dir)
     noun = "file" if len(paths) == 1 else "files"
     print(f"identifier-minimized JSON saved: {len(paths)} {noun}")
@@ -306,6 +361,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.report,
                 args.hardware,
                 tuple(args.models) or None,
+                measurement_evidence_path=args.measurement_evidence,
             )
             paths = write_submissions(submissions, args.output_dir)
             noun = "file" if len(paths) == 1 else "files"
@@ -318,6 +374,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 interactive=_interactive_terminal(),
                 confirm_public=args.confirm_public,
             )
+        sampler_requested = (
+            args.command == "run" and args.measurement_sampler is not None
+        )
+        sampler = None
+        measurement_error: MeasurementError | None = None
+        run_identity = new_run_identity() if sampler_requested else None
+        if sampler_requested:
+            try:
+                sampler = LocalMeasurementSampler(args.measurement_sampler)
+            except MeasurementError as error:
+                measurement_error = error
         runner = _runner_from_args(args)
         if args.command == "check":
             statuses = runner.preflight()
@@ -328,13 +395,40 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{unavailable} metadata unavailable"
             )
             return 0
-        report = runner.run()
+        sampler_model_ids = (
+            tuple(model.id for model in runner.models) if sampler is not None else ()
+        )
+        pre_sample = None
+        post_sample = None
+        if sampler is not None and run_identity is not None:
+            try:
+                pre_sample = sampler.sample(
+                    phase="pre",
+                    source_run_id=run_identity[0],
+                    model_ids=sampler_model_ids,
+                )
+            except MeasurementError as error:
+                measurement_error = error
+        report = (
+            runner.run(run_identity=run_identity)
+            if run_identity is not None
+            else runner.run()
+        )
+        if sampler is not None and run_identity is not None and pre_sample is not None:
+            try:
+                post_sample = sampler.sample(
+                    phase="post",
+                    source_run_id=run_identity[0],
+                    model_ids=sampler_model_ids,
+                )
+            except MeasurementError as error:
+                measurement_error = error
         path = write_report(report, args.artifacts_dir)
         print(f"run complete: {path.name}")
         run_status = 0 if report["validity"] != "invalid" else 1
         action = args.submission
         interactive = _interactive_terminal()
-        eligible = report["validity"] == "valid" and report["profile"] == "standard"
+        eligible = _eligible_public_report(report)
         if action == "ask":
             action = _prompt_submission_action() if eligible and interactive else "none"
         if action == "none":
@@ -343,13 +437,42 @@ def main(argv: Sequence[str] | None = None) -> int:
             if run_status != 0:
                 return run_status
             raise SubmissionError(
-                "only a fully valid standard run can produce a leaderboard submission"
+                "only a fully valid registered public-suite run can produce a leaderboard submission"
             )
+        if not interactive and not sampler_requested:
+            raise MeasurementError(
+                "non-interactive run submission requires --measurement-sampler; "
+                "private report retained"
+            )
+        sampled_evidence = None
+        if sampler_requested:
+            if measurement_error is not None or pre_sample is None or post_sample is None:
+                raise MeasurementError(
+                    "measurement sampler did not produce complete evidence; private report retained"
+                )
+            report_model_ids = tuple(model["model_id"] for model in report["models"])
+            if (
+                run_identity is None
+                or report["run_id"] != run_identity[0]
+                or report_model_ids != sampler_model_ids
+            ):
+                raise MeasurementError(
+                    "measurement sampler binding did not match the completed run; "
+                    "private report retained"
+                )
+            sampled_evidence = build_measurement_evidence(
+                source_run_id=report["run_id"],
+                model_ids=report_model_ids,
+                pre=pre_sample,
+                post=post_sample,
+            )
+            write_measurement_evidence(sampled_evidence, args.measurement_evidence)
         return _save_post_run_submissions(
             report,
             args,
             action=action,
             interactive=interactive,
+            measurement_evidence=sampled_evidence,
         )
     except (ClientError, RunnerError, ReportError) as error:
         print(f"run error: {error}", file=sys.stderr)

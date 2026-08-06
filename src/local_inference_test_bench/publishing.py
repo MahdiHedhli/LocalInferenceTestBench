@@ -778,16 +778,15 @@ def _verify_publication_tree(
         raise PublicationError(f"an existing deterministic {subject} has unexpected content")
 
 
-def _verified_existing_pull_request(
+def _pull_request_identity(
     identity: PublicationIdentity,
     branch: str,
     prepared: _PreparedChange,
+    pull: Mapping[str, Any],
     *,
     expected_head_sha: str | None = None,
-) -> str | None:
-    pull = _existing_pull_request(identity, branch)
-    if pull is None:
-        return None
+    subject: str,
+) -> tuple[str, int, str]:
     url = pull.get("html_url")
     number = pull.get("number")
     base = pull.get("base")
@@ -809,10 +808,30 @@ def _verified_existing_pull_request(
         or _COMMIT_SHA.fullmatch(head["sha"]) is None
         or (expected_head_sha is not None and head["sha"] != expected_head_sha)
     ):
-        raise PublicationError("an existing deterministic pull request has unexpected identity")
+        raise PublicationError(f"{subject} has unexpected identity")
+    return url, number, head["sha"]
+
+
+def _verify_pull_request(
+    identity: PublicationIdentity,
+    branch: str,
+    prepared: _PreparedChange,
+    pull: Mapping[str, Any],
+    *,
+    expected_head_sha: str | None = None,
+    subject: str = "an existing deterministic pull request",
+) -> str:
+    url, number, head_sha = _pull_request_identity(
+        identity,
+        branch,
+        prepared,
+        pull,
+        expected_head_sha=expected_head_sha,
+        subject=subject,
+    )
     files = _gh_api_list(
         f"repos/{UPSTREAM_REPOSITORY}/pulls/{number}/files?per_page=100",
-        error_message="existing pull-request files could not be inspected",
+        error_message=f"{subject} files could not be inspected",
     )
     submission_path = f"site/data/submissions/{branch.removeprefix('litb/submission-')}.json"
     observed = {(item.get("status"), item.get("filename")) for item in files}
@@ -823,8 +842,8 @@ def _verified_existing_pull_request(
     if observed != expected or len(files) != 2:
         raise PublicationError("an existing deterministic pull request has unexpected files")
     commit = _gh_api(
-        f"repos/{identity.target_repository}/git/commits/{quote(head['sha'], safe='')}",
-        error_message="an existing pull-request commit could not be inspected",
+        f"repos/{identity.target_repository}/git/commits/{quote(head_sha, safe='')}",
+        error_message=f"{subject} commit could not be inspected",
     )
     commit_tree = commit.get("tree")
     tree_sha = commit_tree.get("sha") if isinstance(commit_tree, dict) else None
@@ -837,17 +856,72 @@ def _verified_existing_pull_request(
         prepared,
         subject="pull request",
     )
+    _verify_branch_head(identity.target_repository, branch, head_sha)
     return url
 
 
-def _pull_request_body(submission_id: str) -> str:
+def _verified_existing_pull_request(
+    identity: PublicationIdentity,
+    branch: str,
+    prepared: _PreparedChange,
+    *,
+    expected_head_sha: str | None = None,
+) -> str | None:
+    pull = _existing_pull_request(identity, branch)
+    if pull is None:
+        return None
+    return _verify_pull_request(
+        identity,
+        branch,
+        prepared,
+        pull,
+        expected_head_sha=expected_head_sha,
+    )
+
+
+def _verified_created_pull_request(
+    identity: PublicationIdentity,
+    branch: str,
+    prepared: _PreparedChange,
+    created: Mapping[str, Any],
+    *,
+    expected_head_sha: str,
+) -> str:
+    # The creation response captures the head GitHub used for the opened event.
+    # Validate it before a mutable branch can hide a transient wrong head, then
+    # fetch that exact PR number and validate its current files and tree.
+    _, number, _ = _pull_request_identity(
+        identity,
+        branch,
+        prepared,
+        created,
+        expected_head_sha=expected_head_sha,
+        subject="the created pull request",
+    )
+    pull = _gh_api(
+        f"repos/{UPSTREAM_REPOSITORY}/pulls/{number}",
+        error_message="the created pull request could not be rechecked",
+    )
+    if pull.get("number") != number:
+        raise PublicationError("the created pull request has unexpected identity")
+    return _verify_pull_request(
+        identity,
+        branch,
+        prepared,
+        pull,
+        expected_head_sha=expected_head_sha,
+        subject="the created pull request",
+    )
+
+
+def _pull_request_body(submission_id: str, suite_version: str) -> str:
     return "\n".join(
         (
             "## Benchmark submission",
             "",
             f"Submission ID: `{submission_id}`",
             "",
-            "Suite version: `1.0`",
+            f"Suite version: `{suite_version}`",
             "",
             "## Automated contributor checks",
             "",
@@ -955,26 +1029,32 @@ def publish_submission(
     head_owner = target.split("/", 1)[0]
     try:
         _verify_branch_head(target, branch, expected_head_sha)
-        _gh_api(
+        created_pull = _gh_api(
             f"repos/{UPSTREAM_REPOSITORY}/pulls",
             method="POST",
             payload={
                 "title": f"benchmarks: submit {submission_id[:12]}",
-                "body": _pull_request_body(submission_id),
+                "body": _pull_request_body(
+                    submission_id,
+                    str(submission["suite_version"]),
+                ),
                 "head": f"{head_owner}:{branch}",
                 "base": identity.base_branch,
                 "maintainer_can_modify": True,
             },
             error_message="the public pull request could not be opened",
         )
-        verified_url = _verified_existing_pull_request(
+        verified_url = _verified_created_pull_request(
             identity,
             branch,
             prepared,
+            created_pull,
             expected_head_sha=expected_head_sha,
         )
-        if verified_url is None:
-            raise PublicationError("the created pull request could not be verified")
+        # The PR inspection above is pinned to the expected commit, but its source
+        # branch remains mutable. Recheck the ref after inspecting the PR files and
+        # tree so a concurrent branch update cannot be reported as a safe success.
+        _verify_branch_head(target, branch, expected_head_sha)
     except PublicationError as error:
         raise PublicationError(
             f"the PR could not be opened or verified; public PR/branch "

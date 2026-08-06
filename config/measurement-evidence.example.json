@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "source_run_id": "replace-with-source-run-id",
+  "models": [
+    {
+      "model_id": "example-model",
+      "validity": "nonquiescent",
+      "measurement_conditions": {
+        "pre": {
+          "outcome": "threshold_crossed",
+          "categories": [
+            "sustained_load"
+          ]
+        },
+        "post": {
+          "outcome": "threshold_crossed",
+          "categories": [
+            "sustained_load"
+          ]
+        },
+        "hard_threshold_crossed": true
+      }
+    }
+  ]
+}

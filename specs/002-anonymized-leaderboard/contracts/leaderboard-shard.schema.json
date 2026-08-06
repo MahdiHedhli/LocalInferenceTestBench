@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "leaderboard-shard.schema.json",
   "title": "Local Inference Test Bench leaderboard transport shard",
-  "description": "One independently bounded page of globally ranked leaderboard entries.",
+  "description": "One independently bounded page of globally ranked leaderboard entries under the logical schema named by the transport envelope.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,7 +17,10 @@
       "const": "1.0"
     },
     "schema_version": {
-      "const": "1.0"
+      "enum": [
+        "1.0",
+        "1.1"
+      ]
     },
     "shard_id": {
       "type": "string",
@@ -29,11 +32,37 @@
     },
     "entries": {
       "type": "array",
-      "minItems": 1,
-      "items": {
-        "$ref": "leaderboard-dataset.schema.json#/$defs/entry"
-      }
+      "minItems": 1
     }
   },
-  "$comment": "The Python builder and browser bind entry_count to the array length, shard_id to the synthesized ordinal filename, and the complete shard bytes to the per-file publication cap."
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": "1.0"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "leaderboard-dataset.schema.json#/$defs/legacyMonolithEntry"
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "leaderboard-dataset.schema.json#/$defs/versionedEntry"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$comment": "index_version remains 1.0 because the transport did not change. schema_version binds all rows to either the frozen unannotated 1.0 branch or the explicit mixed 1.1 branch. The Python builder and browser also bind entry_count to the array length, shard_id to the synthesized ordinal filename, and the complete shard bytes to the per-file publication cap."
 }

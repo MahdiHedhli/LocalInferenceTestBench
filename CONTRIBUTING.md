@@ -39,12 +39,17 @@ Benchmark submissions use a public pull request. Before opening one, read
 1. Run the current `standard` profile and confirm that the report is valid.
 2. Copy `config/hardware.example.json` to `.local/hardware.json`, restrict it to owner access, and
    enter the exact hardware used for inference plus the serving runtime and its known configuration.
-3. Choose the public-PR option after a valid interactive standard run, or run
+3. Obtain categorical pre/post measurement evidence from a compatible local sampler or adapter,
+   save it as the ignored owner-only `.local/measurement-evidence.json`, and review it for closed
+   category-only content. Set its top-level `source_run_id` to the report's exact `run_id`; this
+   local binding is stripped from public output. Execution validity does not imply clean measurement
+   conditions.
+4. Choose the public-PR option after a valid interactive standard run, or run
    `litb run ... --submission pr --confirm-public --submission-model <report-model-id>` for an
    explicit non-interactive flow. The model selection is required when the report contains more
    than one model and may be omitted for a single-model run.
-4. Read the complete identifier-minimized JSON and the public-account disclosure before confirming.
-5. Let the tool build and validate an isolated two-file change and open the pull request.
+5. Read the complete identifier-minimized JSON and the public-account disclosure before confirming.
+6. Let the tool build and validate an isolated two-file change and open the pull request.
 
 If a publication attempt is cancelled or fails, use
 `litb publish-submission --candidate .local/leaderboard-submissions/<submission-id>.json` to retry
@@ -57,6 +62,11 @@ them. To use the automated review and merge lane, a manual PR must use the exact
 `litb/submission-<submission-id>`, with the digest matching the added filename and content ID.
 That namespace is reserved for exact generated submissions; a branch with that name fails the
 trusted boundary if it contains a general, mixed, or otherwise non-submission change.
+
+New benchmark pull requests must use public submission schema `1.1`. Accepted `1.0` files remain
+retained under their original digest, but an open or locally saved `1.0` candidate must be regenerated
+from its source report, hardware descriptor, and categorical measurement evidence. Do not hand-edit
+or rehash legacy files to simulate migration.
 
 For an exact benchmark-only PR, trusted base code revalidates the file modes, schema, canonical
 digest, duplicate status, and deterministic leaderboard before posting one fixed GitHub Actions audit

@@ -104,8 +104,9 @@ class SiteSafetyTests(unittest.TestCase):
         self.assertIn('credentials: "omit"', helper)
         self.assertIn('headers.get("content-length")', helper)
         self.assertIn("MAX_DATA_BYTES", helper)
-        self.assertIn("TextEncoder", helper)
-        self.assertIn("response.text()", helper)
+        self.assertIn("response.arrayBuffer()", helper)
+        self.assertIn("decodeStrictUtf8(bytes)", helper)
+        self.assertIn("parseStrictJson(", helper)
 
         self.assertIn("fetchBoundedJson(DATA_URL)", self.javascript)
         self.assertGreaterEqual(self.javascript.count("fetchBoundedJson("), 3)
@@ -192,11 +193,41 @@ class SiteSafetyTests(unittest.TestCase):
             {
                 "bounded_timeout": True,
                 "duplicate_rejected_without_mutation": True,
+                "fetched_bom_rejected": True,
+                "fetched_duplicate_rejected": True,
+                "fetched_invalid_utf8_rejected": True,
+                "fetched_valid_utf8_accepted": True,
                 "first_rank_required": True,
                 "fresh_state_accepts_previously_seen_id": True,
                 "incremental_segments": True,
                 "reversed_canonical_boundary_rejected": True,
                 "wrong_rank_boundary_rejected": True,
+            },
+        )
+
+    def test_unavailable_facet_latency_sorts_last(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable")
+        completed = subprocess.run(
+            [
+                node,
+                str(PROJECT_ROOT / "tests" / "js_sorting_runner.js"),
+                str(SITE_ROOT / "app.js"),
+            ],
+            cwd=PROJECT_ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            json.loads(completed.stdout),
+            {
+                "latency_order": ["fast", "slow", "unavailable"],
+                "half_up_scores": [6.3, 93.8],
             },
         )
 
@@ -213,6 +244,40 @@ class SiteSafetyTests(unittest.TestCase):
                 self.assertIn(expected, visible_text)
         self.assertIn("No loaded results match these filters.", self.javascript)
         self.assertIn("load more results to expand the searchable set", self.javascript)
+
+    def test_validity_is_first_class_and_defaults_to_clean_only(self) -> None:
+        visible_text = re.sub(r"<[^>]+>", " ", self.html)
+        visible_text = re.sub(r"\s+", " ", visible_text).casefold()
+        for expected in (
+            "clean only",
+            "legacy: not reported",
+            "measurement month",
+            "validity",
+            "as of",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, visible_text)
+        self.assertRegex(
+            self.html,
+            r'<option\s+value="clean"\s+selected>Clean only</option>',
+        )
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable")
+        completed = subprocess.run(
+            [
+                node,
+                str(PROJECT_ROOT / "tests" / "js_validity_filter_runner.js"),
+                str(SITE_ROOT / "app.js"),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            json.loads(completed.stdout),
+            {"clean_default": 1, "all": 4, "legacy": 1, "month": 2},
+        )
 
     def test_browser_validators_accept_both_closed_transport_forms(self) -> None:
         node = shutil.which("node")

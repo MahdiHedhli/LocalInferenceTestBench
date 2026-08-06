@@ -60,3 +60,67 @@ one modified generated leaderboard. Validator, workflow, code, documentation, re
 multi-record changes are rejected in that lane.
 
 **Rejected**: Rely only on the PR template or execute a validator that the same benchmark PR may edit.
+
+## Stage 3 decision: require measurement evidence as a separate local input
+
+**Decision**: Public schema `1.1` preparation reads a closed categorical sidecar from an ignored,
+owner-only path. Execution validity continues to describe endpoint, identity, request, and scoring
+integrity; the sidecar separately describes coarse pre/post measurement conditions. Missing evidence
+fails closed. The sidecar binds to exactly one Run Record through a required `source_run_id` exact-
+matched to `report.run_id`, and its unique model evidence list is capped at 1–1000 entries. The
+binding is validation-only and is stripped from public output.
+
+**Rationale**: Treating `report.validity == valid` as proof of host quiescence would invent evidence
+the baseline runner did not collect. Keeping the sampler or adapter output separate also prevents
+raw host instrumentation from expanding the retained run record or public candidate.
+
+**Rejected**: Map execution-valid to clean; accept a CLI validity assertion; reuse unbound or stale-
+run evidence; accept an unbounded model list; collect general machine inventory in the core runner;
+publish the run binding; or publish raw pressure, thermal, load, swap, memory, or process values.
+
+## Post-review decision: integrate an exact-bound synchronous sampler
+
+**Decision**: Make non-interactive POSIX run-and-export use an explicitly selected local adapter. Allocate
+the ordinary run identity first, send it with the phase and ordered public model IDs to a synchronous
+`pre` invocation, run the benchmark with that identity, then perform the matching `post` invocation
+when `pre` succeeded and the benchmark returns successfully. A runner exception produces no post
+sample and no export.
+Require closed categorical responses to echo every binding field. Build and atomically retain the
+ordinary sidecar only from those two measured samples, and reuse that in-memory object for export.
+Cap the source at 16 MiB, execute a private non-writable snapshot of approved bytes, and keep Windows
+on the two-step exact-bound sidecar flow until equivalent process-tree containment exists. Place a
+dedicated standard-library supervisor between the CLI and approved snapshot so it can signal the
+adapter group before reaping the leader and never signal a potentially reused PGID afterward. On
+Linux, fail closed unless child-subreaper setup succeeds and boundedly reap adopted descendants;
+observe leader exit without reaping via `waitid` or, on older supported macOS Python, `kqueue`
+`NOTE_EXIT`. Treat Darwin registration `ESRCH` as observed exit only because the dedicated helper is
+the sole waiter, has `SIGCHLD` at default, and has not polled or waited, leaving the zombie to pin the
+PID/PGID. macOS retains the same kill-before-reap ordering. Require the sampler to stay synchronous and inside
+its inherited session/process group. Require an owner-only snapshot directory on a writable
+filesystem that permits execution, with an owner-controlled non-repository `TMPDIR` option for
+`noexec` defaults.
+
+**Rationale**: A random run ID created only after inference cannot appear in a pre-existing sidecar,
+so the former documented one-command flow required an external rewrite race. Merely replacing the ID
+afterward would make stale measurements look bound. Supplying the ID to the collector before both
+samples makes the flow usable without treating binding as provenance or inventing host conditions.
+
+**Rejected**: Rewrite an arbitrary sidecar after the run; choose the report ID from a fully formed
+pre-existing sidecar; accept a free-form validity flag; invoke shell fragments; inherit credential
+variables; capture unbounded output; signal a process group after reaping its leader; enable a
+process-wide subreaper in the long-lived CLI; claim containment for a sampler that deliberately
+daemonizes or escapes; or let sampler failure prevent retention of an otherwise completed private
+benchmark report.
+
+## Stage 3 decision: regenerate new candidates without rewriting legacy evidence
+
+**Decision**: Newly prepared candidates use public schema `1.1`. Accepted schema `1.0` repository
+files retain their exact bytes and digests; a saved or open `1.0` candidate must be regenerated before
+new publication.
+
+**Rationale**: Rehashing historical files would destroy their content identities, while accepting
+new `1.0` files would let callers invisibly omit validity and recency. Explicit legacy projection
+preserves both facts.
+
+**Rejected**: Rewrite accepted source submissions, synthesize legacy measurement fields, or keep
+accepting new schema `1.0` proposals indefinitely.

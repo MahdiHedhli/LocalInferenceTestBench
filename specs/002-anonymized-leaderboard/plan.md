@@ -72,14 +72,17 @@ the constitution already allows.
 - Present every accepted entry as self-reported and unverified in the site chrome and leaderboard
   header. Describe the identifier as content-integrity evidence only, never provenance or
   attestation.
-- Treat `model.display_name`, `model.source`, and `model.precision` as reviewer-visible descriptors,
-  not arbitrary text: use 160, 240, and 80 ASCII-character limits and reject descriptor-grade UUID,
-  serial/inventory-label, network, URL, and email shapes plus explicit automated-reviewer and
-  instruction-injection shapes in both implementations. Do not change hardware descriptor behavior.
+- Treat all public hardware/runtime labels, model labels, and artifact identity values as
+  reviewer-visible descriptors, not arbitrary text: require visible ASCII and reject
+  descriptor-grade UUID, serial/inventory-label, network, URL, private-host, and email shapes plus
+  automated-reviewer/instruction-injection shapes in both implementations. Keep the model
+  display/source/precision limits at 160/240/80.
 - Rank semantic results first and exact-format results second. Equal scores share a rank. Hardware and
   runtime context make speed interpretable, but performance still does not change the quality rank.
 - Round retained aggregate performance values to reduce unnecessary precision. Do not retain source
   timestamps, local model IDs, manifest digests, or per-case performance traces.
+- Derive displayed score percentages with exact integer-ratio, half-up rounding to one decimal in
+  both Python and JavaScript so future suite lengths cannot create language-specific tie behavior.
 - Let the browser inspect only minimized JSON. It uses text-only rendering and does not transmit the
   selected file.
 - Build and deploy with pinned GitHub-authored actions and narrow job permissions.
@@ -173,6 +176,9 @@ The exact implementation names remain subordinate to the contracts and acceptanc
 8. Cross the former aggregate cap with a synthetic corpus, force an exact-byte page split, and
    prove byte-identical output, complete retention, bounded payloads, load-on-demand behavior, and
    rejection of corrupt records and arbitrary shard targets.
+9. Exercise the same candidate corpus through Python and browser validators, including strict raw
+   JSON duplicate-member rejection and canonical digest recomputation in the local Pages preview;
+   apply fatal UTF-8/BOM rejection and the same strict parser to every fetched leaderboard transport.
 
 ## Post-design constitution check
 
@@ -185,9 +191,10 @@ principles.
 ## Post-release hardening sequence
 
 Stage 1 tightens the three model descriptor labels and corrects public framing without changing what
-is measured or bumping the schema version. Python and browser validators remain parallel
-implementations and receive the same adversarial fixture corpus. Existing hardware descriptor
-acceptance is a regression boundary, not part of this change.
+is measured or bumping the schema version. Stage 3 extends that publication-only rule to the other
+public descriptor and artifact-identity values after parity fuzzing found cross-engine Unicode and
+punctuation-boundary bypasses. Python and browser validators remain parallel implementations and
+receive the same adversarial fixture corpus.
 
 The non-authoritative plausibility annotation and config-cell corroboration count remain later,
 explicitly pending work. They will surface caution and repetition without dropping a record or
@@ -215,3 +222,40 @@ aggregate corpus cap: valid growth adds deterministic pages split by exact rende
 size. Corrupt records, duplicate IDs, inconsistent counts, missing records, oversized individual
 files, and unsafe content still fail publication. All accepted source submissions remain retained
 and digest-addressable; pagination never prunes them.
+
+## Post-release Stage 3 schema `1.1` and expansion seams
+
+Stage 3 changes the public evidence contract, not what the benchmark measures. New submissions and
+projected rows use schema `1.1`; the sharded transport keeps independent `index_version: "1.0"`.
+The current six-entry all-legacy monolith remains byte-identical until the first accepted `1.1`
+submission. Every accepted `1.0` source file remains unchanged and digest-addressable, while new
+benchmark pull requests must be regenerated as `1.1`. A mixed projection marks historical rows
+`legacy_unreported` and leaves unmeasured condition and month fields absent.
+
+Preparation continues to require a `valid` execution report and model result. It additionally reads
+an ignored, owner-only measurement-evidence sidecar containing only closed pre/post threshold
+outcomes and categories, a top-level `source_run_id` exact-matched to the report's `run_id`, and a
+bounded 1–1000 unique model list. The exporter fails closed if that evidence is absent, stale,
+oversized, or inconsistent and never maps execution validity to `clean`. The run binding stays local.
+The public contract records `clean`, `nonquiescent`, or `degraded_midrun`, a UTC `YYYY-MM`
+measurement period, and optional 3–5-run determinism aggregates. No run ID, raw pressure, thermal,
+load, swap, process, inventory, or event-time value crosses the boundary.
+
+A shared suite registry keyed by `(profile, suite_version)` supplies ordered case metadata and suite
+length. The sole public entry remains `standard` / `1.0`. Each current case gains a task-capability
+tag and the `text` modality; `not_applicable` is excluded from denominators and distinct from
+`not_scored`. Inapplicable cases use the sentinel consistently in outcome, route, and termination;
+the complete public candidate still needs one scored case. These are collection and validation seams
+only—there are no new cases, capability scores, pages, or columns.
+
+The builder accepts a versioned facet selector but ships only `all-cases-text`. Configuration
+dimensions are a named version `1.0` structure reused by later filtering and config-cell collapse:
+hardware, model identity including revision or digest, precision, runtime name/version/backend,
+runtime configuration, and settings. The future view-graduation policy is also version `1.0`, with
+25 entries across five model families; nothing reads it yet. Python and browser validation continue
+as parallel closed-schema implementations exercised by shared fixtures. Since minimized accepted
+records do not retain per-case timing or usage, any strict subset facet emits unavailable latency
+and throughput plus zero usage coverage; it never presents the retained full-suite aggregate as a
+facet-specific performance result. Such a subset uses the versioned logical `1.1` projection even
+when all source records are legacy; only the shipped all-legacy full-suite projection retains the
+byte-identical `1.0` transport.

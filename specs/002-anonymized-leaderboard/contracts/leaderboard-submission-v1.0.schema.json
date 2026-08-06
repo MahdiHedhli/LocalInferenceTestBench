@@ -1,0 +1,380 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "leaderboard-submission-v1.0.schema.json",
+  "title": "Local Inference Test Bench leaderboard submission (frozen 1.0)",
+  "description": "One closed, minimized, self-reported standard-suite result for one public model artifact, with optional explicit runtime configuration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "submission_id",
+    "suite_version",
+    "profile",
+    "hardware",
+    "runtime",
+    "model",
+    "settings",
+    "cases",
+    "metrics"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "submission_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "suite_version": {
+      "const": "1.0"
+    },
+    "profile": {
+      "const": "standard"
+    },
+    "hardware": {
+      "$ref": "hardware-descriptor.schema.json#/$defs/hardware"
+    },
+    "runtime": {
+      "$ref": "hardware-descriptor.schema.json#/$defs/runtime"
+    },
+    "runtime_configuration": {
+      "$ref": "hardware-descriptor.schema.json#/$defs/runtimeConfiguration"
+    },
+    "model": {
+      "$ref": "#/$defs/model"
+    },
+    "settings": {
+      "$ref": "#/$defs/settings"
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/structuredJsonCase"
+        },
+        {
+          "$ref": "#/$defs/pythonAstCase"
+        },
+        {
+          "$ref": "#/$defs/defensiveTriageCase"
+        },
+        {
+          "$ref": "#/$defs/readOnlyToolCase"
+        },
+        {
+          "$ref": "#/$defs/unapprovedChangeCase"
+        }
+      ],
+      "items": false
+    },
+    "metrics": {
+      "$ref": "#/$defs/metrics"
+    }
+  },
+  "$defs": {
+    "publicText200": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F\\u200E\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2066-\\u2069\\uD800-\\uDFFF]+$"
+    },
+    "modelDisplayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[ -~]+$"
+    },
+    "modelSource": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^[ -~]+$"
+    },
+    "modelPrecision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[ -~]+$"
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "display_name",
+        "source",
+        "precision",
+        "declared_context_tokens"
+      ],
+      "properties": {
+        "display_name": {
+          "$ref": "#/$defs/modelDisplayName"
+        },
+        "source": {
+          "$ref": "#/$defs/modelSource"
+        },
+        "revision": {
+          "$ref": "#/$defs/publicText200"
+        },
+        "digest": {
+          "$ref": "#/$defs/publicText200"
+        },
+        "precision": {
+          "$ref": "#/$defs/modelPrecision"
+        },
+        "declared_context_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "revision"
+          ],
+          "not": {
+            "required": [
+              "digest"
+            ]
+          }
+        },
+        {
+          "required": [
+            "digest"
+          ],
+          "not": {
+            "required": [
+              "revision"
+            ]
+          }
+        }
+      ]
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "temperature",
+        "top_p",
+        "max_output_tokens",
+        "seed"
+      ],
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "top_p": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "reasoning_effort": {
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    "outcome": {
+      "enum": [
+        "pass",
+        "semantic_only",
+        "format_only",
+        "fail",
+        "not_scored"
+      ]
+    },
+    "route": {
+      "enum": [
+        "direct_response",
+        "read_only_tool",
+        "safe_refusal",
+        "unsafe_mutation",
+        "unexpected_tool",
+        "unrecognized"
+      ]
+    },
+    "termination": {
+      "enum": [
+        "completed",
+        "tool_call",
+        "filtered",
+        "cancelled",
+        "output_budget",
+        "context_window",
+        "length_unknown",
+        "reasoning_only",
+        "unknown",
+        "other",
+        "timeout",
+        "network_error",
+        "authentication",
+        "rate_limited",
+        "server_error",
+        "request_rejected",
+        "invalid_json",
+        "protocol_error",
+        "response_too_large",
+        "http_error"
+      ]
+    },
+    "caseBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "outcome",
+        "route",
+        "termination"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/outcome"
+        },
+        "route": {
+          "$ref": "#/$defs/route"
+        },
+        "termination": {
+          "$ref": "#/$defs/termination"
+        }
+      }
+    },
+    "structuredJsonCase": {
+      "$ref": "#/$defs/caseBase",
+      "properties": {
+        "case_id": {
+          "const": "structured-json"
+        }
+      }
+    },
+    "pythonAstCase": {
+      "$ref": "#/$defs/caseBase",
+      "properties": {
+        "case_id": {
+          "const": "python-ast"
+        }
+      }
+    },
+    "defensiveTriageCase": {
+      "$ref": "#/$defs/caseBase",
+      "properties": {
+        "case_id": {
+          "const": "defensive-triage"
+        }
+      }
+    },
+    "readOnlyToolCase": {
+      "$ref": "#/$defs/caseBase",
+      "properties": {
+        "case_id": {
+          "const": "read-only-tool"
+        }
+      }
+    },
+    "unapprovedChangeCase": {
+      "$ref": "#/$defs/caseBase",
+      "properties": {
+        "case_id": {
+          "const": "unapproved-change-boundary"
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_count",
+        "semantic_pass_count",
+        "exact_format_pass_count",
+        "scored_case_count",
+        "usage_coverage_cases",
+        "latency_ms_mean",
+        "completion_tokens_per_second"
+      ],
+      "properties": {
+        "case_count": {
+          "const": 5
+        },
+        "semantic_pass_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "exact_format_pass_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "scored_case_count": {
+          "const": 5
+        },
+        "usage_coverage_cases": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "latency_ms_mean": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000000
+        },
+        "completion_tokens_per_second": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "completion_tokens_per_second": {
+                "type": "number"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "usage_coverage_cases": {
+                "const": 5
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$comment": "The Python validator is authoritative for canonical digest verification, arithmetic consistency, numeric precision, and the public data deny rules. Python and browser validators enforce safe text, descriptor-grade machine-identifier and reviewer-injection rejection, model and configured-context output limits, and unsafe routes against shared behavioral fixtures. Decimal precision is kept out of the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
+}

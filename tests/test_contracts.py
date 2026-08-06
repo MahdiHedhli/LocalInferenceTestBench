@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -15,16 +16,28 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 
 from local_inference_test_bench.submissions import (  # noqa: E402
+    FacetSelector,
     SubmissionError,
     build_leaderboard,
     build_leaderboard_bundle,
     build_persisted_leaderboard,
-    prepare_submission,
-    validate_submission,
+    validate_accepted_submission,
+)
+from local_inference_test_bench import runner as runner_module  # noqa: E402
+from local_inference_test_bench.reporting import validate_report  # noqa: E402
+from local_inference_test_bench.suites import (  # noqa: E402
+    PUBLIC_SUITE_REGISTRY,
+    SuiteCase,
 )
 from schema_validator import LocalSchemaValidator, SchemaValidationError  # noqa: E402
 from test_models import valid_manifest_data  # noqa: E402
-from test_submissions import public_environment, runtime_configuration, valid_report  # noqa: E402
+from test_submissions import (  # noqa: E402
+    legacy_submission_fixture,
+    prepare_submission,
+    public_environment,
+    runtime_configuration,
+    valid_report,
+)
 
 
 class PublishedContractTests(unittest.TestCase):
@@ -41,6 +54,26 @@ class PublishedContractTests(unittest.TestCase):
         self.runner_validator.validate(manifest, "manifest.schema.json")
         self.runner_validator.validate(report, "run-record.schema.json")
 
+    def test_registered_synthetic_suite_matches_runtime_and_run_record_contract(self) -> None:
+        report = valid_report()
+        report["profile"] = "synthetic-two"
+        report["suite_version"] = "9.0"
+        report["models"][0]["cases"] = report["models"][0]["cases"][:2]
+        report["models"][0]["summary"] = runner_module._summarize(
+            report["models"][0]["cases"]
+        )
+        suite = (
+            SuiteCase("structured-json", "structured_output"),
+            SuiteCase("python-ast", "coding"),
+        )
+
+        with mock.patch.dict(
+            PUBLIC_SUITE_REGISTRY,
+            {("synthetic-two", "9.0"): suite},
+        ):
+            validate_report(report)
+            self.runner_validator.validate(report, "run-record.schema.json")
+
     def test_example_descriptor_matches_its_published_schema(self) -> None:
         descriptor = json.loads(
             (PROJECT_ROOT / "config" / "hardware.example.json").read_text(encoding="utf-8")
@@ -48,12 +81,33 @@ class PublishedContractTests(unittest.TestCase):
 
         self.validator.validate(descriptor, "hardware-descriptor.schema.json")
 
+    def test_public_descriptor_contracts_require_visible_ascii(self) -> None:
+        descriptor = public_environment()
+        descriptor["hardware"]["cpu"]["model"] = "Processeur " + chr(0x03BB)
+        with self.assertRaises(SchemaValidationError):
+            self.validator.validate(descriptor, "hardware-descriptor.schema.json")
+
+        submission = prepare_submission(valid_report(), public_environment())
+        submission["model"]["revision"] = "r" + chr(0x03BB)
+        with self.assertRaises(SchemaValidationError):
+            self.validator.validate(submission, "leaderboard-submission.schema.json")
+
+    def test_example_measurement_evidence_matches_its_published_schema(self) -> None:
+        evidence = json.loads(
+            (PROJECT_ROOT / "config" / "measurement-evidence.example.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.validator.validate(evidence, "measurement-evidence.schema.json")
+
     def test_export_and_dataset_match_the_published_schemas(self) -> None:
         report = valid_report()
         report["models"][0]["settings"]["reasoning_effort"] = "high"
         environment = public_environment()
         environment["runtime_configuration"] = runtime_configuration()
         submission = prepare_submission(report, environment)
+        self.assertEqual(submission["schema_version"], "1.1")
         self.validator.validate(submission, "leaderboard-submission.schema.json")
         self.assertEqual(
             submission["runtime_configuration"], environment["runtime_configuration"]
@@ -80,6 +134,126 @@ class PublishedContractTests(unittest.TestCase):
             sum(shard["entry_count"] for shard in shards),
             index["entry_count"],
         )
+
+    def test_subset_facet_contract_requires_unavailable_performance(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        facet = FacetSelector(
+            facet_id="coding-text",
+            capabilities=frozenset({"coding"}),
+            modalities=frozenset({"text"}),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            submissions = Path(temporary)
+            path = submissions / f"{submission['submission_id']}.json"
+            path.write_text(json.dumps(submission), encoding="utf-8")
+            dataset = build_leaderboard(submissions, facet=facet)
+
+        self.validator.validate(dataset, "leaderboard-dataset.schema.json")
+        metrics = dataset["entries"][0]["metrics"]
+        self.assertEqual(metrics["usage_coverage_cases"], 0)
+        self.assertIsNone(metrics["latency_ms_mean"])
+        self.assertIsNone(metrics["completion_tokens_per_second"])
+
+        inconsistent = copy.deepcopy(dataset)
+        inconsistent["entries"][0]["metrics"]["usage_coverage_cases"] = 1
+        with self.assertRaises(SchemaValidationError):
+            self.validator.validate(inconsistent, "leaderboard-dataset.schema.json")
+
+        mislabeled = copy.deepcopy(dataset)
+        mislabeled["entries"][0]["metrics"]["latency_ms_mean"] = 10.0
+        with self.assertRaises(SchemaValidationError):
+            self.validator.validate(mislabeled, "leaderboard-dataset.schema.json")
+
+    def test_full_suite_contract_requires_observed_latency(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        with tempfile.TemporaryDirectory() as temporary:
+            submissions = Path(temporary)
+            path = submissions / f"{submission['submission_id']}.json"
+            path.write_text(json.dumps(submission), encoding="utf-8")
+            dataset = build_leaderboard(submissions)
+
+        dataset["entries"][0]["metrics"].update(
+            {
+                "usage_coverage_cases": 0,
+                "latency_ms_mean": None,
+                "completion_tokens_per_second": None,
+            }
+        )
+        with self.assertRaises(SchemaValidationError):
+            self.validator.validate(dataset, "leaderboard-dataset.schema.json")
+
+    def test_legacy_subset_projection_matches_the_versioned_contract(self) -> None:
+        legacy_path, _ = legacy_submission_fixture()
+        facet = FacetSelector(
+            facet_id="legacy-coding-text",
+            capabilities=frozenset({"coding"}),
+            modalities=frozenset({"text"}),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / legacy_path.name).write_bytes(legacy_path.read_bytes())
+            dataset = build_leaderboard(directory, facet=facet)
+
+        self.assertEqual(dataset["schema_version"], "1.1")
+        self.validator.validate(dataset, "leaderboard-dataset.schema.json")
+
+    def test_not_applicable_contracts_require_matching_route_and_termination(self) -> None:
+        report = valid_report()
+        report_case = report["models"][0]["cases"][-1]
+        report_case.update(
+            {
+                "semantic_success": False,
+                "exact_format": False,
+                "outcome": "not_applicable",
+                "route": "not_applicable",
+                "termination": "not_applicable",
+            }
+        )
+        self.runner_validator.validate(report, "run-record.schema.json")
+
+        mismatched_report = copy.deepcopy(report)
+        mismatched_report["models"][0]["cases"][-1]["route"] = "safe_refusal"
+        with self.assertRaises(SchemaValidationError):
+            self.runner_validator.validate(mismatched_report, "run-record.schema.json")
+        for field in ("route", "termination"):
+            reverse_mismatch = valid_report()
+            reverse_mismatch["models"][0]["cases"][0][field] = "not_applicable"
+            with self.subTest(report_reverse=field), self.assertRaises(
+                SchemaValidationError
+            ):
+                self.runner_validator.validate(
+                    reverse_mismatch,
+                    "run-record.schema.json",
+                )
+
+        submission = prepare_submission(valid_report(), public_environment())
+        submission_case = submission["cases"][-1]
+        submission_case.update(
+            {
+                "outcome": "not_applicable",
+                "route": "not_applicable",
+                "termination": "not_applicable",
+            }
+        )
+        self.validator.validate(submission, "leaderboard-submission.schema.json")
+
+        mismatched_submission = copy.deepcopy(submission)
+        mismatched_submission["cases"][-1]["termination"] = "completed"
+        with self.assertRaises(SchemaValidationError):
+            self.validator.validate(
+                mismatched_submission,
+                "leaderboard-submission.schema.json",
+            )
+        for field in ("route", "termination"):
+            reverse_mismatch = prepare_submission(valid_report(), public_environment())
+            reverse_mismatch["cases"][0][field] = "not_applicable"
+            with self.subTest(submission_reverse=field), self.assertRaises(
+                SchemaValidationError
+            ):
+                self.validator.validate(
+                    reverse_mismatch,
+                    "leaderboard-submission.schema.json",
+                )
 
     def test_public_model_descriptor_contract_uses_field_specific_ascii_limits(self) -> None:
         maximums = {
@@ -110,8 +284,13 @@ class PublishedContractTests(unittest.TestCase):
         for path in sorted(submissions.glob("*.json")):
             with self.subTest(file=path.name):
                 submission = json.loads(path.read_text(encoding="utf-8"))
-                validate_submission(submission)
-                self.validator.validate(submission, "leaderboard-submission.schema.json")
+                validate_accepted_submission(submission)
+                schema = {
+                    "1.0": "leaderboard-submission-v1.0.schema.json",
+                    "1.1": "leaderboard-submission.schema.json",
+                }.get(submission["schema_version"])
+                self.assertIsNotNone(schema)
+                self.validator.validate(submission, schema)
                 self.assertEqual(path.name, f"{submission['submission_id']}.json")
 
         dataset = json.loads(
@@ -142,9 +321,33 @@ class PublishedContractTests(unittest.TestCase):
             path = submissions / f"{submission['submission_id']}.json"
             path.write_text(json.dumps(submission), encoding="utf-8")
             dataset = build_leaderboard(submissions)
-        dataset["entries"][0]["metrics"]["usage_coverage_cases"] = 4
+        dataset["entries"][0]["metrics"]["usage_coverage_cases"] = "4"
         with self.assertRaises(SchemaValidationError):
             self.validator.validate(dataset, "leaderboard-dataset.schema.json")
+
+    def test_mixed_legacy_and_current_dataset_matches_transport_contracts(self) -> None:
+        current = prepare_submission(valid_report(), public_environment())
+        _legacy_path, legacy = legacy_submission_fixture()
+        self.assertEqual(legacy["schema_version"], "1.0")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            submissions = Path(temporary)
+            for submission in (legacy, current):
+                path = submissions / f"{submission['submission_id']}.json"
+                path.write_text(json.dumps(submission), encoding="utf-8")
+            dataset = build_leaderboard(submissions)
+
+        self.assertEqual(dataset["schema_version"], "1.1")
+        self.assertEqual(
+            {entry["submission_schema_version"] for entry in dataset["entries"]},
+            {"1.0", "1.1"},
+        )
+        self.validator.validate(dataset, "leaderboard-dataset.schema.json")
+
+        index, shards = build_leaderboard_bundle(dataset)
+        self.validator.validate(index, "leaderboard-index.schema.json")
+        for shard in shards:
+            self.validator.validate(shard, "leaderboard-shard.schema.json")
 
     def test_transport_contracts_reject_unknown_keys_and_wrong_types(self) -> None:
         submission = prepare_submission(valid_report(), public_environment())
@@ -206,7 +409,7 @@ class PublishedContractTests(unittest.TestCase):
 
         index = {
             "index_version": "1.0",
-            "schema_version": "1.0",
+            "schema_version": large["schema_version"],
             "entry_count": large["entry_count"],
             "shard_count": 2,
         }
