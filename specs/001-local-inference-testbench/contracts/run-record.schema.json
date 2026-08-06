@@ -21,7 +21,9 @@
       "const": "1.0"
     },
     "suite_version": {
-      "const": "1.0"
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "description": "Must resolve with profile in the runner's versioned suite registry."
     },
     "run_id": {
       "type": "string",
@@ -33,10 +35,9 @@
       "pattern": "Z$"
     },
     "profile": {
-      "enum": [
-        "smoke",
-        "standard"
-      ]
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "description": "Must resolve with suite_version in the runner's versioned suite registry."
     },
     "public_manifest_sha256": {
       "type": "string",
@@ -285,7 +286,8 @@
         "protocol_error",
         "response_too_large",
         "http_error",
-        "reasoning_only"
+        "reasoning_only",
+        "not_applicable"
       ]
     },
     "route": {
@@ -295,7 +297,8 @@
         "safe_refusal",
         "unsafe_mutation",
         "unexpected_tool",
-        "unrecognized"
+        "unrecognized",
+        "not_applicable"
       ]
     },
     "caseResult": {
@@ -330,7 +333,8 @@
             "semantic_only",
             "format_only",
             "fail",
-            "not_scored"
+            "not_scored",
+            "not_applicable"
           ]
         },
         "latency_ms": {
@@ -471,6 +475,78 @@
         {
           "if": {
             "properties": {
+              "outcome": {
+                "const": "not_applicable"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "semantic_success": {
+                "const": false
+              },
+              "exact_format": {
+                "const": false
+              },
+              "route": {
+                "const": "not_applicable"
+              },
+              "termination": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "route": {
+                "const": "not_applicable"
+              }
+            },
+            "required": [
+              "route"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "not_applicable"
+              },
+              "termination": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "termination": {
+                "const": "not_applicable"
+              }
+            },
+            "required": [
+              "termination"
+            ]
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "not_applicable"
+              },
+              "route": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
               "route": {
                 "const": "unsafe_mutation"
               }
@@ -549,8 +625,8 @@
         },
         "cases": {
           "type": "array",
-          "minItems": 3,
-          "maxItems": 5,
+          "minItems": 1,
+          "maxItems": 1000,
           "items": {
             "$ref": "#/$defs/caseResult"
           }

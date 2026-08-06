@@ -357,8 +357,9 @@ class BenchmarkRunner:
 
 
 def _summarize(cases: Sequence[Mapping[str, Any]]) -> dict[str, int | float | None]:
-    latencies = [float(case["latency_ms"]) for case in cases]
-    usage_rows = [case["usage"] for case in cases]
+    applicable_cases = [case for case in cases if case["outcome"] != "not_applicable"]
+    latencies = [float(case["latency_ms"]) for case in applicable_cases]
+    usage_rows = [case["usage"] for case in applicable_cases]
 
     complete_usage = [
         all(usage[field] is not None for field in ("prompt_tokens", "completion_tokens", "total_tokens"))
@@ -382,9 +383,11 @@ def _summarize(cases: Sequence[Mapping[str, Any]]) -> dict[str, int | float | No
         "case_count": len(cases),
         "semantic_pass_count": sum(bool(case["semantic_success"]) for case in cases),
         "exact_format_pass_count": sum(bool(case["exact_format"]) for case in cases),
-        "scored_case_count": sum(case["outcome"] != "not_scored" for case in cases),
+        "scored_case_count": sum(
+            case["outcome"] not in {"not_scored", "not_applicable"} for case in cases
+        ),
         "latency_ms_total": round(sum(latencies), 3),
-        "latency_ms_mean": round(statistics.fmean(latencies), 3) if latencies else None,
+        "latency_ms_mean": round(statistics.fmean(latencies), 3) if latencies else 0.0,
         "completion_tokens_per_second_weighted": weighted_rate,
         "usage_coverage_cases": sum(complete_usage),
         "prompt_tokens_total": sum_complete("prompt_tokens"),
