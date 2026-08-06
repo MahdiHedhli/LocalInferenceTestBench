@@ -383,9 +383,16 @@ Published entries remain self-reported, schema-validated, and not independently 
 review, the Actions audit marker, automated reviewer-account approval, and a content digest are
 publication-policy evidence—not evidence that a benchmark run occurred or an independent
 substantive reproduction. Deterministic validation proves schema conformance and integrity of the
-published bytes, not provenance. Quality rank uses
-semantic score first and exact-format score second. Latency and throughput are shown with their
-hardware context but never affect rank.
+published bytes, not provenance. Quality is displayed as representative pass counts plus 95% Wilson
+intervals. Transitive semantic/exact overlap produces an explicit rank band. Latency and throughput
+are shown with their hardware context but never affect rank.
+
+Records with the same versioned hardware/model/runtime/settings configuration collapse to one
+bounded cell. Accepted hashes increase the corroboration count and performance spread, but are not
+treated as independent people or pooled to narrow the quality interval. The cell uses a documented
+score-neutral representative and keeps every original digest-named record in the repository. A
+visible plausibility caution is only an outlier-review hint; it never verifies, drops, gates, or
+ranks the result.
 
 The site defaults to clean self-reported measurement evidence. Users can deliberately include
 nonquiescent, degraded-midrun, or `legacy_unreported` rows; the filter does not verify any claim.

@@ -145,7 +145,8 @@ See the full [operator guide](docs/guide.md) before comparing multiple models.
 ## Public leaderboard
 
 The [GitHub Pages leaderboard](https://mahdihedhli.github.io/LocalInferenceTestBench/) puts the
-community results first. Quality rank uses semantic score, then exact-format score. Latency and
+community results first. It shows pass counts with outward-rounded 95% Wilson intervals and groups
+statistically overlapping semantic/exact-format evidence into explicit rank bands. Latency and
 throughput are shown with the hardware and runtime reported for them, but speed does not affect rank.
 Every entry is self-reported and unverified. Its content hash establishes that the accepted JSON has
 not changed; it does not prove who produced it, that a benchmark run occurred, or that the reported
@@ -164,6 +165,12 @@ The leaderboard defaults to clean measurement evidence. This makes self-reported
 to compare; it does not verify that the conditions or measurements are true. Accepted schema `1.0`
 files remain unchanged and appear as legacy-unreported once mixed with `1.1` evidence. New benchmark
 pull requests must use `1.1`.
+
+Repeated records with the same model/hardware/runtime/settings configuration collapse into one
+bounded cell. They add accepted-hash corroboration and latency/throughput spread, but do not narrow
+the quality interval because anonymous hashes are not proof of independent runs or people. A broad
+versioned plausibility check can display a caution for performance outside its declared hardware and
+model-size envelope; that caution never verifies, drops, gates, or ranks a result.
 
 To prepare a result from a valid standard run:
 

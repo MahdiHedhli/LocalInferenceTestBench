@@ -330,3 +330,12 @@ remembered while inference completes so the private report is still persisted; c
 then fails closed. A static exact-bound sidecar remains a valid input to the separate two-step
 `prepare-submission` flow.
 Windows uses that two-step flow until equivalent process-tree containment is available.
+
+## Stage 4 public evidence bands
+
+Keep optional parameter scale backward-compatible in manifests and run provenance, then normalize it
+to an explicit nullable object only at the new `1.1` public-submission boundary. The derived
+leaderboard groups the existing named configuration dimensions inside facet/profile/suite scope,
+uses a score-neutral representative, and publishes only fixed corroboration, Wilson, distribution,
+and plausibility summaries. Anonymous repeats do not pool quality denominators. The all-legacy
+full-suite `1.0` bytes and every digest-named accepted source record remain unchanged.

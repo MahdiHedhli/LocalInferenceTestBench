@@ -252,6 +252,13 @@ leaderboard base, or a failed local gate causes no branch or PR creation. If PR 
 the branch exists, the command reports the exact public branch that may remain instead of claiming a
 rollback.
 
+Schema `1.1` also publishes nullable total/active model parameter scale because an outlier envelope
+cannot honestly infer size from a model name. This is model-artifact metadata, not host inventory;
+unknown values remain null. The derived board stores fixed configuration-cell counts and month
+ranges rather than an unbounded list of contributor or observation identifiers. Corroboration means
+distinct accepted content hashes only. Neither it nor the caution-only plausibility annotation
+establishes provenance, independence, or that inference occurred.
+
 ## Repository-operator checklist
 
 These are hosting controls, not code changes. Verify them in repository settings; do not treat this

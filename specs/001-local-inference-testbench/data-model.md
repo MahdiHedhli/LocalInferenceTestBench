@@ -45,6 +45,7 @@ are ephemeral command inputs and are not manifest properties.
 | digest | string | exclusive | Exactly one of digest or revision is present |
 | precision | string | yes | Public precision or quantization label |
 | declared_context_tokens | integer | yes | Positive model or runtime-declared context capacity |
+| parameter_scale | object | no | Closed nullable `total_billions`/`active_billions`; explicit public model scale when known |
 | runtime_model | string | yes | Value sent in the request model field; local-only unless reviewed |
 | settings | Generation Settings | yes | Non-secret generation controls |
 
@@ -182,9 +183,14 @@ one Model Entry.
 
 ### Value object: Recorded Provenance
 
-Contains display_name, source, exactly one revision or digest, precision, and
-declared_context_tokens copied from the Model Entry. It excludes runtime_model so a local alias or
-path is not carried into the report.
+Contains display_name, source, exactly one revision or digest, precision,
+declared_context_tokens, and optional parameter_scale copied from the Model Entry. It excludes
+runtime_model so a local alias or path is not carried into the report.
+
+When `parameter_scale` is supplied it has exactly nullable `total_billions` and `active_billions`.
+Known values are positive, no greater than 1,000,000, and use at most three decimal places; active
+cannot exceed total or exist without total. Existing manifests may omit the object. New schema `1.1`
+leaderboard export normalizes omission to explicit nulls and never infers scale from a name.
 
 When these retained fields are projected into a public leaderboard submission, `display_name`,
 `source`, and `precision` receive 1–160, 1–240, and 1–80 limits respectively. They, the public
@@ -217,7 +223,9 @@ browser derives one-based contiguous IDs zero-padded to a minimum width of six d
 row sequence splits greedily at stable record boundaries according to the exact UTF-8 byte length of
 each rendered shard JSON document. Each submission, the index, and every shard retains an individual
 hard byte cap, but there is no aggregate corpus-size rejection. The complete shard union must contain
-every accepted digest exactly once; corrupt, missing, duplicate, inconsistent, or individually
+every projected configuration cell exactly once. Every accepted digest remains retained and
+addressable under `site/data/submissions/`; corroborating source digests are counted rather than
+copied into an unbounded leaderboard row. Corrupt, missing, duplicate, inconsistent, or individually
 oversized inputs still fail closed.
 
 The current all-legacy six-entry monolith remains byte-for-byte unchanged until the first accepted

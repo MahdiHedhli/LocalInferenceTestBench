@@ -469,3 +469,15 @@ categorical evidence and preserving the private report on optional sampler failu
 - [x] T078 Document the single-command sampler and separate static-sidecar flow across the feature
   specifications, CLI contract, README, and operator guidance, including the synchronous no-escape
   boundary and owner-controlled executable `TMPDIR` requirement
+
+---
+
+## Phase 12: Stage 4 public evidence bands
+
+- [x] T079 Amend the baseline spec, plan, data model, and public contracts for optional local
+  parameter scale, explicit nullable `1.1` export, bounded config-cell collapse, Wilson rank bands,
+  corroboration, distributions, and caution-only plausibility
+- [x] T080 Implement and test public parameter-scale normalization plus deterministic collapsed-cell
+  generation without changing existing manifest/run compatibility or frozen legacy bytes
+- [x] T081 Mirror the derived `1.1` contract and rank-band arithmetic in the dependency-free browser,
+  render the evidence honestly, and pass shared parity and publication gates

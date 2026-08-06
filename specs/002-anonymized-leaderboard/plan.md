@@ -42,8 +42,9 @@ needed
 raw report upload, general machine inventory, contributor field, or speed-based quality rank
 
 **Scale/Scope**: One retained record per model run; an append-only corpus that may exceed one browser
-payload; deterministic byte-bounded pagination of the global rank sequence; advanced aggregation and
-hardware-normalized performance ranking remain out of scope
+payload; deterministic byte-bounded pagination of the global rank sequence; bounded configuration-cell
+collapse, Wilson rank bands, corroboration, and non-authoritative plausibility are included;
+hardware-normalized performance ranking remains out of scope
 
 ## Constitution check
 
@@ -66,7 +67,8 @@ the constitution already allows.
 - Export from validated standard reports rather than accepting arbitrary manual fields.
 - Read hardware and runtime context from a separate ignored descriptor so local run records keep their
   existing minimized contract.
-- Use one record per model so entries remain easy to validate, deduplicate, rank, and review.
+- Retain one accepted source record per model while projecting one bounded leaderboard cell per
+  benchmark scope and versioned configuration key.
 - Compute the submission identifier from canonical minimized content. The identifier detects content
   changes and exact duplicates but is not proof that a benchmark was run.
 - Present every accepted entry as self-reported and unverified in the site chrome and leaderboard
@@ -196,9 +198,9 @@ public descriptor and artifact-identity values after parity fuzzing found cross-
 punctuation-boundary bypasses. Python and browser validators remain parallel implementations and
 receive the same adversarial fixture corpus.
 
-The non-authoritative plausibility annotation and config-cell corroboration count remain later,
-explicitly pending work. They will surface caution and repetition without dropping a record or
-claiming that distinct content hashes prove independent operators.
+The non-authoritative plausibility annotation and config-cell corroboration count land in Stage 4.
+They surface caution and repetition without dropping a record or claiming that distinct content
+hashes prove independent operators.
 
 ## Post-release Stage 2 scale hardening
 
@@ -259,3 +261,38 @@ and throughput plus zero usage coverage; it never presents the retained full-sui
 facet-specific performance result. Such a subset uses the versioned logical `1.1` projection even
 when all source records are legacy; only the shipped all-legacy full-suite projection retains the
 byte-identical `1.0` transport.
+
+## Post-release Stage 4 evidence bands and bounded config cells
+
+Stage 4 changes only the derived schema `1.1` leaderboard projection plus explicit model-scale
+provenance in new `1.1` submissions. The frozen all-legacy full-suite projection remains byte-for-byte
+`1.0`. The builder groups records by facet, profile, suite version, and canonical configuration-key
+bytes. It emits one bounded cell per group and never embeds the group's unbounded list of submission
+IDs; every original digest file remains the append-only source of truth.
+
+Cell selection version `1.0` is score-neutral: prefer clean, then nonquiescent, then
+degraded-midrun, then legacy evidence; prefer the newest reported month within that class; use the
+smallest digest last. The selected record supplies scalar score and measurement fields. A fixed
+four-validity corroboration object exposes total accepted-hash count, validity counts, and bounded
+month ranges so the selected scalar is not mistaken for the whole cell. Validity and month filters
+apply to that documented representative. Exact per-month observation arrays are rejected because a
+single flooded configuration could recreate the former 2 MB pipeline wedge.
+
+The representative pass counts produce outward-rounded whole-percent 95% Wilson intervals. Repeats
+do not pool quality denominators because anonymous content hashes are not independent samples and a
+Sybil could otherwise manufacture false precision. Repeats contribute to corroboration and
+latency/throughput sample count, median, minimum, and maximum. Performance never changes rank.
+
+Rank bands are transitive interval components: semantic Wilson overlap is primary; exact-format
+Wilson overlap partitions each semantic component secondarily. Bands are dense. Display/source
+names and performance are absent from the order; `submission_id` is the neutral final tiebreak
+inside a band. The browser validates and renders the published integer interval bounds and labels
+the result as a band rather than a strict point-estimate rank.
+
+New `1.1` model provenance always carries nullable total and active parameter counts in billions.
+Older compatible manifests may omit the field; export writes explicit nulls instead of parsing a
+name. A version `1.0` plausibility policy derives only a coarse existing hardware class and the
+explicit active-or-total size bucket, applies deliberately broad latency-minimum and
+throughput-maximum envelopes, and publishes a caution if any cell observation is outside. Unknown
+inputs and subset facets are `not_evaluated`. Plausibility is visible but never gates, drops,
+verifies, orders, or changes a rank band.

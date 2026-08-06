@@ -26,6 +26,26 @@ Schema `1.1` rows display their UTC month as “as of” and can be filtered or 
 is deliberately coarse: it helps identify aging runtime evidence without publishing an event time.
 On a paginated board, controls describe loaded rows until all pages have been fetched.
 
+## Configuration cells and rank bands
+
+The board projects one cell for each exact facet/profile/suite/configuration key. If several accepted
+records share that key, one score-neutral representative is selected: clean before nonquiescent,
+then degraded-midrun, then legacy-unreported; newest month and content digest break remaining ties.
+Validity/month filters apply to that representative. The cell separately shows fixed counts and
+month ranges for every retained validity class, so the representative is not presented as the only
+evidence. Every original record remains addressable by its digest in the repository.
+
+Quality is shown as a pass count with a 95% Wilson interval. Overlapping evidence shares a transitive
+rank band; it is not a strict point-estimate ordering. Repeated anonymous hashes increase the cell's
+corroboration and performance sample range but do not narrow its quality interval, because neither
+the hash nor repository acceptance proves independent operators or runs.
+
+`Caution` means at least one retained performance observation fell outside a deliberately broad,
+versioned envelope for the declared coarse hardware class and explicit model-size bucket.
+`Within envelope` means no automatic flag fired, not that a result is verified. `Not evaluated`
+means the model scale, hardware class, or facet performance was unavailable. Plausibility never
+drops, gates, or changes a rank band.
+
 ## Common classifications
 
 | Classification | Meaning | Next question |

@@ -25,6 +25,8 @@ Automated-lane branch: `litb/submission-<submission-id>`
 - [ ] I understand that this pull request and my GitHub account are public.
 - [ ] I verified that `measurement_period` is month-only, measurement conditions contain no raw host
   values, and execution validity was not treated as proof of clean conditions.
+- [ ] I verified that model parameter scale is explicit or null and was not inferred from a display
+  name, and I understand that corroboration counts accepted hashes rather than independent people.
 - [ ] I regenerated `site/data/leaderboard.json` without editing it by hand.
 - [ ] `python3 scripts/build_leaderboard.py --check` passes.
 - [ ] `python3 -m unittest discover -s tests -v` passes.

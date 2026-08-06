@@ -81,8 +81,8 @@ later aggregation work; they are not part of this no-schema-change increment.
   unverified and hashes prove content integrity rather than provenance or that a run occurred
 - [x] T026 Run Python/JavaScript parity, text-only DOM, deterministic build, cross-platform unit,
   privacy, history, and secret-scanning regression gates
-- [ ] T027 Add a computed, non-authoritative plausibility caution that never drops or gates an entry
-- [ ] T028 Add config-cell corroboration counts with an explicit definition that does not imply
+- [x] T027 Add a computed, non-authoritative plausibility caution that never drops or gates an entry
+- [x] T028 Add config-cell corroboration counts with an explicit definition that does not imply
   independent operators merely from distinct accepted content hashes
 
 ## Phase 8: Post-release Stage 2 scale hardening
@@ -131,8 +131,34 @@ new benchmark case, capability score, or capability-specific UI.
   source-run evidence bounds, unchanged-monolith, closed-key, fatal UTF-8/BOM, strict-JSON,
   duplicate-member, digest, exact-filename, fetched-transport, public-descriptor punctuation/Unicode,
   and deterministic-build regressions
-- [ ] T039 Complete local and hosted cross-platform, Pages, exact-boundary, privacy, history, and
+- [x] T039 Complete local and hosted cross-platform, Pages, exact-boundary, privacy, history, and
   secret-scanning verification before merging Stage 3
 - [x] T040 Keep strict subset facets quality-only by omitting unavailable latency and throughput,
   with matching browser validation and regression coverage, rather than relabeling retained
   full-suite aggregate performance as facet measurements
+
+## Phase 10: Post-release Stage 4 evidence bands and configuration cells
+
+**Sequence**: Update the living contract and tests first. Preserve the all-legacy byte path throughout.
+The failure-reporting feature and live benchmark run remain separate follow-on work.
+
+- [x] T041 Amend the specification, plan, research, data model, and contracts for representative-only
+  Wilson intervals, transitive rank bands, bounded config-cell collapse, fixed corroboration,
+  performance distributions, parameter scale, and non-authoritative plausibility
+- [x] T042 Add Python tests for Wilson bounds, transitive semantic/exact overlap, neutral ordering,
+  deterministic representative selection, config-dimension splitting, collapse, distributions,
+  mixed validity/month summaries, same-cell flooding, and frozen legacy bytes
+- [x] T043 Add shared browser fixtures for the derived cell contract, arithmetic, band continuity,
+  parameter-scale validation, plausibility signals, and Python/JavaScript parity
+- [x] T044 Implement canonical config grouping, fixed corroboration summaries, score-neutral
+  representative selection, deterministic distributions, and one bounded cell per benchmark scope
+- [x] T045 Implement representative-only Wilson intervals and dense transitive semantic/exact rank
+  bands; remove model/source alphabetical ordering and keep performance outside rank
+- [x] T046 Implement explicit nullable parameter-scale export plus versioned hardware/size
+  plausibility annotations that caution without dropping, gating, verifying, or ranking
+- [x] T047 Render rank bands, pass counts with 95% Wilson bounds, accepted-hash corroboration,
+  performance median/range/sample count, and literal plausibility status through text-only DOM
+- [x] T048 Update methodology, interpretation, guide, security/privacy, contributor, and submission
+  documentation with representative filtering, Sybil limits, bounded aggregation, and caution scope
+- [ ] T049 Run focused and complete Python/JavaScript suites, deterministic build/shard checks,
+  strict full-tree/history publication gates, cross-platform hosted checks, and live Pages verification
