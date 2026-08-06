@@ -20,7 +20,19 @@ class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
         )
 
         self.assertIn("pull_request_target:", workflow)
-        self.assertIn("issues: write", workflow)
+        request_job = workflow[workflow.index("  request-reviews:") :]
+        permission_block = re.search(
+            r"(?m)^    permissions:\n(?P<body>(?:      [^\n]+\n)+)    steps:",
+            request_job,
+        )
+        self.assertIsNotNone(permission_block)
+        assert permission_block is not None
+        self.assertEqual(
+            permission_block.group("body"),
+            "      contents: read\n      pull-requests: write\n",
+        )
+        self.assertEqual(workflow.count("pull-requests: write"), 1)
+        self.assertNotIn("issues: write", workflow)
         self.assertIn("change boundary passed: benchmark-only", workflow)
         self.assertIn(
             "python3 scripts/trusted_submission_automation.py review-request",

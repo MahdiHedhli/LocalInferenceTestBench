@@ -6,7 +6,7 @@
    current general-PR success behavior.
 2. Keep `Trusted benchmark boundary` as the required base-controlled job. Materialize only public
    data blobs, run the trusted schema/digest/deterministic builder, then post one fixed review-request
-   comment per exact base and head.
+   comment per exact base and head with job-scoped pull-request comment permission.
 3. Add a default-branch `issue_comment` workflow that accepts only a strict Codex clean-review event.
 4. Parse the event with standard-library Python, emit only validated numeric/SHA fields, then re-read
    current PR state through GitHub with bounded retries while mergeability is still unknown.

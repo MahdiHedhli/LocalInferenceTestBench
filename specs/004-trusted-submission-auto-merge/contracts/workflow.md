@@ -8,6 +8,9 @@
 - Classification: execute validator bytes and schema/builder code from `BASE_SHA`; materialize only
   head data blobs; tag reviewers only after exact shape, schema, digest, duplicate, and deterministic
   byte validation.
+- Review-request token scope: the request job explicitly requests only repository-content read and
+  pull-request write permissions. Trusted code uses the write scope only for the fixed PR comment,
+  invokes no review or merge endpoint, and has no repository-content write permission.
 
 ## Auto-merge authorization
 

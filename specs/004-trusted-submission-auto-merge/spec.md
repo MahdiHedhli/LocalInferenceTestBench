@@ -61,7 +61,9 @@ check.
   the trusted base classify the exact diff as `benchmark-only` and validate schema, canonical digest,
   filename, duplicates, privacy shape, and the byte-exact deterministic leaderboard.
 - **FR-003**: Review requests MUST be idempotent per full base-and-head pair and contain no
-  contributor-supplied content.
+  contributor-supplied content. Their job MUST receive only repository-content read and pull-request
+  write permissions, use the write scope only for the fixed comment, and invoke no review or merge
+  endpoint.
 - **FR-004**: A merge signal MUST be a newly created, unedited comment from Codex user ID
   `199175422` through GitHub App ID `1144995`, use the documented clean-review form, and identify a
   commit prefix matching the current full PR head. The connector's ten-character prefix is advisory;
@@ -76,7 +78,8 @@ check.
   pagination, and zero unresolved threads. The live default-branch tip MUST still equal the
   authorized base SHA immediately before each possible credentialed mutation.
 - **FR-007**: Reviewer credentials MUST be available only to the final trusted job, MUST never enter
-  command arguments or logs, and MUST be identity-checked before mutation.
+  command arguments or logs, and MUST be identity-checked before mutation. The review-request job
+  MUST use only its ephemeral GitHub token and MUST NOT receive the reviewer credential.
 - **FR-008**: The reviewer bot MUST NOT approve its own PR and MUST pin the review to the full current
   head SHA.
 - **FR-009**: For a fresh authorization, automation MUST first enable GitHub squash auto-merge with
