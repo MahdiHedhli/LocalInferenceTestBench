@@ -13,15 +13,17 @@ python3 scripts/build_leaderboard.py --check
 1. Add the dedicated reviewer credential as the Actions secret `ERNEST_REVIEW_TOKEN`, using the
    narrowest repository scope the credential type supports. Do not paste it into an issue, pull
    request, workflow input, command argument, or tracked file.
-2. Enable native pull-request auto-merge for the repository.
-3. Keep `main` strict and require the three platform tests, `Publication boundary`, and
+2. Keep the repository's default workflow permission read-only and leave “Allow GitHub Actions to
+   create and approve pull requests” disabled (`can_approve_pull_request_reviews: false`).
+3. Enable native pull-request auto-merge for the repository.
+4. Keep `main` strict and require the three platform tests, `Publication boundary`, and
    `Trusted benchmark boundary`, all bound to the GitHub Actions App.
-4. Keep one approving review, stale-review dismissal, last-push approval, conversation resolution,
+5. Keep one approving review, stale-review dismissal, last-push approval, conversation resolution,
    linear history, admin enforcement, and force-push/deletion prohibitions enabled.
 
 The workflow proves the public app-bound required-check summary and native review decision on every
-run. GitHub does not expose all settings in step 4 to its read-only identities, so an operator must
-verify them before enabling automation and again after any repository-protection change.
+run. GitHub does not expose all settings in steps 2 and 5 to its read-only identities, so an operator
+must verify them before enabling automation and again after any repository-protection change.
 
 ## End-to-end behavior
 
