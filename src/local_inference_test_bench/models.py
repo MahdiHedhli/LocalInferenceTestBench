@@ -38,6 +38,15 @@ class ManifestError(ValueError):
     """Raised when a model manifest violates the public configuration contract."""
 
 
+class ParameterScaleValidationError(ValueError):
+    """Neutral parameter-scale validation failure translated at module boundaries."""
+
+    def __init__(self, code: str, field: str | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.field = field
+
+
 def _plain_string(value: Any, field: str, *, maximum: int = 500) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ManifestError(f"{field} must be a non-empty string")
@@ -53,30 +62,69 @@ def _reject_unknown(mapping: Mapping[str, Any], allowed: set[str], field: str) -
         raise ManifestError(f"{field} contains unsupported fields: {', '.join(unknown)}")
 
 
-def _parameter_billions(value: Any, field: str) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ManifestError(
-            f"{field} must be null or a finite number greater than 0 and at most 1000000"
+def validate_parameter_scale_values(
+    value: Any,
+) -> tuple[float | None, float | None]:
+    """Validate the shared scale contract without choosing a boundary exception."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "total_billions",
+        "active_billions",
+    }:
+        raise ParameterScaleValidationError("object_contract")
+
+    def parameter_billions(field: str) -> float | None:
+        raw = value[field]
+        if raw is None:
+            return None
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise ParameterScaleValidationError("invalid_number", field)
+        try:
+            number = float(raw)
+        except OverflowError as error:
+            raise ParameterScaleValidationError("invalid_number", field) from error
+        if not math.isfinite(number) or number < 0 or number > 1_000_000:
+            raise ParameterScaleValidationError("invalid_number", field)
+        if number == 0:
+            raise ParameterScaleValidationError("zero", field)
+        try:
+            decimal = Decimal(str(raw))
+            if decimal != decimal.quantize(Decimal("0.001")):
+                raise ParameterScaleValidationError("fractional_digits", field)
+        except InvalidOperation as error:
+            raise ParameterScaleValidationError("numeric_precision", field) from error
+        return number
+
+    total = parameter_billions("total_billions")
+    active = parameter_billions("active_billions")
+    if total is None and active is not None:
+        raise ParameterScaleValidationError("active_requires_total", "active_billions")
+    if total is not None and active is not None and active > total:
+        raise ParameterScaleValidationError("active_exceeds_total", "active_billions")
+    return total, active
+
+
+def _manifest_parameter_scale_message(
+    error: ParameterScaleValidationError,
+    field: str,
+) -> str:
+    if error.code == "object_contract":
+        return f"{field} has an unsupported object contract"
+    error_field = f"{field}.{error.field}"
+    if error.code in {"invalid_number", "zero"}:
+        return (
+            f"{error_field} must be null or a finite number greater than 0 "
+            "and at most 1000000"
         )
-    try:
-        number = float(value)
-    except OverflowError as error:
-        raise ManifestError(
-            f"{field} must be null or a finite number greater than 0 and at most 1000000"
-        ) from error
-    if not math.isfinite(number) or not 0 < number <= 1_000_000:
-        raise ManifestError(
-            f"{field} must be null or a finite number greater than 0 and at most 1000000"
-        )
-    try:
-        decimal = Decimal(str(value))
-        if decimal != decimal.quantize(Decimal("0.001")):
-            raise ManifestError(f"{field} supports at most three fractional digits")
-    except InvalidOperation as error:
-        raise ManifestError(f"{field} has unsupported numeric precision") from error
-    return number
+    if error.code == "fractional_digits":
+        return f"{error_field} supports at most three fractional digits"
+    if error.code == "numeric_precision":
+        return f"{error_field} has unsupported numeric precision"
+    if error.code == "active_requires_total":
+        return f"{field}.active_billions requires total_billions"
+    if error.code == "active_exceeds_total":
+        return f"{field}.active_billions cannot exceed total_billions"
+    raise AssertionError(f"unsupported parameter-scale error code: {error.code}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,20 +136,10 @@ class ParameterScale:
 
     @classmethod
     def from_mapping(cls, value: Any, *, field: str) -> "ParameterScale":
-        if not isinstance(value, Mapping) or set(value) != {
-            "total_billions",
-            "active_billions",
-        }:
-            raise ManifestError(f"{field} has an unsupported object contract")
-        total = _parameter_billions(value["total_billions"], f"{field}.total_billions")
-        active = _parameter_billions(
-            value["active_billions"],
-            f"{field}.active_billions",
-        )
-        if total is None and active is not None:
-            raise ManifestError(f"{field}.active_billions requires total_billions")
-        if total is not None and active is not None and active > total:
-            raise ManifestError(f"{field}.active_billions cannot exceed total_billions")
+        try:
+            total, active = validate_parameter_scale_values(value)
+        except ParameterScaleValidationError as error:
+            raise ManifestError(_manifest_parameter_scale_message(error, field)) from error
         return cls(total_billions=total, active_billions=active)
 
     def as_report_data(self) -> dict[str, float | None]:

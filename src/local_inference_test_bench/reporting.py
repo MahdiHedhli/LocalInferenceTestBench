@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 import getpass
 import ipaddress
@@ -17,6 +16,7 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 import uuid
 
+from .models import ParameterScaleValidationError, validate_parameter_scale_values
 from .safety import SafetyError, secure_directory
 from .suites import resolve_report_suite
 
@@ -364,42 +364,31 @@ def _validate_settings(value: Any, path: str) -> int:
 
 
 def _validate_parameter_scale(value: Any, path: str) -> None:
-    scale = _object(value, {"total_billions", "active_billions"}, path)
-
-    def parameter_billions(field: str) -> float | None:
-        raw = scale[field]
-        if raw is None:
-            return None
-        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-            raise ReportError(
-                f"{path}.{field} must be a finite number greater than 0 and at most 1000000"
-            )
-        try:
-            number = float(raw)
-        except OverflowError as error:
-            raise ReportError(
-                f"{path}.{field} must be a finite number greater than 0 and at most 1000000"
-            ) from error
-        if not math.isfinite(number) or not 0 < number <= 1_000_000:
-            raise ReportError(
-                f"{path}.{field} must be a finite number greater than 0 and at most 1000000"
-            )
-        try:
-            decimal = Decimal(str(raw))
-            if decimal != decimal.quantize(Decimal("0.001")):
-                raise ReportError(
-                    f"{path}.{field} supports at most three fractional digits"
+    try:
+        validate_parameter_scale_values(value)
+    except ParameterScaleValidationError as error:
+        if error.code == "object_contract":
+            message = f"{path} has an unsupported object contract"
+        else:
+            error_path = f"{path}.{error.field}"
+            if error.code in {"invalid_number", "zero"}:
+                message = (
+                    f"{error_path} must be a finite number greater than 0 "
+                    "and at most 1000000"
                 )
-        except InvalidOperation as error:
-            raise ReportError(f"{path}.{field} has unsupported numeric precision") from error
-        return number
-
-    total = parameter_billions("total_billions")
-    active = parameter_billions("active_billions")
-    if total is None and active is not None:
-        raise ReportError(f"{path}.active_billions requires total_billions")
-    if total is not None and active is not None and active > total:
-        raise ReportError(f"{path}.active_billions cannot exceed total_billions")
+            elif error.code == "fractional_digits":
+                message = f"{error_path} supports at most three fractional digits"
+            elif error.code == "numeric_precision":
+                message = f"{error_path} has unsupported numeric precision"
+            elif error.code == "active_requires_total":
+                message = f"{path}.active_billions requires total_billions"
+            elif error.code == "active_exceeds_total":
+                message = f"{path}.active_billions cannot exceed total_billions"
+            else:
+                raise AssertionError(
+                    f"unsupported parameter-scale error code: {error.code}"
+                ) from error
+        raise ReportError(message) from error
 
 
 def _validate_provenance(value: Any, path: str) -> int:

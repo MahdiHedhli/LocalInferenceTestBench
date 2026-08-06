@@ -15,6 +15,7 @@ import re
 import tempfile
 from typing import Any, Mapping
 
+from .models import ParameterScaleValidationError, validate_parameter_scale_values
 from .reporting import ReportError, _walk_safe, validate_report
 from .safety import (
     SafetyError,
@@ -374,30 +375,33 @@ def _number(
 
 
 def _validate_parameter_scale(value: Any, path: str) -> Mapping[str, Any]:
-    scale = _object(value, {"total_billions", "active_billions"}, path)
-    normalized: dict[str, float | None] = {}
-    for field in ("total_billions", "active_billions"):
-        item = scale[field]
-        if item is None:
-            normalized[field] = None
-            continue
-        number = _number(
-            item,
-            f"{path}.{field}",
-            minimum=0.0,
-            maximum=1_000_000.0,
-            decimal_places=3,
-        )
-        if number <= 0:
-            raise SubmissionError(f"{path}.{field} must be positive when known")
-        normalized[field] = number
-    total = normalized["total_billions"]
-    active = normalized["active_billions"]
-    if total is None and active is not None:
-        raise SubmissionError(f"{path}.active_billions requires total_billions")
-    if total is not None and active is not None and active > total:
-        raise SubmissionError(f"{path}.active_billions cannot exceed total_billions")
-    return scale
+    try:
+        validate_parameter_scale_values(value)
+    except ParameterScaleValidationError as error:
+        if error.code == "object_contract":
+            message = f"{path} has an unsupported object contract"
+        else:
+            error_path = f"{path}.{error.field}"
+            if error.code == "zero":
+                message = f"{error_path} must be positive when known"
+            elif error.code == "invalid_number":
+                message = (
+                    f"{error_path} must be a finite number between 0.0 and 1000000.0"
+                )
+            elif error.code == "fractional_digits":
+                message = f"{error_path} supports at most 3 fractional digits"
+            elif error.code == "numeric_precision":
+                message = f"{error_path} has unsupported numeric precision"
+            elif error.code == "active_requires_total":
+                message = f"{path}.active_billions requires total_billions"
+            elif error.code == "active_exceeds_total":
+                message = f"{path}.active_billions cannot exceed total_billions"
+            else:
+                raise AssertionError(
+                    f"unsupported parameter-scale error code: {error.code}"
+                ) from error
+        raise SubmissionError(message) from error
+    return value
 
 
 def _validate_model(
@@ -1704,8 +1708,10 @@ def _model_size_basis(model: Mapping[str, Any]) -> tuple[str, str]:
     return bucket, basis
 
 
-def _plausibility(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
-    representative = rows[0]
+def _plausibility(
+    rows: list[Mapping[str, Any]],
+    representative: Mapping[str, Any],
+) -> dict[str, Any]:
     hardware_class = _hardware_class(representative["hardware"])
     size_bucket, size_basis = _model_size_basis(representative["model"])
     envelope = _PLAUSIBILITY_ENVELOPES.get(hardware_class, {}).get(size_bucket)
@@ -1866,7 +1872,7 @@ def _versioned_config_cells(
                     ),
                 },
                 "performance_distribution": _performance_distribution(group),
-                "plausibility": _plausibility(group),
+                "plausibility": _plausibility(group, representative),
             }
         )
         cells.append(cell)

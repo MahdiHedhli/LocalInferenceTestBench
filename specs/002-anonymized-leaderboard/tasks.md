@@ -64,8 +64,8 @@
 
 ## Phase 7: Post-release adversarial hardening
 
-**Sequence**: Complete T022–T026 as Stage 1. Plausibility and corroboration remain pending until the
-later aggregation work; they are not part of this no-schema-change increment.
+**Sequence**: T022–T026 formed the no-schema-change Stage 1 increment. T027–T028 were deliberately
+deferred until the later aggregation work and are now complete; they were not part of Stage 1.
 
 - [x] T022 Amend `spec.md`, `plan.md`, and `data-model.md` with model descriptor limits,
   reviewer-injection resistance, hardware-behavior preservation, and honest

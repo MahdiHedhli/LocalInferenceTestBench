@@ -384,15 +384,18 @@ review, the Actions audit marker, automated reviewer-account approval, and a con
 publication-policy evidence—not evidence that a benchmark run occurred or an independent
 substantive reproduction. Deterministic validation proves schema conformance and integrity of the
 published bytes, not provenance. Quality is displayed as representative pass counts plus 95% Wilson
-intervals. Transitive semantic/exact overlap produces an explicit rank band. Latency and throughput
-are shown with their hardware context but never affect rank.
+intervals. Semantic overlap components are formed first; exact-format overlap then partitions each
+semantic component into explicit rank bands. Latency and throughput are shown with their hardware
+context but never affect rank.
 
-Records with the same versioned hardware/model/runtime/settings configuration collapse to one
-bounded cell. Accepted hashes increase the corroboration count and performance spread, but are not
-treated as independent people or pooled to narrow the quality interval. The cell uses a documented
-score-neutral representative and keeps every original digest-named record in the repository. A
-visible plausibility caution is only an outlier-review hint; it never verifies, drops, gates, or
-ranks the result.
+Records collapse to one bounded cell only when their facet, profile, suite version, and versioned
+hardware/model-identity/precision/runtime/runtime-configuration/settings key all match. Parameter
+scale remains reported model provenance and a plausibility input, not a configuration-key dimension.
+Every accepted hash increases corroboration; a latency or throughput distribution changes only when
+that record provides the corresponding measurement. Hashes are not treated as independent people or
+pooled to narrow the quality interval. The cell uses a documented score-neutral representative and
+keeps every original digest-named record in the repository. A visible plausibility caution is only
+an outlier-review hint; it never verifies, drops, gates, or ranks the result.
 
 The site defaults to clean self-reported measurement evidence. Users can deliberately include
 nonquiescent, degraded-midrun, or `legacy_unreported` rows; the filter does not verify any claim.

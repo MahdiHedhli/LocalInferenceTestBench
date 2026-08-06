@@ -269,8 +269,10 @@ An inapplicable case records `not_applicable` as its outcome, route, and termina
 from denominators. A whole-suite all-not-applicable result remains valid private evidence but cannot
 be published because every public candidate needs at least one scored case.
 Configuration dimensions are fixed as version `1.0`: hardware, model identity including revision or
-digest and explicit nullable parameter scale, precision, runtime name/version/backend, runtime
-configuration, and settings. Within facet/profile/suite scope, repeated records collapse to one cell.
+digest, precision, runtime name/version/backend, runtime configuration, and settings. Explicit
+nullable parameter scale remains model provenance and a plausibility input; it is not a configuration
+key dimension. Repeated records collapse to one cell only within the same facet, profile, suite
+version, and configuration-key scope.
 The representative is chosen without score or speed: clean, nonquiescent, degraded-midrun, then
 legacy; newest month; then digest. Fixed validity counts/month ranges, performance distributions,
 Wilson rank bands, and a caution-only plausibility result keep that projection bounded. A documented

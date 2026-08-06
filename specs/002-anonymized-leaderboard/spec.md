@@ -28,8 +28,10 @@ without a framework or third-party service.
 
 1. **Given** accepted standard-profile entries, **When** the page loads, **Then** it shows them in a
    quality-ranked table with the hardware and runtime needed to interpret latency and throughput.
-2. **Given** entries whose 95% Wilson intervals overlap, **When** rank bands are assigned,
-   **Then** the entries share an explicit rank band and speed does not break the tie.
+2. **Given** entries in the same transitive semantic Wilson component whose exact-format Wilson
+   intervals also belong to the same transitive component, **When** rank bands are assigned,
+   **Then** the entries share an explicit rank band and speed does not break the tie; a distinct
+   exact-format component inside that semantic component creates a separate band.
 3. **Given** no accepted entries, **When** the page loads, **Then** it shows an honest empty state and
    a link to the submission process.
 4. **Given** a string that contains HTML syntax, **When** a row is rendered, **Then** the browser
@@ -37,9 +39,10 @@ without a framework or third-party service.
 5. **Given** any accepted entry, **When** it is presented in the site chrome or leaderboard header,
    **Then** the site says it is self-reported and unverified and explains that its hash establishes
    content integrity rather than provenance or proof that the run occurred.
-6. **Given** repeated accepted records for the same benchmark configuration, **When** the dataset is
-   built, **Then** one bounded configuration cell remains, its corroboration count and performance
-   spread increase, and every source record remains retained by digest.
+6. **Given** repeated accepted records in the same configuration-key scope for a facet, profile, and
+   suite version, **When** the dataset is built, **Then** one bounded configuration cell remains, its
+   corroboration count increases, each performance distribution changes only for a record carrying
+   that measurement, and every source record remains retained by digest.
 7. **Given** a configuration cell containing clean and non-clean records, **When** the representative
    is selected, **Then** selection uses validity priority, newest month, and digest only, while the
    fixed validity counts and month ranges expose the other retained evidence.
@@ -309,7 +312,9 @@ dataset and that Pages deployment runs only from the default branch.
 - **FR-044**: The projected schema `1.1` leaderboard MUST collapse accepted records to one cell for
   each `(facet, profile, suite version, configuration key)` scope. The version `1.0` configuration
   key MUST be the canonical JSON of the six named dimensions in FR-043; an absent runtime
-  configuration MUST normalize to null. The cell MUST expose a deterministic digest of that key.
+  configuration MUST normalize to null. Parameter scale remains model provenance and a plausibility
+  input and MUST NOT be included in this configuration key. The cell MUST expose a deterministic
+  digest of that key.
 - **FR-045**: A collapsed cell MUST select one representative without consulting score,
   performance, plausibility, model name, or source label. Selection version `1.0` MUST prefer
   `clean`, then `nonquiescent`, then `degraded_midrun`, then `legacy_unreported`; within that class it
@@ -321,10 +326,11 @@ dataset and that Pages deployment runs only from the default branch.
   provenance, or attestation. The aggregate MUST NOT embed an unbounded list of submission IDs or
   per-month observations; every original digest-named record remains retained and addressable.
 - **FR-047**: Repeated anonymous records MUST NOT be pooled to narrow the representative Wilson
-  interval. They MUST contribute only to corroboration, a latency distribution, a throughput
-  distribution, and plausibility counts. Each distribution MUST report sample count, median,
-  minimum, and maximum; unavailable values are excluded and a zero-count distribution uses null
-  statistics. Performance MUST remain outside quality ranking.
+  interval. Every record MUST contribute to corroboration and MAY contribute to the latency
+  distribution, throughput distribution, and plausibility counts only when the corresponding
+  measurements and plausibility inputs are available. Each distribution MUST report sample count,
+  median, minimum, and maximum; unavailable values are excluded and a zero-count distribution uses
+  null statistics. Performance MUST remain outside quality ranking.
 - **FR-048**: Rank-band ordering MUST be deterministic and neutral. Bands MUST be ordered by their
   non-overlapping semantic component and then exact-format component; entries inside a band MUST use
   `submission_id` as the final tiebreak. Model display name, source, latency, throughput,

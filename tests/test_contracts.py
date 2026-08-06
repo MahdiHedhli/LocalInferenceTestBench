@@ -72,6 +72,14 @@ class PublishedContractTests(unittest.TestCase):
         with self.assertRaises(SchemaValidationError):
             self.runner_validator.validate(invalid, "run-record.schema.json")
 
+        invalid_manifest = copy.deepcopy(manifest)
+        invalid_manifest["models"][0]["parameter_scale"] = {
+            "total_billions": None,
+            "active_billions": 3.0,
+        }
+        with self.assertRaises(SchemaValidationError):
+            self.runner_validator.validate(invalid_manifest, "manifest.schema.json")
+
     def test_registered_synthetic_suite_matches_runtime_and_run_record_contract(self) -> None:
         report = valid_report()
         report["profile"] = "synthetic-two"

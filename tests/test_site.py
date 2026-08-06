@@ -308,7 +308,7 @@ class SiteSafetyTests(unittest.TestCase):
                 "wilson_five_of_five": {"lower_percent": 56, "upper_percent": 100},
                 "wilson_zero_of_five": {"lower_percent": 0, "upper_percent": 44},
                 "legacy_wilson_in_memory": {"lower_percent": 56, "upper_percent": 100},
-                "legacy_score_text": "5/5 (56–100%)",
+                "legacy_score_text": "5/5 (56\u2013100%)",
                 "legacy_display_band_count": 1,
                 "valid_projected_entry": True,
                 "valid_projected_payload": True,
