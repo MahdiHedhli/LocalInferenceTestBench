@@ -23,7 +23,7 @@
 
 - [x] T009 Update the baseline specification, README, contribution, guide, interpretation, and
   privacy documentation without changing benchmark/public-result contracts.
-- [ ] T010 Run full unit, deterministic-build, syntax, compile, privacy, history, hooks, and Gitleaks
+- [x] T010 Run full unit, deterministic-build, syntax, compile, privacy, history, hooks, and Gitleaks
   validation across supported platforms.
-- [ ] T011 Obtain independent review, resolve findings, merge through branch protection, and verify
+- [x] T011 Obtain independent review, resolve findings, merge through branch protection, and verify
   the protected main checks.

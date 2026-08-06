@@ -495,5 +495,5 @@ categorical evidence and preserving the private report on optional sampler failu
   issue URL, and the opt-in `litb run --failure-report {ask,none}` flow without changing benchmark or
   publication contracts.
 - [x] T085 Update operator/privacy/interpretation/contribution guidance and bump the feature version.
-- [ ] T086 Run complete unit, deterministic-build, syntax, compile, privacy, history, hooks, Gitleaks,
+- [x] T086 Run complete unit, deterministic-build, syntax, compile, privacy, history, hooks, Gitleaks,
   hosted review, protected merge, and post-merge verification.
