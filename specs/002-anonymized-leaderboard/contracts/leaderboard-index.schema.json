@@ -27,5 +27,29 @@
       "minimum": 0
     }
   },
-  "$comment": "The Python builder and browser additionally enforce that entry_count and shard_count are both zero, or that 1 <= shard_count <= entry_count. Shard paths are never supplied by public data."
+  "oneOf": [
+    {
+      "properties": {
+        "entry_count": {
+          "const": 0
+        },
+        "shard_count": {
+          "const": 0
+        }
+      }
+    },
+    {
+      "properties": {
+        "entry_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "shard_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  ],
+  "$comment": "The schema encodes the zero/zero and positive/positive branches. Standard JSON Schema cannot compare sibling numeric values, so the Python builder and browser additionally enforce shard_count <= entry_count. Shard paths are never supplied by public data."
 }

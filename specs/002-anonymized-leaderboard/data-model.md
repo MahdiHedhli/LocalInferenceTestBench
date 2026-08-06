@@ -210,7 +210,9 @@ the temporary static-site directory uploaded as the Pages artifact. Shards are n
 the temporary output is discarded after deployment. Each shard has its own hard byte cap. The
 browser derives a one-based ID padded to at least six digits from the validated index, synthesizes
 `data/leaderboard-NNNNNN.json`, verifies bounded shape and size, and fetches pages on demand; public
-data cannot provide a path or URL.
+data cannot provide a path or URL. Search, hardware filtering, and alternate sorting operate only on
+loaded rows until all pages are present. The site labels that scope and distinguishes no loaded match
+from no published match.
 
 ### Pagination
 

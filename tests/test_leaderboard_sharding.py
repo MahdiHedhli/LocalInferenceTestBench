@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from itertools import pairwise
 from pathlib import Path
 import subprocess
 import sys
@@ -248,7 +249,7 @@ class LeaderboardShardTransportTests(unittest.TestCase):
 
         self.assertEqual(entry_total, index["entry_count"])
         self.assertEqual(published_ids, self.submission_ids)
-        for current, following in zip(decoded_shards, decoded_shards[1:]):
+        for current, following in pairwise(decoded_shards):
             candidate = {
                 **current,
                 "entry_count": int(current["entry_count"]) + 1,

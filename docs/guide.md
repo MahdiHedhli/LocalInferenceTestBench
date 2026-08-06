@@ -193,6 +193,8 @@ The repository deliberately separates that retention policy from browser deliver
   one-based IDs from `000001` through the declared shard count and constructs only
   `data/leaderboard-NNNNNN.json`; public JSON never supplies a URL or arbitrary path. Each closed
   shard contains exactly `index_version`, `schema_version`, `shard_id`, `entry_count`, and `entries`.
+  Until every page is loaded, search, hardware filters, and alternate sorting are explicitly scoped
+  to loaded results, and an empty filtered view does not claim that no matching published row exists.
 
 The scale code rollout leaves the current six-entry legacy leaderboard monolith byte-identical so a
 mixed code-and-generated-data pull request cannot bypass the trusted boundary. The browser and

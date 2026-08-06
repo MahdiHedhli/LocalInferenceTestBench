@@ -4,6 +4,7 @@ const DATA_URL = "./data/leaderboard.json";
 const SHARD_URL_PREFIX = "./data/leaderboard-";
 const SHARD_URL_SUFFIX = ".json";
 const MAX_DATA_BYTES = 2 * 1024 * 1024;
+const DATA_FETCH_TIMEOUT_MS = 15 * 1000;
 const MAX_SUBMISSION_BYTES = 256 * 1024;
 const LEADERBOARD_INDEX_VERSION = "1.0";
 const MODEL_DISPLAY_NAME_MAX = 160;
@@ -98,6 +99,7 @@ let entries = [];
 let leaderboardIndex = null;
 let nextShardNumber = 1;
 let loadingShard = false;
+let shardRankingState = createShardRankingState();
 let checkedSubmission = null;
 let checkedSubmissionText = "";
 
@@ -454,6 +456,52 @@ function validateRankingSegment(values) {
     previousRank = entry.rank;
     previousEntry = entry;
   }
+  return true;
+}
+
+function createShardRankingState() {
+  return {
+    entryCount: 0,
+    previousEntry: null,
+    submissionIds: new Set(),
+  };
+}
+
+function hasSameLeaderboardQuality(left, right) {
+  return (
+    left.metrics.semantic_score_percent === right.metrics.semantic_score_percent &&
+    left.metrics.exact_format_score_percent === right.metrics.exact_format_score_percent
+  );
+}
+
+function validateAndTrackShardRanking(state, values) {
+  if (values.length === 0) {
+    return false;
+  }
+  const firstEntry = values[0];
+  if (state.previousEntry === null) {
+    if (firstEntry.rank !== 1) {
+      return false;
+    }
+  } else {
+    const expectedRank =
+      state.previousEntry.rank +
+      (hasSameLeaderboardQuality(state.previousEntry, firstEntry) ? 0 : 1);
+    if (
+      compareCanonicalLeaderboardOrder(state.previousEntry, firstEntry) > 0 ||
+      firstEntry.rank !== expectedRank
+    ) {
+      return false;
+    }
+  }
+  if (values.some((entry) => state.submissionIds.has(entry.submission_id))) {
+    return false;
+  }
+  for (const entry of values) {
+    state.submissionIds.add(entry.submission_id);
+  }
+  state.entryCount += values.length;
+  state.previousEntry = values[values.length - 1];
   return true;
 }
 
@@ -882,6 +930,15 @@ function updateLoadMoreButton() {
   elements.loadMore.textContent = loadingShard ? "Loading more results..." : "Load more results";
 }
 
+function resetLeaderboardState() {
+  entries = [];
+  leaderboardIndex = null;
+  nextShardNumber = 1;
+  loadingShard = false;
+  shardRankingState = createShardRankingState();
+  updateLoadMoreButton();
+}
+
 function render() {
   const query = elements.search.value.trim().toLocaleLowerCase();
   const hardware = elements.hardwareFilter.value;
@@ -893,20 +950,24 @@ function render() {
   const visible = sortedEntries(filtered, elements.sort.value);
   const shown =
     visible.length === entries.length
-      ? `${integer(entries.length)} published result${entries.length === 1 ? "" : "s"}`
-      : `${integer(visible.length)} of ${integer(entries.length)} results shown`;
+      ? `${integer(entries.length)} loaded result${entries.length === 1 ? "" : "s"}`
+      : `${integer(visible.length)} of ${integer(entries.length)} loaded results shown`;
   const total = leaderboardIndex === null ? entries.length : leaderboardIndex.entry_count;
+  const hasUnloadedResults = entries.length < total;
   elements.updated.textContent =
-    entries.length < total
+    hasUnloadedResults
       ? `${shown} | ${integer(entries.length)} of ${integer(total)} loaded`
       : shown;
 
   elements.body.replaceChildren();
+  updateLoadMoreButton();
   if (visible.length === 0) {
     showStatus(
       entries.length === 0
         ? "No reviewed benchmark results have been published yet."
-        : "No published results match these filters.",
+        : hasUnloadedResults
+          ? "No loaded results match these filters. More published results may match; load more results to expand the searchable set."
+          : "No loaded results match these filters.",
     );
     return;
   }
@@ -914,7 +975,6 @@ function render() {
   visible.forEach(addRow);
   elements.status.hidden = true;
   elements.table.hidden = false;
-  updateLoadMoreButton();
 }
 
 function setSubmissionStatus(message, state) {
@@ -1028,20 +1088,30 @@ function downloadCheckedSubmission() {
   setSubmissionStatus("Checked copy downloaded. The file has not been uploaded.", "success");
 }
 
-async function fetchBoundedJson(url) {
-  const response = await fetch(url, { cache: "no-cache", credentials: "omit" });
-  if (!response.ok) {
-    throw new Error("Leaderboard data is unavailable.");
+async function fetchBoundedJson(url, timeoutMilliseconds = DATA_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMilliseconds);
+  try {
+    const response = await fetch(url, {
+      cache: "no-cache",
+      credentials: "omit",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error("Leaderboard data is unavailable.");
+    }
+    const contentLength = Number(response.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > MAX_DATA_BYTES) {
+      throw new Error("Leaderboard data is larger than expected.");
+    }
+    const source = await response.text();
+    if (new TextEncoder().encode(source).byteLength > MAX_DATA_BYTES) {
+      throw new Error("Leaderboard data is larger than expected.");
+    }
+    return JSON.parse(source);
+  } finally {
+    clearTimeout(timeout);
   }
-  const contentLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(contentLength) && contentLength > MAX_DATA_BYTES) {
-    throw new Error("Leaderboard data is larger than expected.");
-  }
-  const source = await response.text();
-  if (new TextEncoder().encode(source).byteLength > MAX_DATA_BYTES) {
-    throw new Error("Leaderboard data is larger than expected.");
-  }
-  return JSON.parse(source);
 }
 
 async function loadNextShard() {
@@ -1061,18 +1131,21 @@ async function loadNextShard() {
       expectedId,
       leaderboardIndex.schema_version,
     );
-    const combined = [...entries, ...payload.entries];
     const remainingShards = leaderboardIndex.shard_count - nextShardNumber;
-    const remainingEntries = leaderboardIndex.entry_count - combined.length;
+    const projectedEntryCount = entries.length + payload.entry_count;
+    const remainingEntries = leaderboardIndex.entry_count - projectedEntryCount;
     if (
-      combined.length > leaderboardIndex.entry_count ||
+      shardRankingState.entryCount !== entries.length ||
+      projectedEntryCount > leaderboardIndex.entry_count ||
       (remainingShards === 0) !== (remainingEntries === 0) ||
       remainingEntries < remainingShards ||
-      !validateRanking(combined)
+      !validateAndTrackShardRanking(shardRankingState, payload.entries)
     ) {
       throw new Error("Leaderboard shards are inconsistent with their index.");
     }
-    entries = combined;
+    for (const entry of payload.entries) {
+      entries.push(entry);
+    }
     nextShardNumber += 1;
     populateHardwareFilter(entries);
     render();
@@ -1083,12 +1156,14 @@ async function loadNextShard() {
 }
 
 function leaderboardUnavailable() {
+  resetLeaderboardState();
   elements.updated.textContent = "Leaderboard unavailable";
   elements.loadMore.hidden = true;
   showStatus("The leaderboard could not be loaded. Try again later or view the repository for current results.");
 }
 
 async function loadLeaderboard() {
+  resetLeaderboardState();
   try {
     const candidate = await fetchBoundedJson(DATA_URL);
     if (hasExactKeys(candidate, ["schema_version", "entry_count", "entries"])) {
@@ -1100,8 +1175,6 @@ async function loadLeaderboard() {
       return;
     }
     leaderboardIndex = validateIndex(candidate);
-    entries = [];
-    nextShardNumber = 1;
     if (leaderboardIndex.shard_count > 0) {
       await loadNextShard();
     } else {
@@ -1119,6 +1192,9 @@ if (typeof module !== "undefined" && module.exports) {
     validateModel,
     validatePayload,
     validateShard,
+    createShardRankingState,
+    fetchBoundedJson,
+    validateAndTrackShardRanking,
   };
 }
 

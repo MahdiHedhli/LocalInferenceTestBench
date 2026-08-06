@@ -242,8 +242,9 @@ file. On trusted `main`, Pages performs the same check before copying only allow
 chrome to a temporary artifact directory and always generating the exact-key index and one-based
 shard IDs padded to at least six digits. The retained source submissions are not duplicated into the
 artifact. Shards are discarded with the build workspace and are never committed. The
-browser loads the index first and fetches only synthesized `data/leaderboard-NNNNNN.json` pages
-needed for the current view.
+browser loads the index first and fetches only synthesized `data/leaderboard-NNNNNN.json` pages on
+demand. Until every page is loaded, search, hardware filters, alternate sorting, and empty-state copy
+are explicitly scoped to the loaded rows.
 
 Per-file caps remain on submissions, the index, and each shard. The former aggregate corpus cap is
 replaced with exact rendered UTF-8 byte pagination of the deterministic global rank sequence. All

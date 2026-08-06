@@ -219,7 +219,9 @@ dataset and that Pages deployment runs only from the default branch.
 - **FR-033**: The site MUST load the bounded index first and fetch same-origin shard pages on demand.
   It MUST derive only one-based contiguous shard IDs padded to at least six digits from `shard_count`
   and synthesize `data/leaderboard-NNNNNN.json` locally; neither the index nor a submission may
-  supply an arbitrary path or URL for the browser to fetch.
+  supply an arbitrary path or URL for the browser to fetch. Until every page is loaded, search,
+  hardware filters, alternate sorting, and no-match messages MUST be explicitly scoped to loaded
+  rows and MUST NOT claim that no matching published row exists.
 - **FR-034**: Every accepted submission MUST remain retained in the repository and addressable by
   its digest. Pagination MAY change publication transport only and MUST NOT be a retention, pruning,
   or silent-drop mechanism.

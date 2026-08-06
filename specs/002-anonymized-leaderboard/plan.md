@@ -139,7 +139,7 @@ The tradeoffs and rejected alternatives are recorded in [research.md](research.m
     |-- styles.css
     |-- app.js
     `-- data/
-        |-- leaderboard.json       # committed bounded deterministic index
+        |-- leaderboard.json       # bounded legacy monolith or deterministic index
         `-- submissions/
     src/local_inference_test_bench/
     `-- submissions.py

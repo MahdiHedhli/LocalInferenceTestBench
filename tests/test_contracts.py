@@ -161,6 +161,14 @@ class PublishedContractTests(unittest.TestCase):
             ("leaderboard-index.schema.json", {**index, "path": "not-accepted"}),
             ("leaderboard-index.schema.json", {**index, "entry_count": True}),
             ("leaderboard-index.schema.json", {**index, "shard_count": "1"}),
+            (
+                "leaderboard-index.schema.json",
+                {**index, "entry_count": 1, "shard_count": 0},
+            ),
+            (
+                "leaderboard-index.schema.json",
+                {**index, "entry_count": 0, "shard_count": 1},
+            ),
             ("leaderboard-shard.schema.json", {**shard, "url": "not-accepted"}),
             ("leaderboard-shard.schema.json", {**shard, "shard_id": "00001"}),
             ("leaderboard-shard.schema.json", {**shard, "entry_count": "1"}),
@@ -203,6 +211,15 @@ class PublishedContractTests(unittest.TestCase):
             "shard_count": 2,
         }
         self.validator.validate(index, "leaderboard-index.schema.json")
+
+        # Standard JSON Schema cannot compare sibling numeric values. Runtime
+        # validators separately reject shard_count values above entry_count.
+        schema_only_upper_bound = {
+            **index,
+            "entry_count": 1,
+            "shard_count": 2,
+        }
+        self.validator.validate(schema_only_upper_bound, "leaderboard-index.schema.json")
 
 
 if __name__ == "__main__":
