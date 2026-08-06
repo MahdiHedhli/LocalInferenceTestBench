@@ -121,8 +121,68 @@
       },
       "submission_id": "223bfbd426982b067fa7077bf2e6a2ae2e6e762511434f9173aac8bf7bd10213",
       "suite_version": "1.0"
+    },
+    {
+      "hardware": {
+        "accelerators": [
+          {
+            "count": 1,
+            "kind": "integrated_gpu",
+            "memory_gb": null,
+            "model": "Apple M1 Ultra 64-core GPU"
+          }
+        ],
+        "cpu": {
+          "logical_cores": 20,
+          "model": "Apple M1 Ultra"
+        },
+        "execution_mode": "unknown",
+        "memory": {
+          "architecture": "shared",
+          "system_gb": 128.0
+        }
+      },
+      "metrics": {
+        "case_count": 5,
+        "completion_tokens_per_second": 26.2,
+        "exact_format_pass_count": 4,
+        "exact_format_score_percent": 80.0,
+        "latency_ms_mean": 1199.0,
+        "scored_case_count": 5,
+        "semantic_pass_count": 5,
+        "semantic_score_percent": 100.0,
+        "usage_coverage_cases": 5
+      },
+      "model": {
+        "declared_context_tokens": 262144,
+        "digest": "sha256-manifest-v1:835afa4efcc1683e7a153df10ad68274bceebaa3a513e53c5b912d2a6b5d8687",
+        "display_name": "Qwen 3 Coder Next",
+        "precision": "MLX 4-bit",
+        "source": "lmstudio-community/Qwen3-Coder-Next-MLX-4bit"
+      },
+      "profile": "standard",
+      "rank": 2,
+      "runtime": {
+        "backend": "MLX LLM 1.11.0 / Apple Metal",
+        "name": "LM Studio",
+        "version": "0.4.20+1"
+      },
+      "runtime_configuration": {
+        "concurrent_requests": 1,
+        "context_window_tokens": 262144,
+        "offload_mode": "not_applicable",
+        "speculative_decoding": "disabled"
+      },
+      "settings": {
+        "max_output_tokens": 4096,
+        "seed": 0,
+        "temperature": 0.0,
+        "top_p": 1.0
+      },
+      "submission_id": "57d8926c992f0000592f49c7643a0942636217262eb9259fbbe1c9e834a06ff2",
+      "suite_version": "1.0"
     }
   ],
-  "entry_count": 2,
+  "entry_count": 3,
   "schema_version": "1.0"
 }
