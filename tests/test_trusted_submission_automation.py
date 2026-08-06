@@ -621,33 +621,72 @@ class ReviewStateTests(unittest.TestCase):
                 {"id": REVIEWER_USER_ID + 1, "login": REVIEWER_LOGIN, "type": "User"}
             )
 
-    def test_branch_protection_and_native_auto_merge_are_required(self) -> None:
+    def test_branch_protection_and_native_auto_merge_visibility(self) -> None:
         validate_branch_protection(protection_fixture())
-        validate_repository_settings(
-            {
-                "id": REPOSITORY_ID,
-                "node_id": REPOSITORY_NODE_ID,
-                "full_name": REPOSITORY_FULL_NAME,
-                "default_branch": "main",
-                "allow_auto_merge": True,
-            }
-        )
+        repository = {
+            "id": REPOSITORY_ID,
+            "node_id": REPOSITORY_NODE_ID,
+            "full_name": REPOSITORY_FULL_NAME,
+            "default_branch": "main",
+        }
+        validate_repository_settings(repository)
+        enabled = {**repository, "allow_auto_merge": True}
+        validate_repository_settings(enabled)
+        validate_repository_settings(enabled, require_auto_merge=True)
+
+        with self.assertRaisesRegex(AutomationError, "auto-merge"):
+            validate_repository_settings(repository, require_auto_merge=True)
+
+        for disabled_value in (False, None, 1, "true"):
+            with self.subTest(disabled_value=disabled_value):
+                disabled = {**repository, "allow_auto_merge": disabled_value}
+                with self.assertRaisesRegex(AutomationError, "auto-merge"):
+                    validate_repository_settings(disabled)
+                with self.assertRaisesRegex(AutomationError, "auto-merge"):
+                    validate_repository_settings(disabled, require_auto_merge=True)
 
         weak = protection_fixture()
         weak["protection"]["required_status_checks"]["enforcement_level"] = "non_admins"
         with self.assertRaises(AutomationError):
             validate_branch_protection(weak)
 
-        with self.assertRaisesRegex(AutomationError, "auto-merge"):
-            validate_repository_settings(
-                {
-                    "id": REPOSITORY_ID,
-                    "node_id": REPOSITORY_NODE_ID,
-                    "full_name": REPOSITORY_FULL_NAME,
-                    "default_branch": "main",
-                    "allow_auto_merge": False,
-                }
+    def test_repository_cli_strict_mode_rejects_omitted_auto_merge(self) -> None:
+        repository = {
+            "id": REPOSITORY_ID,
+            "node_id": REPOSITORY_NODE_ID,
+            "full_name": REPOSITORY_FULL_NAME,
+            "default_branch": "main",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory) / "repository.json"
+            input_path.write_text(json.dumps(repository), encoding="utf-8")
+            command = [
+                sys.executable,
+                str(
+                    Path(__file__).resolve().parents[1]
+                    / "scripts"
+                    / "trusted_submission_automation.py"
+                ),
+                "repository",
+                "--input",
+                str(input_path),
+            ]
+            observable = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
             )
+            strict = subprocess.run(
+                [*command, "--require-auto-merge"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(observable.returncode, 0, observable.stderr)
+        self.assertEqual(strict.returncode, 1)
+        self.assertIn("repository auto-merge is disabled", strict.stderr)
 
     def test_auto_merge_and_approval_results_are_exact_head_and_fixed_metadata(self) -> None:
         fixed_headline = f"data: add benchmark submission {SUBMISSION_ID[:12]}"

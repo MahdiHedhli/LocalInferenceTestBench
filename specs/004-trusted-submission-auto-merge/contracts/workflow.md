@@ -73,5 +73,8 @@ conformance, not provenance that a self-reported run occurred.
 
 The workflow can prove only the public protected-branch summary, GitHub-Actions-bound required
 checks, enforcement level, and native review decision on each run. The operator MUST keep and verify
-the administration-only controls listed in `quickstart.md`; their absence is not made safe by being
-invisible to the workflow.
+the administration-only controls listed in `quickstart.md`; the read-only repository response may
+omit `allow_auto_merge`, and their absence is not made safe by being invisible to the workflow. A
+reviewer-credential repository check MUST require `allow_auto_merge: true` immediately before each
+possible mutation. A disabled or unconfirmable native auto-merge setting makes the final required
+boundary fail.
