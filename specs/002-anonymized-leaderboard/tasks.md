@@ -79,7 +79,7 @@ later aggregation work; they are not part of this no-schema-change increment.
   Python/browser authority for prohibited-pattern checks; do not change schema version
 - [x] T025 State in `site/index.html` and `README.md` that all entries are self-reported and
   unverified and hashes prove content integrity rather than provenance or that a run occurred
-- [ ] T026 Run Python/JavaScript parity, text-only DOM, deterministic build, cross-platform unit,
+- [x] T026 Run Python/JavaScript parity, text-only DOM, deterministic build, cross-platform unit,
   privacy, history, and secret-scanning regression gates
 - [ ] T027 Add a computed, non-authoritative plausibility caution that never drops or gates an entry
 - [ ] T028 Add config-cell corroboration counts with an explicit definition that does not imply

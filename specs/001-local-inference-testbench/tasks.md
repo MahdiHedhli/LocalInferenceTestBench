@@ -346,8 +346,8 @@ independent publication-gate test.
 ## Task Summary
 
 - Total tasks: 64
-- Completed: 63
-- Intentionally open: T064 pending exact-head hosted checks
+- Completed: 64
+- Intentionally open: none
 - Setup: 7
 - Foundation: 7
 - User Story 1: 11
@@ -385,5 +385,5 @@ without changing what the benchmark measures or changing hardware descriptor beh
 - [x] T063 State in `README.md` that image and video generation are out of scope because their
   similarity/preference scoring conflicts with the judge-free rule design and uses a different
   runtime stack; record that a separate bench may reuse this pipeline
-- [ ] T064 Re-run the complete cross-platform unit, parity, deterministic-build, privacy, history,
+- [x] T064 Re-run the complete cross-platform unit, parity, deterministic-build, privacy, history,
   secret, and static-site safety gates before merging the hardening increment
