@@ -31,18 +31,22 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - name: Build leaderboard data
-        run: |
-          python3 scripts/build_leaderboard.py
-          git diff --exit-code -- site/data/leaderboard.json
+      - name: Verify committed leaderboard data
+        run: python3 scripts/build_leaderboard.py --check
       - name: Scan publication content
         run: python3 scripts/public_safety.py --full-tree
+      - name: Build bounded Pages artifact
+        run: |
+          artifact_dir="$RUNNER_TEMP/litb-site"
+          mkdir -p "$artifact_dir/data"
+          cp site/.nojekyll site/index.html site/app.js site/styles.css "$artifact_dir/"
+          python3 scripts/build_leaderboard.py --bundle-output-dir "$artifact_dir/data"
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: site
+          path: ${{ runner.temp }}/litb-site
           retention-days: 1
 
   deploy:

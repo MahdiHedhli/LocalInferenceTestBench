@@ -1,9 +1,11 @@
 "use strict";
 
 const DATA_URL = "./data/leaderboard.json";
+const SHARD_URL_PREFIX = "./data/leaderboard-";
+const SHARD_URL_SUFFIX = ".json";
 const MAX_DATA_BYTES = 2 * 1024 * 1024;
-const MAX_ENTRIES = 10_000;
 const MAX_SUBMISSION_BYTES = 256 * 1024;
+const LEADERBOARD_INDEX_VERSION = "1.0";
 const MODEL_DISPLAY_NAME_MAX = 160;
 const MODEL_SOURCE_MAX = 240;
 const MODEL_PRECISION_MAX = 80;
@@ -78,6 +80,7 @@ const elements =
         sort: document.querySelector("#sort-results"),
         status: document.querySelector("#leaderboard-status"),
         table: document.querySelector("#leaderboard-table-shell"),
+        loadMore: document.querySelector("#load-more-results"),
         updated: document.querySelector("#leaderboard-updated"),
         submissionFile: document.querySelector("#submission-file"),
         submissionStatus: document.querySelector("#submission-status"),
@@ -92,6 +95,9 @@ const elements =
       };
 
 let entries = [];
+let leaderboardIndex = null;
+let nextShardNumber = 1;
+let loadingShard = false;
 let checkedSubmission = null;
 let checkedSubmissionText = "";
 
@@ -361,7 +367,7 @@ function validatePayload(payload) {
   if (
     !hasExactKeys(payload, ["schema_version", "entry_count", "entries"]) ||
     payload.schema_version !== "1.0" ||
-    !isInteger(payload.entry_count, 0, MAX_ENTRIES) ||
+    !isInteger(payload.entry_count, 0) ||
     !Array.isArray(payload.entries) ||
     payload.entries.length !== payload.entry_count ||
     !payload.entries.every(validateEntry) ||
@@ -372,12 +378,119 @@ function validatePayload(payload) {
   return payload;
 }
 
+function validateIndex(payload) {
+  if (
+    !hasExactKeys(payload, [
+      "index_version",
+      "schema_version",
+      "entry_count",
+      "shard_count",
+    ]) ||
+    payload.index_version !== LEADERBOARD_INDEX_VERSION ||
+    payload.schema_version !== "1.0" ||
+    !isInteger(payload.entry_count, 0) ||
+    !isInteger(payload.shard_count, 0) ||
+    (payload.entry_count === 0) !== (payload.shard_count === 0) ||
+    payload.shard_count > payload.entry_count
+  ) {
+    throw new Error("Leaderboard index does not match the expected public schema.");
+  }
+  return payload;
+}
+
+function validateShard(payload, expectedShardId, expectedSchemaVersion) {
+  if (
+    !hasExactKeys(payload, [
+      "index_version",
+      "schema_version",
+      "shard_id",
+      "entry_count",
+      "entries",
+    ]) ||
+    payload.index_version !== LEADERBOARD_INDEX_VERSION ||
+    payload.schema_version !== expectedSchemaVersion ||
+    payload.shard_id !== expectedShardId ||
+    !isInteger(payload.entry_count, 1) ||
+    !Array.isArray(payload.entries) ||
+    payload.entries.length !== payload.entry_count ||
+    !payload.entries.every(validateEntry) ||
+    !validateRankingSegment(payload.entries)
+  ) {
+    throw new Error("Leaderboard shard does not match the expected public schema.");
+  }
+  return payload;
+}
+
+function validateRankingSegment(values) {
+  const seen = new Set();
+  let previousEntry = null;
+  let previousQuality = null;
+  let previousRank = null;
+  for (const entry of values) {
+    if (seen.has(entry.submission_id)) {
+      return false;
+    }
+    if (previousEntry !== null && compareCanonicalLeaderboardOrder(previousEntry, entry) > 0) {
+      return false;
+    }
+    seen.add(entry.submission_id);
+    const quality = [
+      entry.metrics.semantic_score_percent,
+      entry.metrics.exact_format_score_percent,
+    ];
+    if (previousQuality !== null) {
+      const sameQuality =
+        quality[0] === previousQuality[0] && quality[1] === previousQuality[1];
+      if (
+        quality[0] > previousQuality[0] ||
+        (quality[0] === previousQuality[0] && quality[1] > previousQuality[1]) ||
+        (sameQuality && entry.rank !== previousRank) ||
+        (!sameQuality && entry.rank !== previousRank + 1)
+      ) {
+        return false;
+      }
+    }
+    previousQuality = quality;
+    previousRank = entry.rank;
+    previousEntry = entry;
+  }
+  return true;
+}
+
+function compareCanonicalLeaderboardOrder(left, right) {
+  const numberKeys = ["semantic_score_percent", "exact_format_score_percent"];
+  for (const key of numberKeys) {
+    const comparison = right.metrics[key] - left.metrics[key];
+    if (comparison !== 0) {
+      return comparison;
+    }
+  }
+  const textPairs = [
+    [left.model.source.toLowerCase(), right.model.source.toLowerCase()],
+    [left.model.display_name.toLowerCase(), right.model.display_name.toLowerCase()],
+    [left.submission_id, right.submission_id],
+  ];
+  for (const [leftValue, rightValue] of textPairs) {
+    if (leftValue < rightValue) {
+      return -1;
+    }
+    if (leftValue > rightValue) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 function validateRanking(values) {
   const seen = new Set();
+  let previousEntry = null;
   let previousQuality = null;
   let expectedRank = 0;
   for (const entry of values) {
     if (seen.has(entry.submission_id)) {
+      return false;
+    }
+    if (previousEntry !== null && compareCanonicalLeaderboardOrder(previousEntry, entry) > 0) {
       return false;
     }
     seen.add(entry.submission_id);
@@ -399,6 +512,7 @@ function validateRanking(values) {
       return false;
     }
     previousQuality = quality;
+    previousEntry = entry;
   }
   return true;
 }
@@ -756,6 +870,18 @@ function showStatus(message) {
   elements.table.hidden = true;
 }
 
+function shardId(number) {
+  return String(number).padStart(6, "0");
+}
+
+function updateLoadMoreButton() {
+  const hasMore =
+    leaderboardIndex !== null && nextShardNumber <= leaderboardIndex.shard_count;
+  elements.loadMore.hidden = !hasMore;
+  elements.loadMore.disabled = loadingShard;
+  elements.loadMore.textContent = loadingShard ? "Loading more results..." : "Load more results";
+}
+
 function render() {
   const query = elements.search.value.trim().toLocaleLowerCase();
   const hardware = elements.hardwareFilter.value;
@@ -765,10 +891,15 @@ function render() {
     return matchesHardware && (!query || haystack.includes(query));
   });
   const visible = sortedEntries(filtered, elements.sort.value);
-  elements.updated.textContent =
+  const shown =
     visible.length === entries.length
       ? `${integer(entries.length)} published result${entries.length === 1 ? "" : "s"}`
       : `${integer(visible.length)} of ${integer(entries.length)} results shown`;
+  const total = leaderboardIndex === null ? entries.length : leaderboardIndex.entry_count;
+  elements.updated.textContent =
+    entries.length < total
+      ? `${shown} | ${integer(entries.length)} of ${integer(total)} loaded`
+      : shown;
 
   elements.body.replaceChildren();
   if (visible.length === 0) {
@@ -783,6 +914,7 @@ function render() {
   visible.forEach(addRow);
   elements.status.hidden = true;
   elements.table.hidden = false;
+  updateLoadMoreButton();
 }
 
 function setSubmissionStatus(message, state) {
@@ -896,32 +1028,98 @@ function downloadCheckedSubmission() {
   setSubmissionStatus("Checked copy downloaded. The file has not been uploaded.", "success");
 }
 
-async function loadLeaderboard() {
+async function fetchBoundedJson(url) {
+  const response = await fetch(url, { cache: "no-cache", credentials: "omit" });
+  if (!response.ok) {
+    throw new Error("Leaderboard data is unavailable.");
+  }
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_DATA_BYTES) {
+    throw new Error("Leaderboard data is larger than expected.");
+  }
+  const source = await response.text();
+  if (new TextEncoder().encode(source).byteLength > MAX_DATA_BYTES) {
+    throw new Error("Leaderboard data is larger than expected.");
+  }
+  return JSON.parse(source);
+}
+
+async function loadNextShard() {
+  if (
+    leaderboardIndex === null ||
+    loadingShard ||
+    nextShardNumber > leaderboardIndex.shard_count
+  ) {
+    return;
+  }
+  loadingShard = true;
+  updateLoadMoreButton();
   try {
-    const response = await fetch(DATA_URL, { cache: "no-cache", credentials: "omit" });
-    if (!response.ok) {
-      throw new Error("Leaderboard data is unavailable.");
+    const expectedId = shardId(nextShardNumber);
+    const payload = validateShard(
+      await fetchBoundedJson(`${SHARD_URL_PREFIX}${expectedId}${SHARD_URL_SUFFIX}`),
+      expectedId,
+      leaderboardIndex.schema_version,
+    );
+    const combined = [...entries, ...payload.entries];
+    const remainingShards = leaderboardIndex.shard_count - nextShardNumber;
+    const remainingEntries = leaderboardIndex.entry_count - combined.length;
+    if (
+      combined.length > leaderboardIndex.entry_count ||
+      (remainingShards === 0) !== (remainingEntries === 0) ||
+      remainingEntries < remainingShards ||
+      !validateRanking(combined)
+    ) {
+      throw new Error("Leaderboard shards are inconsistent with their index.");
     }
-    const contentLength = Number(response.headers.get("content-length"));
-    if (Number.isFinite(contentLength) && contentLength > MAX_DATA_BYTES) {
-      throw new Error("Leaderboard data is larger than expected.");
-    }
-    const source = await response.text();
-    if (new TextEncoder().encode(source).byteLength > MAX_DATA_BYTES) {
-      throw new Error("Leaderboard data is larger than expected.");
-    }
-    const payload = validatePayload(JSON.parse(source));
-    entries = payload.entries;
+    entries = combined;
+    nextShardNumber += 1;
     populateHardwareFilter(entries);
     render();
+  } finally {
+    loadingShard = false;
+    updateLoadMoreButton();
+  }
+}
+
+function leaderboardUnavailable() {
+  elements.updated.textContent = "Leaderboard unavailable";
+  elements.loadMore.hidden = true;
+  showStatus("The leaderboard could not be loaded. Try again later or view the repository for current results.");
+}
+
+async function loadLeaderboard() {
+  try {
+    const candidate = await fetchBoundedJson(DATA_URL);
+    if (hasExactKeys(candidate, ["schema_version", "entry_count", "entries"])) {
+      const payload = validatePayload(candidate);
+      leaderboardIndex = null;
+      entries = payload.entries;
+      populateHardwareFilter(entries);
+      render();
+      return;
+    }
+    leaderboardIndex = validateIndex(candidate);
+    entries = [];
+    nextShardNumber = 1;
+    if (leaderboardIndex.shard_count > 0) {
+      await loadNextShard();
+    } else {
+      populateHardwareFilter(entries);
+      render();
+    }
   } catch (error) {
-    elements.updated.textContent = "Leaderboard unavailable";
-    showStatus("The leaderboard could not be loaded. Try again later or view the repository for current results.");
+    leaderboardUnavailable();
   }
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { validateModel };
+  module.exports = {
+    validateIndex,
+    validateModel,
+    validatePayload,
+    validateShard,
+  };
 }
 
 if (typeof document !== "undefined") {
@@ -932,5 +1130,12 @@ if (typeof document !== "undefined") {
   elements.submissionFile.addEventListener("change", checkSubmissionFile);
   elements.copySubmission.addEventListener("click", copyCheckedSubmission);
   elements.downloadSubmission.addEventListener("click", downloadCheckedSubmission);
+  elements.loadMore.addEventListener("click", async () => {
+    try {
+      await loadNextShard();
+    } catch (error) {
+      leaderboardUnavailable();
+    }
+  });
   loadLeaderboard();
 }

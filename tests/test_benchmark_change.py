@@ -73,10 +73,38 @@ class BenchmarkChangeBoundaryTests(unittest.TestCase):
         for changes in (
             [("A", SUBMISSION)],
             [("A", SUBMISSION), ("A", LEADERBOARD)],
+            [
+                ("A", SUBMISSION),
+                ("M", LEADERBOARD),
+                ("A", "site/data/leaderboard-000001.json"),
+            ],
         ):
             with self.subTest(changes=changes):
                 with self.assertRaises(ChangeError):
                     validate_changes(changes)
+
+    def test_ephemeral_shards_cannot_enter_the_tracked_benchmark_boundary(self) -> None:
+        for path in (
+            "site/data/leaderboard-000001.json",
+            "site/data/shards/leaderboard-00000001.json",
+        ):
+            with self.subTest(path=path):
+                with self.assertRaises(ChangeError):
+                    validate_changes(
+                        [("A", SUBMISSION), ("M", LEADERBOARD), ("A", path)],
+                        require_benchmark=True,
+                    )
+
+    def test_trusted_materialization_keeps_per_file_caps_without_an_aggregate_wedge(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "validate_benchmark_change.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("256 * 1024", source)
+        self.assertNotIn("dataset exceeds its trusted materialization limit", source)
+        self.assertNotRegex(source, r"total_bytes\s*>\s*\d+\s*\*\s*1024\s*\*\s*1024")
 
     def test_every_dataset_tree_change_enters_the_strict_lane(self) -> None:
         for changes in (

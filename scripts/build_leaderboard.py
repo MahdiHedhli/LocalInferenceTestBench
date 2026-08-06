@@ -19,9 +19,11 @@ sys.path.insert(0, str(REPOSITORY / "src"))
 from local_inference_test_bench.submissions import (  # noqa: E402
     SubmissionError,
     build_leaderboard,
+    build_persisted_leaderboard,
     load_json_object,
     render_leaderboard_bytes,
     write_leaderboard,
+    write_leaderboard_bundle,
 )
 
 
@@ -49,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--staged",
         action="store_true",
         help="check the exact Git index instead of working-tree leaderboard data",
+    )
+    mode.add_argument(
+        "--bundle-output-dir",
+        type=Path,
+        help="write a bounded Pages index and shards into this directory",
     )
     parser.add_argument(
         "--repository",
@@ -113,7 +120,8 @@ def _check_bytes(submissions: Path, output: Path) -> dict[str, object]:
         actual = output.read_bytes()
     except OSError as error:
         raise SubmissionError("committed leaderboard data could not be read") from error
-    if actual != render_leaderboard_bytes(leaderboard):
+    expected = build_persisted_leaderboard(leaderboard)
+    if actual != render_leaderboard_bytes(expected):
         raise SubmissionError("generated data is stale")
     return leaderboard
 
@@ -144,7 +152,20 @@ def main() -> int:
                 f"{'entry' if leaderboard['entry_count'] == 1 else 'entries'}"
             )
             return 0
-        write_leaderboard(leaderboard, args.output)
+        if args.bundle_output_dir is not None:
+            _index, shards = write_leaderboard_bundle(
+                leaderboard,
+                args.bundle_output_dir,
+            )
+            print(
+                "leaderboard bundle built: "
+                f"{leaderboard['entry_count']} "
+                f"{'entry' if leaderboard['entry_count'] == 1 else 'entries'} "
+                f"across {len(shards)} "
+                f"{'shard' if len(shards) == 1 else 'shards'}"
+            )
+            return 0
+        write_leaderboard(build_persisted_leaderboard(leaderboard), args.output)
         print(
             "leaderboard built: "
             f"{leaderboard['entry_count']} "

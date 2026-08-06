@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "leaderboard-shard.schema.json",
+  "title": "Local Inference Test Bench leaderboard transport shard",
+  "description": "One independently bounded page of globally ranked leaderboard entries.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "index_version",
+    "schema_version",
+    "shard_id",
+    "entry_count",
+    "entries"
+  ],
+  "properties": {
+    "index_version": {
+      "const": "1.0"
+    },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "shard_id": {
+      "type": "string",
+      "pattern": "^[0-9]{6,}$"
+    },
+    "entry_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "leaderboard-dataset.schema.json#/$defs/entry"
+      }
+    }
+  },
+  "$comment": "The Python builder and browser bind entry_count to the array length, shard_id to the synthesized ordinal filename, and the complete shard bytes to the per-file publication cap."
+}

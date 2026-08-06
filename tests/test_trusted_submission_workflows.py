@@ -301,12 +301,16 @@ class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("python3 scripts/build_leaderboard.py\n", pages)
-        self.assertIn("git diff --exit-code -- site/data/leaderboard.json", pages)
+        self.assertIn("python3 scripts/build_leaderboard.py --check", pages)
+        self.assertIn("--bundle-output-dir", pages)
         self.assertLess(
-            pages.index("python3 scripts/build_leaderboard.py\n"),
-            pages.index("git diff --exit-code -- site/data/leaderboard.json"),
+            pages.index("python3 scripts/build_leaderboard.py --check"),
+            pages.index("--bundle-output-dir"),
         )
+        self.assertNotIn("git diff --exit-code -- site/data/leaderboard.json", pages)
+        upload = pages[pages.index("uses: actions/upload-pages-artifact@") :]
+        self.assertNotIn("path: site\n", upload)
+        self.assertIn("runner.temp", pages)
         self.assertIn("python3 scripts/build_leaderboard.py --check", public_safety)
 
     def test_expressions_are_never_interpolated_inside_shell_programs(self) -> None:

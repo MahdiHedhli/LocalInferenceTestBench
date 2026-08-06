@@ -15,7 +15,10 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 
 from local_inference_test_bench.submissions import (  # noqa: E402
+    SubmissionError,
     build_leaderboard,
+    build_leaderboard_bundle,
+    build_persisted_leaderboard,
     prepare_submission,
     validate_submission,
 )
@@ -67,6 +70,16 @@ class PublishedContractTests(unittest.TestCase):
             dataset["entries"][0]["runtime_configuration"],
             environment["runtime_configuration"],
         )
+        index, shards = build_leaderboard_bundle(dataset)
+        self.validator.validate(index, "leaderboard-index.schema.json")
+        self.assertEqual(index["entry_count"], dataset["entry_count"])
+        self.assertEqual(index["shard_count"], len(shards))
+        for shard in shards:
+            self.validator.validate(shard, "leaderboard-shard.schema.json")
+        self.assertEqual(
+            sum(shard["entry_count"] for shard in shards),
+            index["entry_count"],
+        )
 
     def test_public_model_descriptor_contract_uses_field_specific_ascii_limits(self) -> None:
         maximums = {
@@ -104,7 +117,13 @@ class PublishedContractTests(unittest.TestCase):
         dataset = json.loads(
             (PROJECT_ROOT / "site" / "data" / "leaderboard.json").read_text(encoding="utf-8")
         )
-        self.validator.validate(dataset, "leaderboard-dataset.schema.json")
+        if "entries" in dataset:
+            self.validator.validate(dataset, "leaderboard-dataset.schema.json")
+            self.assertEqual(dataset["entry_count"], len(dataset["entries"]))
+        else:
+            self.validator.validate(dataset, "leaderboard-index.schema.json")
+            self.assertEqual(dataset["entry_count"] == 0, dataset["shard_count"] == 0)
+            self.assertLessEqual(dataset["shard_count"], dataset["entry_count"])
 
     def test_closed_schema_rejects_unknown_and_inconsistent_fields(self) -> None:
         submission = prepare_submission(valid_report(), public_environment())
@@ -127,7 +146,37 @@ class PublishedContractTests(unittest.TestCase):
         with self.assertRaises(SchemaValidationError):
             self.validator.validate(dataset, "leaderboard-dataset.schema.json")
 
-    def test_dataset_contract_caps_entries(self) -> None:
+    def test_transport_contracts_reject_unknown_keys_and_wrong_types(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        with tempfile.TemporaryDirectory() as temporary:
+            submissions = Path(temporary)
+            path = submissions / f"{submission['submission_id']}.json"
+            path.write_text(json.dumps(submission), encoding="utf-8")
+            dataset = build_leaderboard(submissions)
+        index, shards = build_leaderboard_bundle(dataset)
+        self.assertEqual(len(shards), 1)
+        shard = shards[0]
+
+        rejected = (
+            ("leaderboard-index.schema.json", {**index, "path": "not-accepted"}),
+            ("leaderboard-index.schema.json", {**index, "entry_count": True}),
+            ("leaderboard-index.schema.json", {**index, "shard_count": "1"}),
+            ("leaderboard-shard.schema.json", {**shard, "url": "not-accepted"}),
+            ("leaderboard-shard.schema.json", {**shard, "shard_id": "00001"}),
+            ("leaderboard-shard.schema.json", {**shard, "entry_count": "1"}),
+            ("leaderboard-shard.schema.json", {**shard, "entries": {}}),
+        )
+        for schema, payload in rejected:
+            with self.subTest(schema=schema, keys=sorted(payload)):
+                with self.assertRaises(SchemaValidationError):
+                    self.validator.validate(payload, schema)
+
+        inconsistent = copy.deepcopy(dataset)
+        inconsistent["entry_count"] += 1
+        with self.assertRaisesRegex(SubmissionError, "transport contract"):
+            build_leaderboard_bundle(inconsistent)
+
+    def test_logical_dataset_contract_does_not_reintroduce_the_old_volume_cap(self) -> None:
         submission = prepare_submission(valid_report(), public_environment())
         with tempfile.TemporaryDirectory() as temporary:
             submissions = Path(temporary)
@@ -135,16 +184,25 @@ class PublishedContractTests(unittest.TestCase):
             path.write_text(json.dumps(submission), encoding="utf-8")
             dataset = build_leaderboard(submissions)
 
-        oversized_count = copy.deepcopy(dataset)
-        oversized_count["entry_count"] = 10001
-        with self.assertRaises(SchemaValidationError):
-            self.validator.validate(oversized_count, "leaderboard-dataset.schema.json")
+        large = copy.deepcopy(dataset)
+        large["entries"] *= 10001
+        large["entry_count"] = len(large["entries"])
+        self.validator.validate(large, "leaderboard-dataset.schema.json")
 
-        oversized_entries = copy.deepcopy(dataset)
-        oversized_entries["entry_count"] = 10000
-        oversized_entries["entries"] *= 10001
-        with self.assertRaises(SchemaValidationError):
-            self.validator.validate(oversized_entries, "leaderboard-dataset.schema.json")
+        persisted = build_persisted_leaderboard(large)
+        self.assertEqual(
+            set(persisted),
+            {"index_version", "schema_version", "entry_count", "shard_count"},
+        )
+        self.validator.validate(persisted, "leaderboard-index.schema.json")
+
+        index = {
+            "index_version": "1.0",
+            "schema_version": "1.0",
+            "entry_count": large["entry_count"],
+            "shard_count": 2,
+        }
+        self.validator.validate(index, "leaderboard-index.schema.json")
 
 
 if __name__ == "__main__":

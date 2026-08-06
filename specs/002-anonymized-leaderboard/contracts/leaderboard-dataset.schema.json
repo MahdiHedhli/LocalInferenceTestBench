@@ -16,12 +16,10 @@
     },
     "entry_count": {
       "type": "integer",
-      "minimum": 0,
-      "maximum": 10000
+      "minimum": 0
     },
     "entries": {
       "type": "array",
-      "maxItems": 10000,
       "items": {
         "$ref": "#/$defs/entry"
       }
@@ -161,5 +159,5 @@
       ]
     }
   },
-  "$comment": "The Python builder is authoritative for entry_count, derived percentages, one-decimal numeric precision, dense ranking, deterministic order, and the generated size limit. Decimal precision is kept out of the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
+  "$comment": "This is the logical full-dataset contract used while deriving ranks. The Python builder is authoritative for entry_count, derived percentages, one-decimal numeric precision, dense ranking, deterministic order, and bounded transport partitioning. Decimal precision is kept out of the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
 }
