@@ -208,6 +208,75 @@ class MeasurementSupervisorTests(unittest.TestCase):
         )
         queue.close.assert_called_once_with()
 
+    def test_darwin_registration_esrch_means_unreaped_child_exited(self) -> None:
+        process_id = 424242
+        registration = mock.Mock()
+        queue = mock.Mock()
+        queue.control.side_effect = ProcessLookupError(3, "no such process")
+        darwin_select = mock.Mock()
+        darwin_select.kqueue.return_value = queue
+        darwin_select.kevent.return_value = registration
+        darwin_select.KQ_FILTER_PROC = -5
+        darwin_select.KQ_EV_ADD = 0x1
+        darwin_select.KQ_EV_ENABLE = 0x4
+        darwin_select.KQ_EV_ONESHOT = 0x10
+        darwin_select.KQ_EV_ERROR = 0x4000
+        darwin_select.KQ_NOTE_EXIT = 0x80000000
+        supervisor._termination_requested = False
+
+        with (
+            mock.patch.object(supervisor.sys, "platform", "darwin"),
+            mock.patch.object(supervisor.os, "waitid", None, create=True),
+            mock.patch.object(supervisor, "select", darwin_select),
+        ):
+            observed = supervisor._observe_exit_without_reaping(process_id)
+
+        self.assertTrue(observed)
+        queue.control.assert_called_once_with([registration], 0, 0)
+        queue.close.assert_called_once_with()
+
+    def test_darwin_registration_errors_other_than_esrch_fail_closed(self) -> None:
+        queue = mock.Mock()
+        queue.control.side_effect = PermissionError(1, "not permitted")
+        darwin_select = mock.Mock()
+        darwin_select.kqueue.return_value = queue
+        darwin_select.kevent.return_value = mock.Mock()
+        darwin_select.KQ_FILTER_PROC = -5
+        darwin_select.KQ_EV_ADD = 0x1
+        darwin_select.KQ_EV_ENABLE = 0x4
+        darwin_select.KQ_EV_ONESHOT = 0x10
+        darwin_select.KQ_EV_ERROR = 0x4000
+        darwin_select.KQ_NOTE_EXIT = 0x80000000
+        supervisor._termination_requested = False
+
+        with (
+            mock.patch.object(supervisor.sys, "platform", "darwin"),
+            mock.patch.object(supervisor.os, "waitid", None, create=True),
+            mock.patch.object(supervisor, "select", darwin_select),
+            self.assertRaises(supervisor._SupervisorError),
+        ):
+            supervisor._observe_exit_without_reaping(424242)
+
+        queue.close.assert_called_once_with()
+
+    def test_darwin_observer_construction_error_is_categorical(self) -> None:
+        darwin_select = mock.Mock()
+        darwin_select.kqueue.side_effect = OSError("unavailable")
+        darwin_select.KQ_FILTER_PROC = -5
+        darwin_select.KQ_EV_ADD = 0x1
+        darwin_select.KQ_EV_ENABLE = 0x4
+        darwin_select.KQ_EV_ONESHOT = 0x10
+        darwin_select.KQ_EV_ERROR = 0x4000
+        darwin_select.KQ_NOTE_EXIT = 0x80000000
+
+        with (
+            mock.patch.object(supervisor.sys, "platform", "darwin"),
+            mock.patch.object(supervisor.os, "waitid", None, create=True),
+            mock.patch.object(supervisor, "select", darwin_select),
+            self.assertRaises(supervisor._SupervisorError),
+        ):
+            supervisor._observe_exit_without_reaping(424242)
+
     @unittest.skipUnless(sys.platform == "darwin", "Darwin kqueue integration")
     def test_real_darwin_kqueue_fallback_leaves_leader_unreaped(self) -> None:
         process = subprocess.Popen(
@@ -216,6 +285,15 @@ class MeasurementSupervisorTests(unittest.TestCase):
         )
         supervisor._termination_requested = False
         try:
+            time.sleep(0.1)
+            state = subprocess.run(
+                ["ps", "-p", str(process.pid), "-o", "state="],
+                check=False,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertTrue(state.startswith("Z"), state)
+            self.assertIsNone(process.returncode)
             with mock.patch.object(supervisor.os, "waitid", None, create=True):
                 observed = supervisor._observe_exit_without_reaping(process.pid)
 

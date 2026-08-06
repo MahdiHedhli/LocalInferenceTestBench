@@ -266,7 +266,9 @@ the existing bounded standard streams, kills the adapter group before reaping th
 signals the PGID after reaping, and on Linux fails closed unless it can adopt and boundedly reap
 descendants as a child subreaper. Leader exit is observed without reaping: `waitid` where available,
 or `kqueue` `NOTE_EXIT` on supported macOS Python versions that omit `os.waitid`. macOS keeps the same
-ordering without a subreaper facility. Require
+ordering without a subreaper facility. Darwin registration `ESRCH` counts as observed exit only under
+the dedicated helper's invariant that it is the sole waiter, has restored `SIGCHLD` to default, and
+has not polled or waited, so the zombie still pins the PID/PGID. Require
 the trusted sampler to stay synchronous and not daemonize or deliberately leave its session/process
 group. Require an owner-only snapshot directory on a writable filesystem that permits execution,
 allowing `TMPDIR` to select an owner-controlled non-repository location when the default is `noexec`. Fail the single-command option closed

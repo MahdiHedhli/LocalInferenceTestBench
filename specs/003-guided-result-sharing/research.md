@@ -93,7 +93,9 @@ dedicated standard-library supervisor between the CLI and approved snapshot so i
 adapter group before reaping the leader and never signal a potentially reused PGID afterward. On
 Linux, fail closed unless child-subreaper setup succeeds and boundedly reap adopted descendants;
 observe leader exit without reaping via `waitid` or, on older supported macOS Python, `kqueue`
-`NOTE_EXIT`. macOS retains the same kill-before-reap ordering. Require the sampler to stay synchronous and inside
+`NOTE_EXIT`. Treat Darwin registration `ESRCH` as observed exit only because the dedicated helper is
+the sole waiter, has `SIGCHLD` at default, and has not polled or waited, leaving the zombie to pin the
+PID/PGID. macOS retains the same kill-before-reap ordering. Require the sampler to stay synchronous and inside
 its inherited session/process group. Require an owner-only snapshot directory on a writable
 filesystem that permits execution, with an owner-controlled non-repository `TMPDIR` option for
 `noexec` defaults.

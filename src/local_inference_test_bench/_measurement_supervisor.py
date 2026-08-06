@@ -118,27 +118,35 @@ def _observe_exit_with_darwin_kqueue(pid: int) -> bool:
 
     queue = None
     try:
-        queue = select.kqueue()  # type: ignore[attr-defined]
-        registration = select.kevent(  # type: ignore[attr-defined]
-            pid,
-            filter=select.KQ_FILTER_PROC,  # type: ignore[attr-defined]
-            flags=(
-                select.KQ_EV_ADD  # type: ignore[attr-defined]
-                | select.KQ_EV_ENABLE  # type: ignore[attr-defined]
-                | select.KQ_EV_ONESHOT  # type: ignore[attr-defined]
-            ),
-            fflags=select.KQ_NOTE_EXIT,  # type: ignore[attr-defined]
-        )
-        queue.control([registration], 0, 0)
-    except (AttributeError, OSError, ValueError) as error:
-        if queue is not None:
-            try:
-                queue.close()
-            except OSError:
-                pass
-        raise _SupervisorError("Darwin process observer could not be created") from error
+        try:
+            queue = select.kqueue()  # type: ignore[attr-defined]
+            registration = select.kevent(  # type: ignore[attr-defined]
+                pid,
+                filter=select.KQ_FILTER_PROC,  # type: ignore[attr-defined]
+                flags=(
+                    select.KQ_EV_ADD  # type: ignore[attr-defined]
+                    | select.KQ_EV_ENABLE  # type: ignore[attr-defined]
+                    | select.KQ_EV_ONESHOT  # type: ignore[attr-defined]
+                ),
+                fflags=select.KQ_NOTE_EXIT,  # type: ignore[attr-defined]
+            )
+        except (AttributeError, OSError, ValueError) as error:
+            raise _SupervisorError(
+                "Darwin process observer could not be created"
+            ) from error
+        try:
+            queue.control([registration], 0, 0)
+        except ProcessLookupError:
+            # This helper is the child's sole waiter, SIGCHLD is SIG_DFL, and
+            # neither poll nor wait has run. Darwin returns ESRCH when that
+            # still-unreaped direct child exited before EVFILT_PROC registration.
+            # Its zombie pins the PID/PGID until kill-before-wait cleanup.
+            return True
+        except (OSError, ValueError) as error:
+            raise _SupervisorError(
+                "Darwin process observer could not be created"
+            ) from error
 
-    try:
         while not _termination_requested:
             try:
                 events = queue.control(None, 1, 0.05)
@@ -155,10 +163,11 @@ def _observe_exit_with_darwin_kqueue(pid: int) -> bool:
     except OSError as error:
         raise _SupervisorError("Darwin process observer failed") from error
     finally:
-        try:
-            queue.close()
-        except OSError:
-            pass
+        if queue is not None:
+            try:
+                queue.close()
+            except OSError:
+                pass
 
 
 def _observe_exit_without_reaping(pid: int) -> bool:
