@@ -15,6 +15,23 @@ from .reporting import new_run_identity
 from .scoring import classify_termination, score_case
 
 
+_KNOWN_CLIENT_CATEGORIES = frozenset(
+    {
+        "authentication",
+        "context_window",
+        "http_error",
+        "invalid_json",
+        "network_error",
+        "protocol_error",
+        "rate_limited",
+        "request_rejected",
+        "response_too_large",
+        "server_error",
+        "timeout",
+    }
+)
+
+
 class RunnerError(RuntimeError):
     """A sanitized preflight or orchestration failure."""
 
@@ -241,22 +258,10 @@ class BenchmarkRunner:
         try:
             advertised = self.client.list_models()
         except ClientError as error:
-            known_categories = {
-                "authentication",
-                "context_window",
-                "http_error",
-                "invalid_json",
-                "network_error",
-                "protocol_error",
-                "rate_limited",
-                "request_rejected",
-                "response_too_large",
-                "server_error",
-                "timeout",
-            }
             category = (
                 error.category
-                if isinstance(error.category, str) and error.category in known_categories
+                if isinstance(error.category, str)
+                and error.category in _KNOWN_CLIENT_CATEGORIES
                 else "other"
             )
             raise RunnerError(

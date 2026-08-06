@@ -133,12 +133,12 @@ class PostRunCliTests(unittest.TestCase):
                 mock.patch.object(
                     cli.sys,
                     "stdin",
-                    SimpleNamespace(isatty=lambda: stdin_tty),
+                    SimpleNamespace(isatty=lambda value=stdin_tty: value),
                 ),
                 mock.patch.object(
                     cli.sys,
                     "stdout",
-                    SimpleNamespace(isatty=lambda: stdout_tty),
+                    SimpleNamespace(isatty=lambda value=stdout_tty: value),
                 ),
             ):
                 self.assertEqual(cli._interactive_terminal(), expected)

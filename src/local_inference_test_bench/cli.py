@@ -287,7 +287,6 @@ def _offer_failure_issue_unchecked(
 
     if getattr(args, "failure_report", "none") != "ask" or not _interactive_terminal():
         return
-    public_environment = None
     try:
         public_environment = load_public_environment_file(args.hardware)
     except Exception:
