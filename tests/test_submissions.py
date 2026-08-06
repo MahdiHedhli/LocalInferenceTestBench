@@ -2176,6 +2176,74 @@ class SubmissionTests(unittest.TestCase):
         with self.assertRaisesRegex(SubmissionError, "requires total_billions"):
             validate_submission(invalid)
 
+    def test_parameter_scale_is_provenance_not_a_config_dimension(self) -> None:
+        older_report = valid_report()
+        older_report["created_at"] = "2026-01-02T03:04:05Z"
+        older = prepare_submission(older_report, public_environment())
+
+        newer_report = valid_report()
+        newer_report["created_at"] = "2026-02-02T03:04:05Z"
+        newer_report["models"][0]["provenance"]["parameter_scale"] = {
+            "total_billions": 30.5,
+            "active_billions": 3.25,
+        }
+        newer = prepare_submission(newer_report, public_environment())
+
+        older_key = submissions_module._config_key(
+            submissions_module._facet_dimensions(older)
+        )
+        newer_key = submissions_module._config_key(
+            submissions_module._facet_dimensions(newer)
+        )
+        self.assertEqual(older_key, newer_key)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for submission in (older, newer):
+                (directory / f"{submission['submission_id']}.json").write_bytes(
+                    render_submission_bytes(submission)
+                )
+            leaderboard = build_leaderboard(directory)
+            validate_versioned_leaderboard(leaderboard)
+
+            node = shutil.which("node")
+            if node is not None:
+                payload = directory / "leaderboard.json"
+                payload.write_text(json.dumps(leaderboard), encoding="utf-8")
+                completed = subprocess.run(
+                    [
+                        node,
+                        str(
+                            Path(__file__).resolve().parent
+                            / "js_payload_validator_runner.js"
+                        ),
+                        str(Path(__file__).resolve().parents[1] / "site" / "app.js"),
+                        str(payload),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    encoding="utf-8",
+                    text=True,
+                )
+                self.assertEqual(completed.stdout, "accepted\n")
+
+        self.assertEqual(leaderboard["entry_count"], 1)
+        entry = leaderboard["entries"][0]
+        self.assertEqual(entry["corroboration"]["accepted_record_count"], 2)
+        self.assertEqual(entry["submission_id"], newer["submission_id"])
+        self.assertEqual(
+            entry["model"]["parameter_scale"],
+            {"total_billions": 30.5, "active_billions": 3.25},
+        )
+        self.assertEqual(
+            entry["plausibility"]["basis"],
+            {
+                "hardware_class": "discrete_accelerator",
+                "model_size_bucket": "under_4b",
+                "model_size_basis": "active_billions",
+            },
+        )
+
     def test_representative_selection_is_score_neutral_and_cohorts_remain_visible(self) -> None:
         clean_old_report = valid_report(latency_ms=30.0)
         clean_old_report["created_at"] = "2025-11-01T00:00:00Z"

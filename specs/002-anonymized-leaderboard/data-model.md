@@ -305,13 +305,14 @@ A strict subset projection uses logical leaderboard schema `1.1` even when every
 legacy `1.0`, so those null semantics and explicit `legacy_unreported` annotations remain valid. The
 shipped default all-legacy full-suite projection alone preserves the byte-identical `1.0` monolith.
 
-Configuration-dimension structure `1.0` names hardware, model identity including revision or digest
-and parameter scale, precision, runtime name/version/backend, runtime configuration, and settings.
-The builder canonicalizes these named dimensions and groups them only inside the same facet, profile,
-and suite. An absent runtime configuration is null. The cell publishes the config digest and fixed
-key/selection versions. Representative selection prefers clean, nonquiescent, degraded-midrun, then
-legacy; newest period and lowest digest break remaining ties. Fixed validity summaries publish
-counts and earliest/latest periods without an unbounded observation list.
+Configuration-dimension structure `1.0` names hardware, model identity including revision or digest,
+precision, runtime name/version/backend, runtime configuration, and settings. Parameter scale remains
+model provenance and a plausibility input; it is not a configuration-key dimension. The builder
+canonicalizes the named dimensions and groups them only inside the same facet, profile, and suite. An
+absent runtime configuration is null. The cell publishes the config digest and fixed key/selection
+versions. Representative selection prefers clean, nonquiescent, degraded-midrun, then legacy; newest
+period and lowest digest break remaining ties. Fixed validity summaries publish counts and
+earliest/latest periods without an unbounded observation list.
 
 Each cell also publishes sample-count/median/minimum/maximum distributions for available latency and
 throughput. A versioned caution-only plausibility result combines the existing coarse hardware class

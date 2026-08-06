@@ -1513,12 +1513,6 @@ def _model_identity(model: Mapping[str, Any]) -> dict[str, Any]:
         "source": model["source"],
         identity_field: model[identity_field],
         "declared_context_tokens": model["declared_context_tokens"],
-        "parameter_scale": copy.deepcopy(
-            model.get(
-                "parameter_scale",
-                {"total_billions": None, "active_billions": None},
-            )
-        ),
     }
 
 

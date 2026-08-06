@@ -547,7 +547,6 @@ function configDimensions(entry) {
       source: entry.model.source,
       [identityField]: entry.model[identityField],
       declared_context_tokens: entry.model.declared_context_tokens,
-      parameter_scale: entry.model.parameter_scale,
     },
     precision: entry.model.precision,
     runtime: entry.runtime,
