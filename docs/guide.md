@@ -251,10 +251,11 @@ cap, the committed output switches to the constant-shape index and the Pages art
 shards. Pages always deploys the generated index and shards. The transport `index_version` stays
 `1.0`; it is independent of projected entry schema `1.1`.
 
-Global rank order and page order are deterministic. The publisher greedily splits that sequence at
+Global rank-band order and page order are deterministic. The publisher greedily splits that sequence at
 stable row boundaries according to the exact UTF-8 byte size of each rendered JSON page. It does not
-estimate from character counts or discard older rows. The union of all pages must contain every
-accepted submission digest exactly once.
+estimate from character counts or discard older rows. Schema `1.1` pages contain one bounded cell
+per configuration rather than every source digest. Each validated source record contributes exactly
+once to its cell's corroboration count and remains retained at its digest-named repository path.
 
 Hard caps remain on each submission, the committed transport file, and every fetched shard. The
 removed cap is the aggregate-corpus failure that would eventually prevent all later contributions.
@@ -268,7 +269,13 @@ An inapplicable case records `not_applicable` as its outcome, route, and termina
 from denominators. A whole-suite all-not-applicable result remains valid private evidence but cannot
 be published because every public candidate needs at least one scored case.
 Configuration dimensions are fixed as version `1.0`: hardware, model identity including revision or
-digest, precision, runtime name/version/backend, runtime configuration, and settings. A documented
+digest, precision, runtime name/version/backend, runtime configuration, and settings. Explicit
+nullable parameter scale remains model provenance and a plausibility input; it is not a configuration
+key dimension. Repeated records collapse to one cell only within the same facet, profile, suite
+version, and configuration-key scope.
+The representative is chosen without score or speed: clean, nonquiescent, degraded-midrun, then
+legacy; newest month; then digest. Fixed validity counts/month ranges, performance distributions,
+Wilson rank bands, and a caution-only plausibility result keep that projection bounded. A documented
 but intentionally unused graduation policy requires at least 25 entries across five distinct model
 families before a facet earns a dedicated page. No capability view or score exists yet.
 

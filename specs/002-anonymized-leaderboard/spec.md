@@ -28,8 +28,10 @@ without a framework or third-party service.
 
 1. **Given** accepted standard-profile entries, **When** the page loads, **Then** it shows them in a
    quality-ranked table with the hardware and runtime needed to interpret latency and throughput.
-2. **Given** entries with the same semantic and exact-format scores, **When** ranks are assigned,
-   **Then** the entries share a rank and speed does not break the tie.
+2. **Given** entries in the same transitive semantic Wilson component whose exact-format Wilson
+   intervals also belong to the same transitive component, **When** rank bands are assigned,
+   **Then** the entries share an explicit rank band and speed does not break the tie; a distinct
+   exact-format component inside that semantic component creates a separate band.
 3. **Given** no accepted entries, **When** the page loads, **Then** it shows an honest empty state and
    a link to the submission process.
 4. **Given** a string that contains HTML syntax, **When** a row is rendered, **Then** the browser
@@ -37,6 +39,18 @@ without a framework or third-party service.
 5. **Given** any accepted entry, **When** it is presented in the site chrome or leaderboard header,
    **Then** the site says it is self-reported and unverified and explains that its hash establishes
    content integrity rather than provenance or proof that the run occurred.
+6. **Given** repeated accepted records in the same configuration-key scope for a facet, profile, and
+   suite version, **When** the dataset is built, **Then** one bounded configuration cell remains, its
+   corroboration count increases, each performance distribution changes only for a record carrying
+   that measurement, and every source record remains retained by digest.
+7. **Given** a configuration cell containing clean and non-clean records, **When** the representative
+   is selected, **Then** selection uses validity priority, newest month, and digest only, while the
+   fixed validity counts and month ranges expose the other retained evidence.
+8. **Given** an observation outside a versioned hardware-class and model-size envelope, **When** the
+   cell is rendered, **Then** it receives a visible non-authoritative caution and is neither dropped
+   nor demoted.
+9. **Given** a five-of-five result, **When** quality is rendered, **Then** it is shown as a pass count
+   and outward-rounded 95% Wilson interval such as `5/5 (56–100%)`, not as a bare `100.0%`.
 
 ---
 
@@ -119,6 +133,11 @@ dataset and that Pages deployment runs only from the default branch.
 - A run uses only a CPU, shared memory, an accelerator row with a count greater than one, or a
   hybrid CPU and accelerator configuration.
 - Two distinct entries earn the same quality score.
+- Overlap is transitive across a chain of semantic or exact-format Wilson intervals.
+- Many distinct digests perturb only latency or throughput for one configuration.
+- A configuration contains clean, nonquiescent, degraded-midrun, and retained legacy records from
+  different months.
+- Model parameter scale is unknown, so plausibility is explicitly not evaluated.
 - Usage data is absent, so throughput is unavailable.
 - A contributor renames a submission file or changes content without updating its digest.
 - A model name contains markup, control characters, a local identifier, or an unusually long value.
@@ -143,8 +162,10 @@ dataset and that Pages deployment runs only from the default branch.
   immediately after it.
 - **FR-003**: The site MUST work without third-party scripts, fonts, analytics, cookies, or a write
   credential.
-- **FR-004**: The leaderboard MUST rank eligible entries by semantic score and then exact-format
-  score, with dense ties.
+- **FR-004**: The leaderboard MUST publish 95% Wilson intervals from representative semantic and
+  exact-format pass counts and MUST rank eligible configuration cells in explicit dense rank bands.
+  Directly overlapping intervals MUST share a band; overlap chains MUST be treated transitively.
+  Semantic interval components are primary and exact-format interval components are secondary.
 - **FR-005**: Latency and throughput MUST be displayed with their hardware, runtime, and any reported
   runtime-configuration context and MUST NOT affect quality rank.
 - **FR-006**: The site chrome and leaderboard header MUST identify every record as self-reported and
@@ -288,11 +309,56 @@ dataset and that Pages deployment runs only from the default branch.
   adding a current UI view. Because accepted submissions retain only full-suite aggregate
   performance, a strict subset facet MUST publish null latency and throughput with zero usage
   coverage rather than relabeling full-suite values as measurements of that facet.
-- **FR-044**: A version `1.0` facet-graduation policy MUST record 25 entries across five distinct
+- **FR-044**: The projected schema `1.1` leaderboard MUST collapse accepted records to one cell for
+  each `(facet, profile, suite version, configuration key)` scope. The version `1.0` configuration
+  key MUST be the canonical JSON of the six named dimensions in FR-043; an absent runtime
+  configuration MUST normalize to null. Parameter scale remains model provenance and a plausibility
+  input and MUST NOT be included in this configuration key. The cell MUST expose a deterministic
+  digest of that key.
+- **FR-045**: A collapsed cell MUST select one representative without consulting score,
+  performance, plausibility, model name, or source label. Selection version `1.0` MUST prefer
+  `clean`, then `nonquiescent`, then `degraded_midrun`, then `legacy_unreported`; within that class it
+  MUST choose the newest reported month and finally the lexicographically smallest submission ID.
+  The representative retains the scalar validity, period, conditions, determinism, and score fields.
+- **FR-046**: Every cell MUST publish a fixed-size corroboration summary containing the total count
+  of distinct accepted content hashes and counts plus earliest/latest month for each closed validity
+  class. Corroboration MUST be described as accepted content hashes, not independent people, runs,
+  provenance, or attestation. The aggregate MUST NOT embed an unbounded list of submission IDs or
+  per-month observations; every original digest-named record remains retained and addressable.
+- **FR-047**: Repeated anonymous records MUST NOT be pooled to narrow the representative Wilson
+  interval. Every record MUST contribute to corroboration and MAY contribute to the latency
+  distribution, throughput distribution, and plausibility counts only when the corresponding
+  measurements and plausibility inputs are available. Each distribution MUST report sample count,
+  median, minimum, and maximum; unavailable values are excluded and a zero-count distribution uses
+  null statistics. Performance MUST remain outside quality ranking.
+- **FR-048**: Rank-band ordering MUST be deterministic and neutral. Bands MUST be ordered by their
+  non-overlapping semantic component and then exact-format component; entries inside a band MUST use
+  `submission_id` as the final tiebreak. Model display name, source, latency, throughput,
+  corroboration, and plausibility MUST NOT affect band assignment or order.
+- **FR-049**: A current `1.1` submission model MUST contain a closed `parameter_scale` object with
+  nullable `total_billions` and `active_billions`. Known values MUST be positive, bounded, and at
+  most three decimal places; active scale cannot exceed total scale, and an unknown total requires
+  active to be unknown. Export MAY derive only the explicit provenance value and MUST emit both as
+  null when a compatible older manifest did not declare them. Model names MUST NOT be parsed to
+  infer scale.
+- **FR-050**: Every projected `1.1` cell MUST carry a non-authoritative plausibility annotation from
+  a versioned static envelope keyed by a closed hardware class and an explicit total- or
+  active-parameter bucket. It MUST report `within_envelope`, `caution`, or `not_evaluated`, evaluated
+  and outside-envelope record counts, and a canonical list containing only latency-below-envelope
+  and throughput-above-envelope signals. Any outside observation cautions the cell. Unknown scale,
+  unknown hardware class, or unavailable facet performance MUST produce `not_evaluated`; no status
+  may drop, gate, verify, or change a cell's rank.
+- **FR-051**: The site MUST label `rank` as a rank band; render semantic and exact-format quality as
+  pass counts plus the published Wilson bounds; display corroboration and the plausibility state in
+  text; and render median performance with range and sample count. A validity or month filter applies
+  to the deterministic representative, while the fixed corroboration summary MUST keep other
+  retained validity classes and their month ranges visible. This bounded representative policy MUST
+  be stated in the UI and methodology.
+- **FR-052**: A version `1.0` facet-graduation policy MUST record 25 entries across five distinct
   model families as the minimum for a dedicated future page, but no current code or UI MUST read it.
   The transport `index_version` MUST remain `1.0` when projected entry `schema_version` becomes
   `1.1`.
-- **FR-045**: The site MUST display `measurement_period` as an “as of” month and provide month
+- **FR-053**: The site MUST display the representative `measurement_period` as an “as of” month and provide month
   filtering and recency sorting. Until every shard is loaded, these controls MUST be explicitly
   scoped to loaded rows and MUST NOT imply a corpus-wide absence or ordering.
 
@@ -317,7 +383,8 @@ dataset and that Pages deployment runs only from the default branch.
 - **SC-001**: One hundred percent of accepted submission files validate against the runtime contract
   and the published JSON Schema.
 - **SC-002**: Export tests prove that every field listed in FR-013 is absent from generated records.
-- **SC-003**: Ranking fixtures prove quality ordering and dense ties without using performance values.
+- **SC-003**: Ranking fixtures prove Wilson arithmetic, inclusive and transitive overlap bands,
+  neutral deterministic ordering, and independence from performance and model/source names.
 - **SC-004**: Browser tests or equivalent DOM checks prove that untrusted record strings cannot add
   markup or script execution.
 - **SC-005**: The full Python test suite and publication gate pass on Linux, macOS, and Windows.
@@ -329,8 +396,9 @@ dataset and that Pages deployment runs only from the default branch.
   overlong, descriptor-like, non-ASCII, bidi, homoglyph, and reviewer-injection-shaped model labels
   while existing hardware descriptor fixtures remain unchanged.
 - **SC-009**: A synthetic accepted corpus larger than the former aggregate cap builds successfully,
-  while every generated index and shard remains within its individual byte cap and all submission
-  identifiers occur exactly once.
+  while every generated index and shard remains within its individual byte cap, every projected
+  configuration cell occurs exactly once, and all source submissions remain retained at their
+  digest-addressed paths.
 - **SC-010**: Repeated builds on supported platforms produce byte-identical committed indexes and
   deployment shards, including deterministic exact-byte pagination of the global rank sequence.
 - **SC-011**: Browser tests prove shard fetch targets use only synthesized
@@ -345,6 +413,14 @@ dataset and that Pages deployment runs only from the default branch.
 - **SC-014**: Sidecar tests reject a missing or stale source-run binding and model lists outside
   1–1000, prove the binding is absent from public bytes, and browser-loading tests reject invalid
   UTF-8, byte-order-marked, or duplicate-member monolith, index, and shard responses.
+- **SC-015**: N accepted records with one configuration and perturbed performance produce one cell
+  with corroboration N and exact deterministic median/range statistics; changing any named
+  configuration dimension, profile, suite, or facet creates a distinct cell.
+- **SC-016**: Python and browser fixtures reject tampered Wilson bounds, distributions,
+  corroboration arithmetic, config-key versions, parameter scales, plausibility signals, and rank
+  bands while proving an outlier remains published and rank-neutral.
+- **SC-017**: A synthetic same-cell flood keeps the bounded aggregate row below the per-file cap,
+  and the frozen all-legacy `1.0` leaderboard remains byte-identical.
 
 ## Assumptions
 

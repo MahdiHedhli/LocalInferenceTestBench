@@ -97,6 +97,18 @@ inventing capability scores from roughly one case per task. The suite registry t
 capability and modality now, while the site deliberately exposes no capability-specific score,
 column, view, or page.
 
+The public board renders each representative result as `passes/scored` plus a 95% Wilson interval.
+Lower bounds are rounded down and upper bounds up to whole percentages, so five passes in five cases
+appears as `5/5 (56–100%)`. Semantic overlap components are ranked first; exact-format overlap
+components partition them secondarily. Overlap is transitive, and every member of a component shares
+an explicit rank band. Model/source names and speed do not order a band; the content digest is the
+neutral final tiebreak.
+
+Accepted hashes are anonymous observations, not proven independent samples. Repeats for one exact
+configuration therefore do not pool pass-count denominators or narrow the Wilson interval. They add
+only a corroboration count and latency/throughput median and spread. This is deliberately resistant
+to false precision from submission flooding.
+
 ### 7. Add experiments only when the decision needs them
 
 Long-context retrieval, bounded repeatability, reasoning-template analysis, dynamic agent tasks,
@@ -133,6 +145,9 @@ changes, and rollback planning belong to a separate reviewed change.
   for outcome, route, and termination; mixed sentinels are invalid.
 - Do not infer clean measurement conditions from valid execution. Public preparation requires a
   separate categorical sidecar, and missing evidence is not a clean run.
+- Treat a plausibility caution only as an outlier-review hint. The broad versioned envelope uses the
+  declared coarse hardware class and explicit active-or-total parameter scale; unknown scale is
+  `not_evaluated`, and no plausibility state establishes that a run occurred.
 - A fenced but correct JSON object can pass semantics while failing exact-envelope adherence.
 - A response that consumes its output budget is not automatically a context-window failure.
 - A reasoning-only response at the configured output ceiling must be rerun with a justified larger

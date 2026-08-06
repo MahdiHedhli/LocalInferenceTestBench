@@ -33,7 +33,7 @@ plus byte-bounded shard pages for browser delivery.
 | Local measurement sidecar | Exact source run ID binding; 1–1000 per-model pre/post threshold outcomes and closed categories; optional aggregate determinism | Raw host values, additional timestamps, paths, process names, inventory, free text, or inferred clean state |
 | Public submission | Public model provenance, settings, structured hardware and runtime, optional runtime configuration, categorical cases, measurement month/conditions, and rounded aggregate observations | Source run ID or precise time, local model selector, manifest digest, contributor field, or raw model content |
 | Committed leaderboard index | Index version, submission schema version, total entry count, and shard count | Accepted row payloads, arbitrary paths or URLs, contributor identity, or unpublished local data |
-| Temporary leaderboard shard | Accepted submission fields, derived quality percentages, and quality rank for one bounded page | Per-case text, contributor identity, arbitrary fetch targets, or unpublished local data |
+| Temporary leaderboard shard | Bounded configuration cells, representative counts/Wilson bands, corroboration, performance spread, and plausibility | Per-case text, contributor identity, unbounded source-ID/month arrays, arbitrary fetch targets, or unpublished local data |
 
 Hardware and performance can weakly characterize a setup. The exporter removes direct machine
 identifiers, but the operator still reviews the candidate before opening a public pull request.
@@ -123,8 +123,12 @@ that would reveal which models were tested together.
 
 ### Value object: Public model provenance
 
-Contains `display_name`, `source`, exactly one of `revision` or `digest`, `precision`, and
-`declared_context_tokens`. `display_name` is 1–160 ASCII characters, `source` is 1–240 ASCII
+Contains `display_name`, `source`, exactly one of `revision` or `digest`, `precision`,
+`declared_context_tokens`, and the closed `parameter_scale` object. `parameter_scale` contains
+nullable `total_billions` and `active_billions`; known values are positive, at most 1,000,000, and
+have at most three decimal places, active cannot exceed total, and active must be null when total is
+null. A compatible older manifest may omit this provenance, but schema `1.1` export writes explicit
+nulls rather than parsing a display/source label. `display_name` is 1–160 ASCII characters, `source` is 1–240 ASCII
 characters, and `precision` is 1–80 ASCII characters. These values and the revision/digest reject
 descriptor-grade UUID, serial/inventory-label, network, URL, email, private-host, reviewer mention,
 role-prefix, and instruction-injection shapes. The public hardware and runtime labels use the same
@@ -195,10 +199,11 @@ authoritative publication boundary.
 
 ## Entity: Leaderboard publication bundle
 
-Purpose: represent every accepted submission through a bounded committed transport file and a
-temporary index plus zero or more bounded shard pages generated for every Pages deployment. This is
-a transport decomposition, not a destructive submission migration: accepted `1.0` records remain
-byte-for-byte retained and new records use `1.1`.
+Purpose: represent deterministic configuration-cell aggregates through a bounded committed
+transport file and a temporary index plus zero or more bounded shard pages generated for every Pages
+deployment. This is a transport decomposition, not a destructive submission migration: every source
+submission remains digest-addressable, accepted `1.0` records remain byte-for-byte retained, and new
+records use `1.1`.
 
 ### Value object: Committed leaderboard index
 
@@ -209,7 +214,7 @@ committed to the repository after sharding activates.
 |-------|------|-------|
 | index_version | string | Must be `1.0` for this transport increment |
 | schema_version | string | Projected-entry schema: `1.0` for the unchanged all-legacy monolith, otherwise `1.1` |
-| entry_count | integer | Total number of accepted entries across all shards |
+| entry_count | integer | Total number of projected configuration cells across all shards |
 | shard_count | integer | Number of contiguous ordinal shards |
 
 This constant-shape index contains no row payload, path, URL, or attacker-selected identifier. Shard
@@ -238,11 +243,13 @@ index and shards in its temporary artifact.
 
 ### Value object: Temporary leaderboard shard
 
-A shard is a deterministic same-origin JSON page containing a bounded subset of derived leaderboard
-entries. Each current entry keeps submission ID, source submission schema, suite, profile,
-measurement period/validity/conditions, hardware, runtime, optional runtime configuration, model,
-settings, cases, and aggregate metrics. It adds derived score fields and rank. Legacy rows retain
-their explicit missing-evidence annotation.
+A shard is a deterministic same-origin JSON page containing a bounded subset of derived
+configuration cells. Each current cell keeps one score-neutral representative's submission ID,
+source schema, suite, profile, measurement period/validity/conditions, hardware, runtime, optional
+runtime configuration, model, settings, and aggregate metrics. It adds the facet ID, config-cell
+identity, fixed corroboration summary, representative Wilson intervals, performance distributions,
+non-authoritative plausibility annotation, and dense rank band. Legacy representatives retain their
+explicit missing-evidence annotation.
 
 | Field | Type | Rules |
 |-------|------|-------|
@@ -271,14 +278,17 @@ canonical shard JSON. Growth therefore adds contiguous numbered pages without re
 platform-specific string length.
 
 Every accepted `site/data/submissions/<submission_id>.json` remains retained and addressable by its
-digest. The union of shard entry IDs must equal the accepted submission IDs exactly: no missing,
-duplicate, or extra record is allowed. Pagination is never pruning. Malformed source records,
-duplicate digests, inconsistent counts or IDs, and individually oversized inputs still fail closed;
-only valid aggregate corpus growth selects more pages instead of failing.
+digest. Each validated source record must contribute exactly once to one configuration cell's
+corroboration count, but only the deterministic representative digest appears in the bounded shard.
+Pagination is never pruning. Malformed source records, duplicate digests, inconsistent counts or
+cells, and individually oversized inputs still fail closed; only valid aggregate corpus growth
+selects more pages instead of failing.
 
-Ranking uses descending semantic percentage, then descending exact-format percentage. Equal quality
-pairs share a dense rank. Source, display name, and submission ID provide deterministic display order
-inside a tie. Latency and throughput never affect rank.
+Ranking uses outward-rounded 95% Wilson intervals from the representative raw pass counts. Repeated
+anonymous records never pool the quality denominator. Semantic interval connected components are
+primary and exact-format connected components inside each semantic component are secondary; the
+result is a dense transitive rank band. Submission ID is the neutral final tiebreak inside a band.
+Source/display names, latency, throughput, corroboration, and plausibility never affect rank.
 
 ### Value object: Facet selector and configuration dimensions
 
@@ -295,11 +305,55 @@ A strict subset projection uses logical leaderboard schema `1.1` even when every
 legacy `1.0`, so those null semantics and explicit `legacy_unreported` annotations remain valid. The
 shipped default all-legacy full-suite projection alone preserves the byte-identical `1.0` monolith.
 
-Configuration-dimension structure `1.0` names hardware, model identity including revision or digest,
-precision, runtime name/version/backend, runtime configuration, and settings. This named structure
-is the dimension-filter allowlist and the identity seam for later config-cell collapse. Facet
+Configuration-dimension structure `1.0` names hardware, model identity including revision or digest
+and parameter scale, precision, runtime name/version/backend, runtime configuration, and settings.
+The builder canonicalizes these named dimensions and groups them only inside the same facet, profile,
+and suite. An absent runtime configuration is null. The cell publishes the config digest and fixed
+key/selection versions. Representative selection prefers clean, nonquiescent, degraded-midrun, then
+legacy; newest period and lowest digest break remaining ties. Fixed validity summaries publish
+counts and earliest/latest periods without an unbounded observation list.
+
+Each cell also publishes sample-count/median/minimum/maximum distributions for available latency and
+throughput. A versioned caution-only plausibility result combines the existing coarse hardware class
+with the explicit active-or-total parameter bucket; any outlier flags the cell, unknown inputs are
+`not_evaluated`, and the annotation never gates or ranks.
+
+This named structure
+is the dimension-filter allowlist and config-cell identity. Facet
 graduation policy `1.0` records a minimum of 25 entries across five distinct model families. Nothing
 reads that policy in this release; it creates no view, score, or page.
+
+### Value object: Derived configuration-cell evidence
+
+Projected schema `1.1` entries add these exact closed objects to the representative fields:
+
+| Field | Type | Rules |
+|-------|------|-------|
+| facet_id | string | `all-cases-text` for the shipped projection |
+| config_cell | object | Exact `key_version`, `selection_version`, and canonical config `digest`; both versions are `1.0` |
+| corroboration.accepted_record_count | integer | At least one; sum of the four validity counts |
+| corroboration.by_validity | object | Exact `clean`, `nonquiescent`, `degraded_midrun`, and `legacy_unreported` summaries |
+| score_intervals.method | string | `wilson_95` |
+| score_intervals.semantic | interval | Integer outward-rounded bounds from representative semantic passes/scored cases |
+| score_intervals.exact_format | interval | Integer outward-rounded bounds from representative exact-format passes/scored cases |
+| performance_distribution | object | Exact latency and throughput distribution objects |
+| plausibility | object | Versioned closed caution-only annotation |
+
+Each validity summary has `count`, `earliest_period`, and `latest_period`. Zero count requires null
+periods. Legacy periods are always null. A current nonzero count requires two valid months with
+earliest no later than latest.
+
+Each distribution has `sample_count`, `median`, `minimum`, and `maximum`. Zero samples require three
+null values. Nonzero samples require finite nonnegative values at no more than two decimal places,
+with minimum no greater than median and median no greater than maximum. Latency includes only
+available full-facet mean-latency observations; throughput excludes nulls.
+
+The plausibility object has `policy_version: "1.0"`, a status of `within_envelope`, `caution`, or
+`not_evaluated`, a closed basis containing hardware class, size bucket, and whether active or total
+billions were used, evaluated/outside record counts, and a canonical unique signal subset of
+`latency_below_envelope` and `throughput_above_envelope`. Zero evaluated records is exactly
+`not_evaluated`; any outside record is exactly `caution`; otherwise the status is
+`within_envelope`.
 
 ## State transitions
 

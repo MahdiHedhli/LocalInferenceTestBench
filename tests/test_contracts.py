@@ -54,6 +54,32 @@ class PublishedContractTests(unittest.TestCase):
         self.runner_validator.validate(manifest, "manifest.schema.json")
         self.runner_validator.validate(report, "run-record.schema.json")
 
+    def test_optional_parameter_scale_matches_manifest_and_run_record_schemas(self) -> None:
+        scale = {"total_billions": 30.0, "active_billions": 3.0}
+        manifest = valid_manifest_data()
+        manifest["models"][0]["parameter_scale"] = scale
+        report = valid_report()
+        report["models"][0]["provenance"]["parameter_scale"] = scale
+
+        self.runner_validator.validate(manifest, "manifest.schema.json")
+        self.runner_validator.validate(report, "run-record.schema.json")
+
+        invalid = copy.deepcopy(report)
+        invalid["models"][0]["provenance"]["parameter_scale"] = {
+            "total_billions": None,
+            "active_billions": 3.0,
+        }
+        with self.assertRaises(SchemaValidationError):
+            self.runner_validator.validate(invalid, "run-record.schema.json")
+
+        invalid_manifest = copy.deepcopy(manifest)
+        invalid_manifest["models"][0]["parameter_scale"] = {
+            "total_billions": None,
+            "active_billions": 3.0,
+        }
+        with self.assertRaises(SchemaValidationError):
+            self.runner_validator.validate(invalid_manifest, "manifest.schema.json")
+
     def test_registered_synthetic_suite_matches_runtime_and_run_record_contract(self) -> None:
         report = valid_report()
         report["profile"] = "synthetic-two"
@@ -80,6 +106,13 @@ class PublishedContractTests(unittest.TestCase):
         )
 
         self.validator.validate(descriptor, "hardware-descriptor.schema.json")
+
+    def test_example_manifest_matches_its_published_schema(self) -> None:
+        manifest = json.loads(
+            (PROJECT_ROOT / "config" / "models.example.json").read_text(encoding="utf-8")
+        )
+
+        self.runner_validator.validate(manifest, "manifest.schema.json")
 
     def test_public_descriptor_contracts_require_visible_ascii(self) -> None:
         descriptor = public_environment()

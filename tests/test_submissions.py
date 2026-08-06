@@ -36,6 +36,8 @@ from local_inference_test_bench.submissions import (  # noqa: E402
     validate_submission,
     validate_accepted_submission,
     validate_measurement_evidence,
+    validate_versioned_leaderboard,
+    wilson_interval_95,
     write_leaderboard,
     write_submission,
 )
@@ -635,6 +637,43 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(text_board["entry_count"], 0)
         self.assertEqual(vision_board["entry_count"], 1)
 
+    def test_nondefault_dimension_filter_forces_versioned_config_cells(self) -> None:
+        source_path, legacy = legacy_submission_fixture()
+        facet = FacetSelector(
+            facet_id="runtime-filter-text",
+            capabilities=None,
+            modalities=frozenset({"text"}),
+            dimension_filters=(("runtime", copy.deepcopy(legacy["runtime"])),),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / source_path.name).write_bytes(source_path.read_bytes())
+            leaderboard = build_leaderboard(directory, facet=facet)
+
+        self.assertEqual(leaderboard["schema_version"], "1.1")
+        self.assertEqual(leaderboard["entry_count"], 1)
+        self.assertEqual(leaderboard["entries"][0]["facet_id"], facet.facet_id)
+        self.assertIn("config_cell", leaderboard["entries"][0])
+
+    def test_facet_selector_rejects_empty_capabilities_and_duplicate_dimensions(self) -> None:
+        invalid = (
+            FacetSelector(
+                facet_id="empty-capabilities",
+                capabilities=frozenset(),
+                modalities=frozenset({"text"}),
+            ),
+            FacetSelector(
+                facet_id="duplicate-dimensions",
+                capabilities=None,
+                modalities=frozenset({"text"}),
+                dimension_filters=(("runtime", {}), ("runtime", {})),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            for facet in invalid:
+                with self.subTest(facet=facet.facet_id), self.assertRaises(SubmissionError):
+                    build_leaderboard(temporary, facet=facet)
+
     def test_public_submission_requires_at_least_one_scored_case(self) -> None:
         submission = prepare_submission(valid_report(), public_environment())
         for case in submission["cases"]:
@@ -988,7 +1027,7 @@ class SubmissionTests(unittest.TestCase):
         self.assertIsNone(legacy_entry["measurement_period"])
         self.assertIsNone(legacy_entry["measurement_conditions"])
 
-    def test_filtered_current_record_does_not_relabel_legacy_projection(self) -> None:
+    def test_nondefault_filter_projects_selected_legacy_as_versioned_cell(self) -> None:
         legacy_path, legacy = legacy_submission_fixture()
         current = prepare_submission(valid_report(), public_environment())
         legacy_identity = submissions_module._facet_dimensions(legacy)["model_identity"]
@@ -1011,9 +1050,13 @@ class SubmissionTests(unittest.TestCase):
             )
             leaderboard = build_leaderboard(directory, facet=facet)
 
-        self.assertEqual(leaderboard["schema_version"], "1.0")
+        self.assertEqual(leaderboard["schema_version"], "1.1")
         self.assertEqual(leaderboard["entry_count"], 1)
-        self.assertNotIn("submission_schema_version", leaderboard["entries"][0])
+        self.assertEqual(
+            leaderboard["entries"][0]["submission_schema_version"],
+            "1.0",
+        )
+        self.assertEqual(leaderboard["entries"][0]["facet_id"], facet.facet_id)
 
     def test_legacy_subset_facet_uses_a_browser_valid_versioned_projection(self) -> None:
         repository = Path(__file__).resolve().parents[1]
@@ -1819,7 +1862,7 @@ class SubmissionTests(unittest.TestCase):
             ):
                 ensure_submission(submission, destination)
 
-    def test_leaderboard_ranks_quality_only_and_shares_ranks_for_ties(self) -> None:
+    def test_leaderboard_uses_wilson_bands_and_neutral_ordering(self) -> None:
         best_fast = prepare_submission(
             valid_report(display_name="Best Fast", source="publisher/best-fast", latency_ms=5.0),
             public_environment(),
@@ -1848,18 +1891,404 @@ class SubmissionTests(unittest.TestCase):
 
         self.assertEqual(leaderboard["entry_count"], 3)
         entries = leaderboard["entries"]
-        self.assertEqual([entry["rank"] for entry in entries], [1, 1, 2])
+        self.assertEqual([entry["rank"] for entry in entries], [1, 1, 1])
         self.assertEqual(
-            [entry["model"]["display_name"] for entry in entries],
-            ["Best Fast", "Best Slow", "Lower"],
+            [entry["submission_id"] for entry in entries],
+            sorted(entry["submission_id"] for entry in entries),
         )
-        self.assertGreater(
-            entries[0]["metrics"]["completion_tokens_per_second"],
-            entries[1]["metrics"]["completion_tokens_per_second"],
+        by_name = {entry["model"]["display_name"]: entry for entry in entries}
+        self.assertEqual(by_name["Best Fast"]["metrics"]["semantic_score_percent"], 100.0)
+        self.assertEqual(by_name["Lower"]["metrics"]["semantic_score_percent"], 80.0)
+        self.assertEqual(
+            by_name["Best Fast"]["score_intervals"]["semantic"],
+            {"lower_percent": 56, "upper_percent": 100},
         )
-        self.assertEqual(entries[0]["metrics"]["semantic_score_percent"], 100.0)
-        self.assertEqual(entries[2]["metrics"]["semantic_score_percent"], 80.0)
         self.assertNotIn("cases", entries[0])
+
+    def test_wilson_interval_uses_conservative_whole_percent_bounds(self) -> None:
+        self.assertEqual(
+            wilson_interval_95(5, 5),
+            {"lower_percent": 56, "upper_percent": 100},
+        )
+        self.assertEqual(
+            wilson_interval_95(0, 5),
+            {"lower_percent": 0, "upper_percent": 44},
+        )
+        with self.assertRaises(SubmissionError):
+            wilson_interval_95(6, 5)
+
+    def test_transitive_interval_components_and_exact_secondary_bands(self) -> None:
+        def row(identifier: str, semantic: tuple[int, int], exact: tuple[int, int]) -> dict:
+            return {
+                "submission_id": identifier * 64,
+                "score_intervals": {
+                    "semantic": {
+                        "lower_percent": semantic[0],
+                        "upper_percent": semantic[1],
+                    },
+                    "exact_format": {
+                        "lower_percent": exact[0],
+                        "upper_percent": exact[1],
+                    },
+                },
+            }
+
+        connected = [
+            row("a", (80, 100), (50, 100)),
+            row("b", (60, 85), (40, 80)),
+            row("c", (40, 65), (30, 60)),
+            row("d", (0, 20), (0, 20)),
+        ]
+        ranked = submissions_module._assign_rank_bands(connected)
+        self.assertEqual(
+            {entry["submission_id"][0]: entry["rank"] for entry in ranked},
+            {"a": 1, "b": 1, "c": 1, "d": 2},
+        )
+
+        exact_split = [
+            row("a", (50, 100), (80, 100)),
+            row("b", (50, 100), (0, 20)),
+        ]
+        split = submissions_module._assign_rank_bands(exact_split)
+        self.assertEqual([entry["rank"] for entry in split], [1, 2])
+
+    def test_config_cell_collapse_corroboration_and_performance_spread(self) -> None:
+        reports = [valid_report(latency_ms=value) for value in (10.0, 20.0, 30.0)]
+        submissions = [
+            prepare_submission(report, public_environment()) for report in reports
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for submission in submissions:
+                (directory / f"{submission['submission_id']}.json").write_bytes(
+                    render_submission_bytes(submission)
+                )
+            leaderboard = build_leaderboard(directory)
+
+        self.assertEqual(leaderboard["entry_count"], 1)
+        entry = leaderboard["entries"][0]
+        self.assertEqual(entry["corroboration"]["accepted_record_count"], 3)
+        self.assertEqual(entry["corroboration"]["by_validity"]["clean"]["count"], 3)
+        self.assertEqual(
+            entry["performance_distribution"]["latency_ms_mean"],
+            {"sample_count": 3, "median": 20.0, "minimum": 10.0, "maximum": 30.0},
+        )
+        self.assertEqual(
+            entry["performance_distribution"]["completion_tokens_per_second"],
+            {"sample_count": 3, "median": 500.0, "minimum": 333.3, "maximum": 1000.0},
+        )
+        self.assertNotIn("submission_ids", json.dumps(entry))
+
+    def test_two_sample_distribution_uses_decimal_median_arithmetic(self) -> None:
+        submissions = [
+            prepare_submission(valid_report(latency_ms=value), public_environment())
+            for value in (10.1, 10.2)
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for submission in submissions:
+                (directory / f"{submission['submission_id']}.json").write_bytes(
+                    render_submission_bytes(submission)
+                )
+            leaderboard = build_leaderboard(directory)
+
+        self.assertEqual(
+            leaderboard["entries"][0]["performance_distribution"][
+                "latency_ms_mean"
+            ],
+            {
+                "sample_count": 2,
+                "median": 10.15,
+                "minimum": 10.1,
+                "maximum": 10.2,
+            },
+        )
+        validate_versioned_leaderboard(leaderboard)
+
+    def test_projected_dataset_python_and_browser_validation_stay_in_lockstep(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable")
+        environment = public_environment()
+        environment["runtime_configuration"] = runtime_configuration()
+        submissions = [
+            prepare_submission(valid_report(latency_ms=value), environment)
+            for value in (10.1, 10.2)
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for submission in submissions:
+                (directory / f"{submission['submission_id']}.json").write_bytes(
+                    render_submission_bytes(submission)
+                )
+            leaderboard = build_leaderboard(directory)
+            payload_path = directory / "projected.json"
+
+            def python_accepts(payload: dict) -> bool:
+                try:
+                    validate_versioned_leaderboard(payload)
+                except SubmissionError:
+                    return False
+                return True
+
+            def browser_accepts(payload: dict) -> bool:
+                payload_path.write_text(json.dumps(payload), encoding="utf-8")
+                completed = subprocess.run(
+                    [
+                        node,
+                        str(
+                            Path(__file__).resolve().parents[1]
+                            / "tests"
+                            / "js_payload_validator_runner.js"
+                        ),
+                        str(
+                            Path(__file__).resolve().parents[1]
+                            / "site"
+                            / "app.js"
+                        ),
+                        str(payload_path),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                return completed.stdout.strip() == "accepted"
+
+            corpus = {"valid": leaderboard}
+            bad_digest = copy.deepcopy(leaderboard)
+            digest = bad_digest["entries"][0]["config_cell"]["digest"]
+            bad_digest["entries"][0]["config_cell"]["digest"] = (
+                ("0" if digest[0] != "0" else "1") + digest[1:]
+            )
+            corpus["config_digest"] = bad_digest
+            bad_wilson = copy.deepcopy(leaderboard)
+            bad_wilson["entries"][0]["score_intervals"]["semantic"][
+                "lower_percent"
+            ] += 1
+            corpus["wilson"] = bad_wilson
+            bad_corroboration = copy.deepcopy(leaderboard)
+            bad_corroboration["entries"][0]["corroboration"][
+                "accepted_record_count"
+            ] += 1
+            corpus["corroboration"] = bad_corroboration
+            bad_distribution = copy.deepcopy(leaderboard)
+            bad_distribution["entries"][0]["performance_distribution"][
+                "latency_ms_mean"
+            ]["median"] = 10.14
+            corpus["distribution"] = bad_distribution
+            half_cent_median = copy.deepcopy(leaderboard)
+            half_cent_median["entries"][0]["metrics"]["latency_ms_mean"] = 0.0
+            half_cent_median["entries"][0]["performance_distribution"][
+                "latency_ms_mean"
+            ] = {
+                "sample_count": 2,
+                "median": 0.03,
+                "minimum": 0.0,
+                "maximum": 0.05,
+            }
+            corpus["unrepresentable_two_sample_median"] = half_cent_median
+            bad_context = copy.deepcopy(leaderboard)
+            bad_context["entries"][0]["runtime_configuration"][
+                "context_window_tokens"
+            ] = 64
+            _canonical, context_digest = submissions_module._config_key(
+                submissions_module._facet_dimensions(bad_context["entries"][0])
+            )
+            bad_context["entries"][0]["config_cell"]["digest"] = context_digest
+            corpus["runtime_context"] = bad_context
+            bad_rank = copy.deepcopy(leaderboard)
+            bad_rank["entries"][0]["rank"] = 2
+            corpus["rank"] = bad_rank
+
+            for name, payload in corpus.items():
+                with self.subTest(name=name):
+                    python_result = python_accepts(payload)
+                    browser_result = browser_accepts(payload)
+                    self.assertEqual(python_result, name == "valid")
+                    self.assertEqual(browser_result, python_result)
+
+    def test_each_named_config_dimension_splits_cells(self) -> None:
+        base = prepare_submission(valid_report(), public_environment())
+        variants = []
+
+        hardware = copy.deepcopy(base)
+        hardware["hardware"]["cpu"]["model"] = "Example CPU Two"
+        variants.append(rehash_submission(hardware))
+
+        model = copy.deepcopy(base)
+        model["model"]["revision"] = "public-revision-two"
+        variants.append(rehash_submission(model))
+
+        precision = copy.deepcopy(base)
+        precision["model"]["precision"] = "alternate-precision"
+        variants.append(rehash_submission(precision))
+
+        runtime = copy.deepcopy(base)
+        runtime["runtime"]["version"] = "1.2.4"
+        variants.append(rehash_submission(runtime))
+
+        configuration = copy.deepcopy(base)
+        configuration["runtime_configuration"] = runtime_configuration()
+        variants.append(rehash_submission(configuration))
+
+        settings = copy.deepcopy(base)
+        settings["settings"]["seed"] = 1
+        variants.append(rehash_submission(settings))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for submission in (base, *variants):
+                (directory / f"{submission['submission_id']}.json").write_bytes(
+                    render_submission_bytes(submission)
+                )
+            leaderboard = build_leaderboard(directory)
+
+        self.assertEqual(leaderboard["entry_count"], 7)
+        self.assertEqual(
+            len({entry["config_cell"]["digest"] for entry in leaderboard["entries"]}),
+            7,
+        )
+
+    def test_public_parameter_scale_is_explicit_and_closed(self) -> None:
+        unknown = prepare_submission(valid_report(), public_environment())
+        self.assertEqual(
+            unknown["model"]["parameter_scale"],
+            {"total_billions": None, "active_billions": None},
+        )
+
+        report = valid_report()
+        report["models"][0]["provenance"]["parameter_scale"] = {
+            "total_billions": 30.5,
+            "active_billions": 3.25,
+        }
+        known = prepare_submission(report, public_environment())
+        self.assertEqual(
+            known["model"]["parameter_scale"],
+            {"total_billions": 30.5, "active_billions": 3.25},
+        )
+
+        invalid = copy.deepcopy(known)
+        invalid["model"]["parameter_scale"] = {
+            "total_billions": None,
+            "active_billions": 3.25,
+        }
+        rehash_submission(invalid)
+        with self.assertRaisesRegex(SubmissionError, "requires total_billions"):
+            validate_submission(invalid)
+
+    def test_representative_selection_is_score_neutral_and_cohorts_remain_visible(self) -> None:
+        clean_old_report = valid_report(latency_ms=30.0)
+        clean_old_report["created_at"] = "2025-11-01T00:00:00Z"
+        clean_new_report = valid_report(
+            outcomes=("fail", "fail", "fail", "fail", "fail"),
+            latency_ms=40.0,
+        )
+        clean_new_report["created_at"] = "2026-01-01T00:00:00Z"
+        noisy_report = valid_report(latency_ms=5.0)
+        noisy_report["created_at"] = "2026-02-01T00:00:00Z"
+        degraded_report = valid_report(latency_ms=1.0)
+        degraded_report["created_at"] = "2026-03-01T00:00:00Z"
+        clean_old = prepare_submission(clean_old_report, public_environment())
+        clean_new = prepare_submission(clean_new_report, public_environment())
+        noisy = prepare_submission(
+            noisy_report,
+            public_environment(),
+            evidence=measurement_evidence(noisy_report, validity="nonquiescent"),
+        )
+        degraded = prepare_submission(
+            degraded_report,
+            public_environment(),
+            evidence=measurement_evidence(degraded_report, validity="degraded_midrun"),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for submission in (clean_old, clean_new, noisy, degraded):
+                (directory / f"{submission['submission_id']}.json").write_bytes(
+                    render_submission_bytes(submission)
+                )
+            entry = build_leaderboard(directory)["entries"][0]
+
+        self.assertEqual(entry["submission_id"], clean_new["submission_id"])
+        self.assertEqual(entry["validity"], "clean")
+        self.assertEqual(entry["measurement_period"], "2026-01")
+        self.assertEqual(entry["metrics"]["semantic_pass_count"], 0)
+        cohorts = entry["corroboration"]["by_validity"]
+        self.assertEqual(cohorts["clean"], {
+            "count": 2,
+            "earliest_period": "2025-11",
+            "latest_period": "2026-01",
+        })
+        self.assertEqual(cohorts["nonquiescent"]["count"], 1)
+        self.assertEqual(cohorts["degraded_midrun"]["count"], 1)
+
+    def test_parameter_scale_drives_caution_without_gating_or_ranking(self) -> None:
+        report = valid_report()
+        report["models"][0]["provenance"]["parameter_scale"] = {
+            "total_billions": 7.0,
+            "active_billions": None,
+        }
+        normal = prepare_submission(report, public_environment())
+        outlier = copy.deepcopy(normal)
+        outlier["metrics"]["latency_ms_mean"] = 0.0
+        outlier["metrics"]["completion_tokens_per_second"] = 12000.1
+        rehash_submission(outlier)
+
+        unknown_report = valid_report(
+            display_name="Unknown Scale",
+            source="publisher/unknown-scale",
+        )
+        unknown = prepare_submission(unknown_report, public_environment())
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for submission in (normal, outlier, unknown):
+                (directory / f"{submission['submission_id']}.json").write_bytes(
+                    render_submission_bytes(submission)
+                )
+            leaderboard = build_leaderboard(directory)
+
+        self.assertEqual(leaderboard["entry_count"], 2)
+        known = next(
+            entry for entry in leaderboard["entries"]
+            if entry["model"]["display_name"] == "Example Model"
+        )
+        unknown_entry = next(
+            entry for entry in leaderboard["entries"]
+            if entry["model"]["display_name"] == "Unknown Scale"
+        )
+        self.assertEqual(known["plausibility"]["status"], "caution")
+        self.assertEqual(known["plausibility"]["outside_envelope_record_count"], 1)
+        self.assertEqual(
+            known["plausibility"]["signals"],
+            ["latency_below_envelope", "throughput_above_envelope"],
+        )
+        self.assertEqual(unknown_entry["plausibility"]["status"], "not_evaluated")
+        self.assertEqual(known["rank"], unknown_entry["rank"])
+
+    def test_same_cell_flood_remains_one_bounded_aggregate(self) -> None:
+        submissions = [
+            prepare_submission(
+                valid_report(latency_ms=10.0 + index / 10),
+                public_environment(),
+            )
+            for index in range(200)
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for submission in submissions:
+                (directory / f"{submission['submission_id']}.json").write_bytes(
+                    render_submission_bytes(submission)
+                )
+            leaderboard = build_leaderboard(directory)
+
+        self.assertEqual(leaderboard["entry_count"], 1)
+        self.assertEqual(
+            leaderboard["entries"][0]["corroboration"]["accepted_record_count"],
+            200,
+        )
+        self.assertLess(
+            len(submissions_module.render_leaderboard_bytes(leaderboard)),
+            32 * 1024,
+        )
 
     def test_score_percent_uses_language_neutral_half_up_rounding(self) -> None:
         self.assertEqual(submissions_module._score_percent(1, 16), 6.3)

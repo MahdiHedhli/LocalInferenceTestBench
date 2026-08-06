@@ -8,9 +8,19 @@ if (!appSource) {
 const { scorePercent, sortedEntries } = require(appSource);
 
 function entry(id, latency) {
+  const identifier = {
+    unavailable: "c",
+    slow: "b",
+    fast: "a",
+  }[id];
   return {
     id,
+    submission_id: identifier.repeat(64),
+    rank: 1,
     metrics: {
+      semantic_pass_count: 5,
+      exact_format_pass_count: 5,
+      scored_case_count: 5,
       exact_format_score_percent: 100,
       semantic_score_percent: 100,
       latency_ms_mean: latency,

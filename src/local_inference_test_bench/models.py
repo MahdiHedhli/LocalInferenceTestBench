@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 from typing import Any, Mapping
@@ -22,6 +24,7 @@ _MODEL_KEYS = {
     "revision",
     "digest",
     "precision",
+    "parameter_scale",
     "declared_context_tokens",
     "runtime_model",
     "settings",
@@ -33,6 +36,15 @@ _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
 class ManifestError(ValueError):
     """Raised when a model manifest violates the public configuration contract."""
+
+
+class ParameterScaleValidationError(ValueError):
+    """Neutral parameter-scale validation failure translated at module boundaries."""
+
+    def __init__(self, code: str, field: str | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.field = field
 
 
 def _plain_string(value: Any, field: str, *, maximum: int = 500) -> str:
@@ -48,6 +60,93 @@ def _reject_unknown(mapping: Mapping[str, Any], allowed: set[str], field: str) -
     unknown = sorted(set(mapping) - allowed)
     if unknown:
         raise ManifestError(f"{field} contains unsupported fields: {', '.join(unknown)}")
+
+
+def validate_parameter_scale_values(
+    value: Any,
+) -> tuple[float | None, float | None]:
+    """Validate the shared scale contract without choosing a boundary exception."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "total_billions",
+        "active_billions",
+    }:
+        raise ParameterScaleValidationError("object_contract")
+
+    def parameter_billions(field: str) -> float | None:
+        raw = value[field]
+        if raw is None:
+            return None
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise ParameterScaleValidationError("invalid_number", field)
+        try:
+            number = float(raw)
+        except OverflowError as error:
+            raise ParameterScaleValidationError("invalid_number", field) from error
+        if not math.isfinite(number) or number < 0 or number > 1_000_000:
+            raise ParameterScaleValidationError("invalid_number", field)
+        if number == 0:
+            raise ParameterScaleValidationError("zero", field)
+        try:
+            decimal = Decimal(str(raw))
+            if decimal != decimal.quantize(Decimal("0.001")):
+                raise ParameterScaleValidationError("fractional_digits", field)
+        except InvalidOperation as error:
+            raise ParameterScaleValidationError("numeric_precision", field) from error
+        return number
+
+    total = parameter_billions("total_billions")
+    active = parameter_billions("active_billions")
+    if total is None and active is not None:
+        raise ParameterScaleValidationError("active_requires_total", "active_billions")
+    if total is not None and active is not None and active > total:
+        raise ParameterScaleValidationError("active_exceeds_total", "active_billions")
+    return total, active
+
+
+def _manifest_parameter_scale_message(
+    error: ParameterScaleValidationError,
+    field: str,
+) -> str:
+    if error.code == "object_contract":
+        return f"{field} has an unsupported object contract"
+    error_field = f"{field}.{error.field}"
+    if error.code in {"invalid_number", "zero"}:
+        return (
+            f"{error_field} must be null or a finite number greater than 0 "
+            "and at most 1000000"
+        )
+    if error.code == "fractional_digits":
+        return f"{error_field} supports at most three fractional digits"
+    if error.code == "numeric_precision":
+        return f"{error_field} has unsupported numeric precision"
+    if error.code == "active_requires_total":
+        return f"{field}.active_billions requires total_billions"
+    if error.code == "active_exceeds_total":
+        return f"{field}.active_billions cannot exceed total_billions"
+    raise AssertionError(f"unsupported parameter-scale error code: {error.code}")
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterScale:
+    """Optional public model-size metadata, including sparse active scale."""
+
+    total_billions: float | None
+    active_billions: float | None
+
+    @classmethod
+    def from_mapping(cls, value: Any, *, field: str) -> "ParameterScale":
+        try:
+            total, active = validate_parameter_scale_values(value)
+        except ParameterScaleValidationError as error:
+            raise ManifestError(_manifest_parameter_scale_message(error, field)) from error
+        return cls(total_billions=total, active_billions=active)
+
+    def as_report_data(self) -> dict[str, float | None]:
+        return {
+            "total_billions": self.total_billions,
+            "active_billions": self.active_billions,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +250,7 @@ class ModelSpec:
     declared_context_tokens: int
     runtime_model: str
     settings: GenerationSettings
+    parameter_scale: ParameterScale | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any], *, index: int) -> "ModelSpec":
@@ -167,6 +267,14 @@ class ModelSpec:
         source = _plain_string(value.get("source"), f"models[{index}].source")
         precision = _plain_string(
             value.get("precision"), f"models[{index}].precision", maximum=500
+        )
+        parameter_scale = (
+            ParameterScale.from_mapping(
+                value["parameter_scale"],
+                field=f"models[{index}].parameter_scale",
+            )
+            if "parameter_scale" in value
+            else None
         )
 
         revision = value.get("revision")
@@ -222,16 +330,20 @@ class ModelSpec:
             declared_context_tokens=declared_context,
             runtime_model=runtime_model,
             settings=settings,
+            parameter_scale=parameter_scale,
         )
 
-    def provenance(self) -> dict[str, str | int]:
-        return {
+    def provenance(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "display_name": self.display_name,
             "source": self.source,
             self.provenance_kind: self.revision_or_digest,
             "precision": self.precision,
             "declared_context_tokens": self.declared_context_tokens,
         }
+        if self.parameter_scale is not None:
+            result["parameter_scale"] = self.parameter_scale.as_report_data()
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,11 +406,7 @@ def parse_manifest(data: Mapping[str, Any]) -> Manifest:
         "models": [
             {
                 "id": model.id,
-                "display_name": model.display_name,
-                "source": model.source,
-                model.provenance_kind: model.revision_or_digest,
-                "precision": model.precision,
-                "declared_context_tokens": model.declared_context_tokens,
+                **model.provenance(),
                 "settings": model.settings.as_report_data(),
             }
             for model in models

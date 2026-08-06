@@ -37,28 +37,29 @@ from local_inference_test_bench.scoring import (  # noqa: E402
 )
 
 
-def manifest():
+def manifest(*, parameter_scale: dict | None = None):
+    model = {
+        "id": "stub-public-id",
+        "display_name": "Stub Model",
+        "source": "publisher/stub-model",
+        "digest": "sha256:public-digest-placeholder",
+        "precision": "runtime-declared",
+        "declared_context_tokens": 4096,
+        "runtime_model": "runtime-selector-under-test",
+        "settings": {
+            "temperature": 0,
+            "top_p": 1,
+            "max_output_tokens": 128,
+            "seed": 0,
+        },
+    }
+    if parameter_scale is not None:
+        model["parameter_scale"] = parameter_scale
     return parse_manifest(
         {
             "schema_version": "1.0",
             "suite_version": "1.0",
-            "models": [
-                {
-                    "id": "stub-public-id",
-                    "display_name": "Stub Model",
-                    "source": "publisher/stub-model",
-                    "digest": "sha256:public-digest-placeholder",
-                    "precision": "runtime-declared",
-                    "declared_context_tokens": 4096,
-                    "runtime_model": "runtime-selector-under-test",
-                    "settings": {
-                        "temperature": 0,
-                        "top_p": 1,
-                        "max_output_tokens": 128,
-                        "seed": 0,
-                    },
-                }
-            ],
+            "models": [model],
         }
     )
 
@@ -308,6 +309,37 @@ class RunnerTests(unittest.TestCase):
             report["models"][1]["provenance"]["digest"],
             "sha256:public-digest-two",
         )
+
+    def test_parameter_scale_flows_to_run_provenance_and_is_revalidated(self) -> None:
+        report = BenchmarkRunner(
+            StubClient(passing_completions()[:3]),
+            manifest(
+                parameter_scale={
+                    "total_billions": 30.0,
+                    "active_billions": 3.0,
+                }
+            ),
+            profile="smoke",
+        ).run()
+
+        validate_report(report)
+        self.assertEqual(
+            report["models"][0]["provenance"]["parameter_scale"],
+            {"total_billions": 30.0, "active_billions": 3.0},
+        )
+
+        invalid_scales = (
+            {"total_billions": 30.0, "active_billions": 31.0},
+            {"total_billions": None, "active_billions": 3.0},
+            {"total_billions": 30.0001, "active_billions": 3.0},
+            {"total_billions": 30.0, "active_billions": 3.0, "extra": None},
+            {"total_billions": 10**10_000, "active_billions": None},
+        )
+        for index, scale in enumerate(invalid_scales):
+            invalid = copy.deepcopy(report)
+            invalid["models"][0]["provenance"]["parameter_scale"] = scale
+            with self.subTest(index=index), self.assertRaises(ReportError):
+                validate_report(invalid)
 
     def test_runtime_identity_mismatch_is_invalid_without_raw_identity(self) -> None:
         completions = passing_completions()[:3]

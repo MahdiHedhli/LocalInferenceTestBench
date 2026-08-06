@@ -175,3 +175,67 @@ latency and throughput rather than mislabeling those aggregates as facet-specifi
   discriminating precision.
 - An inline unversioned config tuple was rejected because collapse and filtering would drift.
 - Enforcing the graduation policy now was rejected because no additional facet ships in this stage.
+
+## Decision 11: Collapse to bounded cells with a score-neutral representative
+
+**Decision**: Group by facet, profile, suite, and canonical config-key `1.0` bytes. Select one
+representative using validity priority, newest month, then digest. Publish fixed counts and month
+ranges for all four validity classes, but do not embed source-ID or per-month arrays.
+
+**Rationale**: The requested configuration key intentionally excludes validity and month. A
+score-neutral representative plus bounded cohort counts preserves one row per configuration and
+keeps the default clean view honest without allowing a one-cell flood to exceed the shard cap. The
+digest-named source records remain the complete addressable evidence.
+
+**Alternatives considered**:
+
+- Pooling all validity classes into one scalar was rejected as misleading.
+- One row per validity/month was rejected because it violates configuration collapse and grows
+  without bound.
+- Embedding every source digest or month was rejected because it recreates the dataset-cap failure
+  inside one cell.
+
+## Decision 12: Use representative Wilson intervals and transitive bands
+
+**Decision**: Compute 95% Wilson intervals from only the representative raw counts, round the lower
+bound down and upper bound up to whole percentages, and build dense transitive components with
+semantic overlap primary and exact-format overlap secondary. Use the submission digest as the
+neutral final tiebreak inside a band.
+
+**Rationale**: Five binary cases do not support the false precision of a bare `100.0%`. Pooling
+anonymous repeats would let one actor narrow an interval. Transitive components make overlapping
+evidence visibly indistinguishable without unstable pairwise tie assignments.
+
+**Alternatives considered**:
+
+- Point-estimate ranking was rejected because the standard five-case suite is a screen, not a
+  discriminating instrument.
+- Pooling repeats was rejected because content hashes do not establish independent samples.
+- Alphabetical model/source ordering was rejected as a name-based advantage.
+
+## Decision 13: Aggregate performance spread, not performance rank
+
+**Decision**: Every retained record in a cell contributes available latency and throughput values to
+sample-count, median, minimum, and maximum distributions. Missing values are excluded. Performance,
+corroboration, and plausibility do not affect quality bands.
+
+**Rationale**: Repeated observations are useful for surfacing operational spread even when they
+cannot honestly increase statistical confidence in quality. Fixed statistics remain bounded under
+submission floods.
+
+## Decision 14: Require explicit nullable parameter scale for plausibility
+
+**Decision**: New `1.1` submissions always carry nullable total and active parameter counts in
+billions. Older manifests may omit them and export explicit nulls. Plausibility policy `1.0` combines
+only a coarse hardware class already present in the public descriptor with an active-or-total size
+bucket and broad static performance envelopes.
+
+**Rationale**: Model display names are hardened untrusted text and cannot be parsed safely or
+reliably for size. Explicit nulls produce an honest `not_evaluated` result. A versioned caution-only
+policy surfaces obvious outliers without pretending to attest provenance or gate future hardware.
+
+**Alternatives considered**:
+
+- Inferring parameters from model names was rejected as fragile and injection-prone.
+- Treating unknown size as plausible was rejected because missing evidence is not positive evidence.
+- Dropping or demoting outliers was rejected because plausibility is non-authoritative.

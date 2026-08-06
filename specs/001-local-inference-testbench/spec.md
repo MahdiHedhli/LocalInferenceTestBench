@@ -132,7 +132,9 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - **FR-007**: Reports MUST exclude raw prompts, responses, reasoning, tool arguments, credentials,
   endpoint values, environment contents, and machine identifiers.
 - **FR-008**: Manifests MUST record public model identity, source, revision or digest, precision or
-  quantization, declared context, and non-secret generation settings.
+  quantization, declared context, and non-secret generation settings. They MAY record one closed
+  nullable total/active parameter-scale object in billions; omission MUST preserve existing manifest
+  compatibility and supplied values MUST flow into public run provenance.
 - **FR-009**: The endpoint gate MUST allow loopback and locally resolved private addresses and reject
   public, unresolved, credential-bearing, or query-bearing endpoints before inference.
 - **FR-010**: Secrets MUST be accepted only from the process environment or an ignored owner-only env
@@ -268,6 +270,15 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
   snapshot until local or system temporary-file cleanup; the snapshot path and bytes MUST never be
   published. Static exact-bound sidecars remain supported by the separate
   two-step preparation command.
+- **FR-035**: A schema `1.1` public submission MUST contain explicit nullable total and active model
+  parameter counts in billions even when an older manifest omitted them. Known values MUST be
+  positive, bounded, at most three decimal places, and internally consistent. Export MUST copy only
+  explicit provenance and MUST NOT parse model names to infer scale.
+- **FR-036**: The schema `1.1` leaderboard projection MUST collapse repeated records by the existing
+  versioned configuration dimensions, retain a deterministic score-neutral representative, show
+  fixed corroboration and performance-spread summaries, and compute representative-only Wilson rank
+  bands plus caution-only plausibility. Anonymous repeats MUST NOT narrow quality intervals, and
+  plausibility/performance MUST NOT gate, drop, verify, or rank a record.
 
 ### Key Entities
 
@@ -296,8 +307,8 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
   quickstart, runner, schemas, or tests.
 - **SC-007**: The public GitHub repository reports secret scanning and push protection as enabled.
 - **SC-008**: A synthetic public corpus larger than the former aggregate cap produces byte-identical,
-  individually bounded index and shard outputs with every accepted digest present exactly once and
-  no committed shard files.
+  individually bounded index and shard outputs with every projected configuration cell present
+  exactly once, every accepted digest retained at its source path, and no committed shard files.
 - **SC-009**: Shared Python/browser fixtures prove registry-based suite resolution, required
   capability/modality tags, `not_applicable` denominator behavior, categorical measurement validity,
   month validation, and `1.0` legacy handling remain in lockstep without changing the five current

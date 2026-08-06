@@ -6,6 +6,41 @@
       "operations": []
     },
     {
+      "name": "known-parameter-scale",
+      "expected": true,
+      "operations": [
+        {"op": "set", "path": ["model", "parameter_scale"], "value": {"total_billions": 30.5, "active_billions": 3.25}}
+      ]
+    },
+    {
+      "name": "missing-parameter-scale",
+      "expected": false,
+      "operations": [
+        {"op": "delete", "path": ["model", "parameter_scale"]}
+      ]
+    },
+    {
+      "name": "active-parameter-scale-without-total",
+      "expected": false,
+      "operations": [
+        {"op": "set", "path": ["model", "parameter_scale"], "value": {"total_billions": null, "active_billions": 3.25}}
+      ]
+    },
+    {
+      "name": "active-parameter-scale-above-total",
+      "expected": false,
+      "operations": [
+        {"op": "set", "path": ["model", "parameter_scale"], "value": {"total_billions": 3.0, "active_billions": 3.25}}
+      ]
+    },
+    {
+      "name": "parameter-scale-too-precise",
+      "expected": false,
+      "operations": [
+        {"op": "set", "path": ["model", "parameter_scale"], "value": {"total_billions": 7.0001, "active_billions": null}}
+      ]
+    },
+    {
       "name": "unicode-accelerator-labels-are-rejected",
       "expected": false,
       "operations": [

@@ -10,9 +10,11 @@ if (!appSource || !payloadSource) {
 const { validatePayload } = require(appSource);
 const payload = JSON.parse(fs.readFileSync(payloadSource, "utf8"));
 
-try {
-  validatePayload(payload);
-  process.stdout.write("accepted\n");
-} catch (error) {
-  process.stdout.write("rejected\n");
-}
+(async () => {
+  try {
+    await validatePayload(payload);
+    process.stdout.write("accepted\n");
+  } catch (error) {
+    process.stdout.write("rejected\n");
+  }
+})();

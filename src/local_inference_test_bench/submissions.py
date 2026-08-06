@@ -15,6 +15,7 @@ import re
 import tempfile
 from typing import Any, Mapping
 
+from .models import ParameterScaleValidationError, validate_parameter_scale_values
 from .reporting import ReportError, _walk_safe, validate_report
 from .safety import (
     SafetyError,
@@ -76,6 +77,7 @@ _TERMINATIONS = {
     "not_applicable",
 }
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_FACET_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _IPV4_CANDIDATE = re.compile(r"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])")
 _IPV6_CANDIDATE = re.compile(
     r"(?i)(?<![0-9a-f:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}"
@@ -159,6 +161,57 @@ _MODEL_REVIEW_INJECTION = re.compile(
     r"```|<!--|-->|<\s*/?\s*script\b|\[\s*inst\s*\]|<<\s*sys\s*>>"
     r")"
 )
+_CONFIG_KEY_VERSION = "1.0"
+_CONFIG_SELECTION_VERSION = "1.0"
+_PLAUSIBILITY_POLICY_VERSION = "1.0"
+_WILSON_Z_95 = 1.959963984540054
+_VALIDITY_SELECTION_ORDER = (
+    "clean",
+    "nonquiescent",
+    "degraded_midrun",
+    "legacy_unreported",
+)
+_PLAUSIBILITY_SIGNAL_ORDER = (
+    "latency_below_envelope",
+    "throughput_above_envelope",
+)
+_MODEL_SIZE_BUCKETS = (
+    "under_4b",
+    "4b_to_under_14b",
+    "14b_to_under_35b",
+    "35b_to_under_70b",
+    "70b_and_above",
+)
+_PLAUSIBILITY_ENVELOPES = {
+    "cpu_only": {
+        "under_4b": (0.1, 2_500.0),
+        "4b_to_under_14b": (0.1, 1_500.0),
+        "14b_to_under_35b": (0.2, 800.0),
+        "35b_to_under_70b": (0.5, 400.0),
+        "70b_and_above": (1.0, 200.0),
+    },
+    "shared_accelerator": {
+        "under_4b": (0.1, 10_000.0),
+        "4b_to_under_14b": (0.1, 6_000.0),
+        "14b_to_under_35b": (0.1, 4_000.0),
+        "35b_to_under_70b": (0.1, 2_500.0),
+        "70b_and_above": (0.2, 1_500.0),
+    },
+    "discrete_accelerator": {
+        "under_4b": (0.1, 20_000.0),
+        "4b_to_under_14b": (0.1, 12_000.0),
+        "14b_to_under_35b": (0.1, 8_000.0),
+        "35b_to_under_70b": (0.1, 5_000.0),
+        "70b_and_above": (0.2, 3_000.0),
+    },
+    "mixed_accelerator": {
+        "under_4b": (0.1, 20_000.0),
+        "4b_to_under_14b": (0.1, 12_000.0),
+        "14b_to_under_35b": (0.1, 8_000.0),
+        "35b_to_under_70b": (0.1, 5_000.0),
+        "70b_and_above": (0.2, 3_000.0),
+    },
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,7 +233,7 @@ DEFAULT_FACET = FacetSelector(
 # These names define the public configuration cell. Stage 4 uses this exact
 # versioned structure for collapse and corroboration rather than an inline tuple.
 CONFIG_KEY_DIMENSIONS = {
-    "version": "1.0",
+    "version": _CONFIG_KEY_VERSION,
     "fields": (
         "hardware",
         "model_identity",
@@ -321,14 +374,52 @@ def _number(
     return float(value)
 
 
-def _validate_model(value: Any, path: str) -> Mapping[str, Any]:
+def _validate_parameter_scale(value: Any, path: str) -> Mapping[str, Any]:
+    try:
+        validate_parameter_scale_values(value)
+    except ParameterScaleValidationError as error:
+        if error.code == "object_contract":
+            message = f"{path} has an unsupported object contract"
+        else:
+            error_path = f"{path}.{error.field}"
+            if error.code == "zero":
+                message = f"{error_path} must be positive when known"
+            elif error.code == "invalid_number":
+                message = (
+                    f"{error_path} must be a finite number between 0.0 and 1000000.0"
+                )
+            elif error.code == "fractional_digits":
+                message = f"{error_path} supports at most 3 fractional digits"
+            elif error.code == "numeric_precision":
+                message = f"{error_path} has unsupported numeric precision"
+            elif error.code == "active_requires_total":
+                message = f"{path}.active_billions requires total_billions"
+            elif error.code == "active_exceeds_total":
+                message = f"{path}.active_billions cannot exceed total_billions"
+            else:
+                raise AssertionError(
+                    f"unsupported parameter-scale error code: {error.code}"
+                ) from error
+        raise SubmissionError(message) from error
+    return value
+
+
+def _validate_model(
+    value: Any,
+    path: str,
+    *,
+    require_parameter_scale: bool = False,
+) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise SubmissionError(f"{path} must be an object")
     base = {"display_name", "source", "precision", "declared_context_tokens"}
-    identity = set(value) - base
+    if require_parameter_scale:
+        base.add("parameter_scale")
+    optional_scale = {"parameter_scale"} if not require_parameter_scale else set()
+    identity = set(value) - base - optional_scale
     if identity not in ({"revision"}, {"digest"}):
         raise SubmissionError(f"{path} must contain exactly one public revision identifier")
-    model = _object(value, base | identity, path)
+    model = _object_with_optional(value, base | identity, optional_scale, path)
     _model_descriptor_text(
         model["display_name"],
         f"{path}.display_name",
@@ -345,6 +436,8 @@ def _validate_model(value: Any, path: str) -> Mapping[str, Any]:
         maximum=_MODEL_PRECISION_MAX,
     )
     _integer(model["declared_context_tokens"], f"{path}.declared_context_tokens", minimum=1)
+    if "parameter_scale" in model:
+        _validate_parameter_scale(model["parameter_scale"], f"{path}.parameter_scale")
     identity_field = next(iter(identity))
     _model_descriptor_text(
         model[identity_field],
@@ -875,6 +968,11 @@ def _normalize_submission_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     settings = normalized["settings"]
     settings["temperature"] = _canonical_float(settings["temperature"])
     settings["top_p"] = _canonical_float(settings["top_p"])
+    parameter_scale = normalized["model"].get("parameter_scale")
+    if parameter_scale is not None:
+        for field in ("total_billions", "active_billions"):
+            if parameter_scale[field] is not None:
+                parameter_scale[field] = _canonical_float(parameter_scale[field])
     metrics = normalized["metrics"]
     metrics["latency_ms_mean"] = _canonical_float(metrics["latency_ms_mean"])
     if metrics["completion_tokens_per_second"] is not None:
@@ -952,7 +1050,15 @@ def prepare_submissions(
             ),
             "hardware": copy.deepcopy(public_environment["hardware"]),
             "runtime": copy.deepcopy(public_environment["runtime"]),
-            "model": copy.deepcopy(model["provenance"]),
+            "model": {
+                **copy.deepcopy(model["provenance"]),
+                "parameter_scale": copy.deepcopy(
+                    model["provenance"].get(
+                        "parameter_scale",
+                        {"total_billions": None, "active_billions": None},
+                    )
+                ),
+            },
             "settings": copy.deepcopy(model["settings"]),
             "cases": [
                 {
@@ -1068,7 +1174,13 @@ def _validate_submission(
     submission_id = submission["submission_id"]
     if not isinstance(submission_id, str) or not _HEX_DIGEST.fullmatch(submission_id):
         raise SubmissionError("submission_id must be a lowercase SHA-256 digest")
-    model = _validate_model(submission["model"], "submission.model")
+    if legacy and "parameter_scale" in submission["model"]:
+        raise SubmissionError("legacy submission.model has an unsupported object contract")
+    model = _validate_model(
+        submission["model"],
+        "submission.model",
+        require_parameter_scale=not legacy,
+    )
     context_tokens = int(model["declared_context_tokens"])
     _validate_settings(
         submission["settings"],
@@ -1378,12 +1490,19 @@ def _validate_facet_selector(facet: FacetSelector) -> None:
         or not facet.modalities.issubset(MODALITIES)
         or (
             facet.capabilities is not None
-            and not facet.capabilities.issubset(CAPABILITIES)
+            and (
+                not facet.capabilities
+                or not facet.capabilities.issubset(CAPABILITIES)
+            )
         )
     ):
         raise SubmissionError("leaderboard facet selector is unsupported")
     dimension_names = set(CONFIG_KEY_DIMENSIONS["fields"])
-    if any(name not in dimension_names for name, _value in facet.dimension_filters):
+    selected_dimensions = [name for name, _value in facet.dimension_filters]
+    if (
+        len(selected_dimensions) != len(set(selected_dimensions))
+        or any(name not in dimension_names for name in selected_dimensions)
+    ):
         raise SubmissionError("leaderboard facet dimension filter is unsupported")
 
 
@@ -1394,6 +1513,12 @@ def _model_identity(model: Mapping[str, Any]) -> dict[str, Any]:
         "source": model["source"],
         identity_field: model[identity_field],
         "declared_context_tokens": model["declared_context_tokens"],
+        "parameter_scale": copy.deepcopy(
+            model.get(
+                "parameter_scale",
+                {"total_billions": None, "active_billions": None},
+            )
+        ),
     }
 
 
@@ -1421,6 +1546,801 @@ def _facet_cases(
             continue
         selected.append(case)
     return selected
+
+
+def wilson_interval_95(passes: int, total: int) -> dict[str, int]:
+    """Return conservative outward-rounded whole-percent Wilson bounds."""
+
+    if (
+        isinstance(passes, bool)
+        or isinstance(total, bool)
+        or not isinstance(passes, int)
+        or not isinstance(total, int)
+        or total < 1
+        or passes < 0
+        or passes > total
+    ):
+        raise SubmissionError("Wilson interval counts are inconsistent")
+    proportion = passes / total
+    squared = _WILSON_Z_95 * _WILSON_Z_95
+    denominator = 1.0 + squared / total
+    center = (proportion + squared / (2.0 * total)) / denominator
+    margin = (
+        _WILSON_Z_95
+        * math.sqrt(
+            (proportion * (1.0 - proportion) + squared / (4.0 * total))
+            / total
+        )
+        / denominator
+    )
+    lower = max(0.0, center - margin)
+    upper = min(1.0, center + margin)
+    return {
+        "lower_percent": max(0, min(100, math.floor(lower * 100.0))),
+        "upper_percent": max(0, min(100, math.ceil(upper * 100.0))),
+    }
+
+
+def _config_key(dimensions: Mapping[str, Any]) -> tuple[bytes, str]:
+    payload = {
+        "version": CONFIG_KEY_DIMENSIONS["version"],
+        "dimensions": dimensions,
+    }
+    canonical = _canonical_bytes(payload)
+    return canonical, hashlib.sha256(canonical).hexdigest()
+
+
+def _representative_key(row: Mapping[str, Any]) -> tuple[int, int, str]:
+    validity = str(row["validity"])
+    try:
+        priority = _VALIDITY_SELECTION_ORDER.index(validity)
+    except ValueError as error:
+        raise SubmissionError("leaderboard row validity is unsupported") from error
+    period = row["measurement_period"]
+    period_number = (
+        int(str(period)[:4]) * 12 + int(str(period)[5:7]) if period is not None else -1
+    )
+    return priority, -period_number, str(row["submission_id"])
+
+
+def _corroboration(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    by_validity: dict[str, Any] = {}
+    total = 0
+    for validity in _VALIDITY_SELECTION_ORDER:
+        matching = [row for row in rows if row["validity"] == validity]
+        periods = sorted(
+            str(row["measurement_period"])
+            for row in matching
+            if row["measurement_period"] is not None
+        )
+        by_validity[validity] = {
+            "count": len(matching),
+            "earliest_period": periods[0] if periods else None,
+            "latest_period": periods[-1] if periods else None,
+        }
+        total += len(matching)
+    if total != len(rows):
+        raise SubmissionError("leaderboard corroboration contains an unsupported validity")
+    return {
+        "accepted_record_count": total,
+        "by_validity": by_validity,
+    }
+
+
+def _distribution(values: list[float]) -> dict[str, int | float | None]:
+    if not values:
+        return {
+            "sample_count": 0,
+            "median": None,
+            "minimum": None,
+            "maximum": None,
+        }
+    ordered = sorted(Decimal(str(value)) for value in values)
+    middle = len(ordered) // 2
+    median = (
+        ordered[middle]
+        if len(ordered) % 2
+        else (ordered[middle - 1] + ordered[middle]) / Decimal(2)
+    )
+    return {
+        "sample_count": len(ordered),
+        "median": _canonical_float(float(median)),
+        "minimum": _canonical_float(float(ordered[0])),
+        "maximum": _canonical_float(float(ordered[-1])),
+    }
+
+
+def _performance_distribution(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    latencies = [
+        float(row["metrics"]["latency_ms_mean"])
+        for row in rows
+        if row["metrics"]["latency_ms_mean"] is not None
+    ]
+    throughput = [
+        float(row["metrics"]["completion_tokens_per_second"])
+        for row in rows
+        if row["metrics"]["completion_tokens_per_second"] is not None
+    ]
+    return {
+        "latency_ms_mean": _distribution(latencies),
+        "completion_tokens_per_second": _distribution(throughput),
+    }
+
+
+def _hardware_class(hardware: Mapping[str, Any]) -> str:
+    execution_mode = hardware["execution_mode"]
+    if execution_mode == "cpu_only":
+        return "cpu_only"
+    if execution_mode not in {"accelerator_only", "hybrid"}:
+        return "unknown"
+    architecture = hardware["memory"]["architecture"]
+    return {
+        "shared": "shared_accelerator",
+        "discrete": "discrete_accelerator",
+        "mixed": "mixed_accelerator",
+    }.get(architecture, "unknown")
+
+
+def _model_size_basis(model: Mapping[str, Any]) -> tuple[str, str]:
+    scale = model.get("parameter_scale")
+    if not isinstance(scale, Mapping):
+        return "unknown", "unknown"
+    active = scale.get("active_billions")
+    total = scale.get("total_billions")
+    if active is not None:
+        value = float(active)
+        basis = "active_billions"
+    elif total is not None:
+        value = float(total)
+        basis = "total_billions"
+    else:
+        return "unknown", "unknown"
+    if value < 4:
+        bucket = "under_4b"
+    elif value < 14:
+        bucket = "4b_to_under_14b"
+    elif value < 35:
+        bucket = "14b_to_under_35b"
+    elif value < 70:
+        bucket = "35b_to_under_70b"
+    else:
+        bucket = "70b_and_above"
+    return bucket, basis
+
+
+def _plausibility(
+    rows: list[Mapping[str, Any]],
+    representative: Mapping[str, Any],
+) -> dict[str, Any]:
+    hardware_class = _hardware_class(representative["hardware"])
+    size_bucket, size_basis = _model_size_basis(representative["model"])
+    envelope = _PLAUSIBILITY_ENVELOPES.get(hardware_class, {}).get(size_bucket)
+    evaluated = 0
+    outside = 0
+    found_signals: set[str] = set()
+    if envelope is not None:
+        minimum_latency, maximum_throughput = envelope
+        for row in rows:
+            metrics = row["metrics"]
+            latency = metrics["latency_ms_mean"]
+            throughput = metrics["completion_tokens_per_second"]
+            if latency is None and throughput is None:
+                continue
+            evaluated += 1
+            row_signals: set[str] = set()
+            if latency is not None and float(latency) < minimum_latency:
+                row_signals.add("latency_below_envelope")
+            if throughput is not None and float(throughput) > maximum_throughput:
+                row_signals.add("throughput_above_envelope")
+            if row_signals:
+                outside += 1
+                found_signals.update(row_signals)
+    status = (
+        "not_evaluated"
+        if evaluated == 0
+        else "caution" if outside else "within_envelope"
+    )
+    return {
+        "policy_version": _PLAUSIBILITY_POLICY_VERSION,
+        "status": status,
+        "basis": {
+            "hardware_class": hardware_class,
+            "model_size_bucket": size_bucket,
+            "model_size_basis": size_basis,
+        },
+        "evaluated_record_count": evaluated,
+        "outside_envelope_record_count": outside,
+        "signals": [
+            signal for signal in _PLAUSIBILITY_SIGNAL_ORDER if signal in found_signals
+        ],
+    }
+
+
+def _interval_components(
+    rows: list[dict[str, Any]],
+    metric: str,
+) -> list[list[dict[str, Any]]]:
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            row["score_intervals"][metric]["lower_percent"],
+            row["score_intervals"][metric]["upper_percent"],
+            row["submission_id"],
+        ),
+    )
+    components: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    current_upper = -1
+    for row in ordered:
+        interval = row["score_intervals"][metric]
+        if current and interval["lower_percent"] > current_upper:
+            components.append(current)
+            current = []
+            current_upper = -1
+        current.append(row)
+        current_upper = max(current_upper, interval["upper_percent"])
+    if current:
+        components.append(current)
+    components.reverse()
+    return components
+
+
+def _assign_rank_bands(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    bands: list[list[dict[str, Any]]] = []
+    for semantic_component in _interval_components(rows, "semantic"):
+        bands.extend(_interval_components(semantic_component, "exact_format"))
+    entries: list[dict[str, Any]] = []
+    for band_number, band in enumerate(bands, start=1):
+        for row in sorted(band, key=lambda candidate: candidate["submission_id"]):
+            entries.append({**row, "rank": band_number})
+    return entries
+
+
+def _legacy_leaderboard_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows.sort(
+        key=lambda row: (
+            -row["metrics"]["semantic_score_percent"],
+            -row["metrics"]["exact_format_score_percent"],
+            row["model"]["source"].casefold(),
+            row["model"]["display_name"].casefold(),
+            row["submission_id"],
+        )
+    )
+    entries: list[dict[str, Any]] = []
+    previous_quality: tuple[float, float] | None = None
+    current_rank = 0
+    for row in rows:
+        quality = (
+            row["metrics"]["semantic_score_percent"],
+            row["metrics"]["exact_format_score_percent"],
+        )
+        if quality != previous_quality:
+            current_rank += 1
+            previous_quality = quality
+        row.pop("_submission_schema_version")
+        entries.append({"rank": current_rank, **row})
+    return entries
+
+
+def _versioned_config_cells(
+    rows: list[dict[str, Any]],
+    facet: FacetSelector,
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, str, bytes], list[dict[str, Any]]] = {}
+    digests: dict[tuple[str, str, str, bytes], str] = {}
+    for row in rows:
+        if "parameter_scale" not in row["model"]:
+            row["model"]["parameter_scale"] = {
+                "total_billions": None,
+                "active_billions": None,
+            }
+        dimensions = _facet_dimensions(row)
+        canonical, digest = _config_key(dimensions)
+        scope = (facet.facet_id, row["profile"], row["suite_version"], canonical)
+        grouped.setdefault(scope, []).append(row)
+        digests[scope] = digest
+
+    cells: list[dict[str, Any]] = []
+    for scope, group in grouped.items():
+        representative = min(group, key=_representative_key)
+        cell = {
+            key: copy.deepcopy(value)
+            for key, value in representative.items()
+            if key != "_submission_schema_version"
+        }
+        cell.update(
+            {
+                "facet_id": facet.facet_id,
+                "submission_schema_version": representative[
+                    "_submission_schema_version"
+                ],
+                "config_cell": {
+                    "key_version": _CONFIG_KEY_VERSION,
+                    "selection_version": _CONFIG_SELECTION_VERSION,
+                    "digest": digests[scope],
+                },
+                "corroboration": _corroboration(group),
+                "score_intervals": {
+                    "method": "wilson_95",
+                    "semantic": wilson_interval_95(
+                        representative["metrics"]["semantic_pass_count"],
+                        representative["metrics"]["scored_case_count"],
+                    ),
+                    "exact_format": wilson_interval_95(
+                        representative["metrics"]["exact_format_pass_count"],
+                        representative["metrics"]["scored_case_count"],
+                    ),
+                },
+                "performance_distribution": _performance_distribution(group),
+                "plausibility": _plausibility(group, representative),
+            }
+        )
+        cells.append(cell)
+    return _assign_rank_bands(cells)
+
+
+def _validate_derived_metrics(
+    value: Any,
+    path: str,
+    *,
+    suite_length: int,
+) -> Mapping[str, Any]:
+    metrics = _object(
+        value,
+        {
+            "case_count",
+            "semantic_pass_count",
+            "semantic_score_percent",
+            "exact_format_pass_count",
+            "exact_format_score_percent",
+            "scored_case_count",
+            "usage_coverage_cases",
+            "latency_ms_mean",
+            "completion_tokens_per_second",
+        },
+        path,
+    )
+    case_count = _integer(metrics["case_count"], f"{path}.case_count", minimum=1)
+    if case_count > suite_length:
+        raise SubmissionError(f"{path}.case_count exceeds the resolved suite")
+    scored = _integer(
+        metrics["scored_case_count"],
+        f"{path}.scored_case_count",
+        minimum=1,
+        maximum=case_count,
+    )
+    semantic = _integer(
+        metrics["semantic_pass_count"],
+        f"{path}.semantic_pass_count",
+        maximum=scored,
+    )
+    exact = _integer(
+        metrics["exact_format_pass_count"],
+        f"{path}.exact_format_pass_count",
+        maximum=scored,
+    )
+    coverage = _integer(
+        metrics["usage_coverage_cases"],
+        f"{path}.usage_coverage_cases",
+        maximum=scored,
+    )
+    if metrics["semantic_score_percent"] != _score_percent(semantic, scored):
+        raise SubmissionError(f"{path}.semantic_score_percent is inconsistent")
+    if metrics["exact_format_score_percent"] != _score_percent(exact, scored):
+        raise SubmissionError(f"{path}.exact_format_score_percent is inconsistent")
+    full_suite = case_count == suite_length
+    latency = metrics["latency_ms_mean"]
+    throughput = metrics["completion_tokens_per_second"]
+    if not full_suite:
+        if coverage != 0 or latency is not None or throughput is not None:
+            raise SubmissionError(f"{path} relabels unavailable facet performance")
+        return metrics
+    normalized_latency = _number(latency, f"{path}.latency_ms_mean")
+    if round(normalized_latency, 1) != normalized_latency:
+        raise SubmissionError(f"{path}.latency_ms_mean must use one decimal")
+    if throughput is not None:
+        normalized_throughput = _number(
+            throughput,
+            f"{path}.completion_tokens_per_second",
+        )
+        if round(normalized_throughput, 1) != normalized_throughput:
+            raise SubmissionError(
+                f"{path}.completion_tokens_per_second must use one decimal"
+            )
+        if coverage != scored:
+            raise SubmissionError(f"{path} reports throughput with incomplete usage")
+    return metrics
+
+
+def _validate_corroboration(
+    value: Any,
+    path: str,
+    *,
+    representative_validity: str,
+    representative_period: str | None,
+) -> Mapping[str, Any]:
+    corroboration = _object(value, {"accepted_record_count", "by_validity"}, path)
+    accepted = _integer(
+        corroboration["accepted_record_count"],
+        f"{path}.accepted_record_count",
+        minimum=1,
+    )
+    by_validity = _object(
+        corroboration["by_validity"],
+        set(_VALIDITY_SELECTION_ORDER),
+        f"{path}.by_validity",
+    )
+    total = 0
+    for validity in _VALIDITY_SELECTION_ORDER:
+        summary_path = f"{path}.by_validity.{validity}"
+        summary = _object(
+            by_validity[validity],
+            {"count", "earliest_period", "latest_period"},
+            summary_path,
+        )
+        count = _integer(summary["count"], f"{summary_path}.count")
+        earliest = summary["earliest_period"]
+        latest = summary["latest_period"]
+        if count == 0 or validity == "legacy_unreported":
+            if earliest is not None or latest is not None:
+                raise SubmissionError(f"{summary_path} has unsupported periods")
+        else:
+            _validate_measurement_period(earliest, f"{summary_path}.earliest_period")
+            _validate_measurement_period(latest, f"{summary_path}.latest_period")
+            if earliest > latest:
+                raise SubmissionError(f"{summary_path} period range is reversed")
+        total += count
+    if total != accepted:
+        raise SubmissionError(f"{path}.accepted_record_count is inconsistent")
+    representative = by_validity[representative_validity]
+    if representative["count"] < 1:
+        raise SubmissionError(f"{path} omits the representative validity")
+    if representative_validity == "legacy_unreported":
+        if representative_period is not None:
+            raise SubmissionError(f"{path} gives a legacy representative a period")
+    elif not (
+        representative["earliest_period"]
+        <= representative_period
+        <= representative["latest_period"]
+    ):
+        raise SubmissionError(f"{path} does not cover the representative period")
+    return corroboration
+
+
+def _validate_distribution(
+    value: Any,
+    path: str,
+    *,
+    maximum_samples: int,
+    representative_value: float | None,
+) -> Mapping[str, Any]:
+    distribution = _object(
+        value,
+        {"sample_count", "median", "minimum", "maximum"},
+        path,
+    )
+    sample_count = _integer(
+        distribution["sample_count"],
+        f"{path}.sample_count",
+        maximum=maximum_samples,
+    )
+    statistics = (
+        distribution["minimum"],
+        distribution["median"],
+        distribution["maximum"],
+    )
+    if sample_count == 0:
+        if any(item is not None for item in statistics) or representative_value is not None:
+            raise SubmissionError(f"{path} zero-sample distribution is inconsistent")
+        return distribution
+    normalized = [
+        _number(item, f"{path}.{field}", decimal_places=2)
+        for item, field in zip(statistics, ("minimum", "median", "maximum"), strict=True)
+    ]
+    minimum, median, maximum = normalized
+    if not minimum <= median <= maximum:
+        raise SubmissionError(f"{path} statistics are not ordered")
+    if sample_count == 1 and not minimum == median == maximum:
+        raise SubmissionError(f"{path} single-sample distribution is inconsistent")
+    if sample_count == 2:
+        expected_median = (
+            Decimal(str(minimum)) + Decimal(str(maximum))
+        ) / Decimal(2)
+        if Decimal(str(median)) != expected_median:
+            raise SubmissionError(f"{path} two-sample median is inconsistent")
+    if representative_value is not None and not minimum <= representative_value <= maximum:
+        raise SubmissionError(f"{path} excludes the representative value")
+    return distribution
+
+
+def validate_leaderboard_entry(
+    value: Mapping[str, Any],
+    *,
+    registry: Mapping[tuple[str, str], tuple[SuiteCase, ...]] | None = None,
+) -> None:
+    """Validate one projected schema 1.1 configuration cell."""
+
+    required = {
+        "rank",
+        "facet_id",
+        "config_cell",
+        "corroboration",
+        "score_intervals",
+        "performance_distribution",
+        "plausibility",
+        "submission_schema_version",
+        "submission_id",
+        "suite_version",
+        "profile",
+        "validity",
+        "measurement_period",
+        "measurement_conditions",
+        "hardware",
+        "runtime",
+        "model",
+        "settings",
+        "metrics",
+    }
+    entry = _object_with_optional(
+        value,
+        required,
+        {"runtime_configuration", "determinism"},
+        "leaderboard_entry",
+    )
+    _integer(entry["rank"], "leaderboard_entry.rank", minimum=1)
+    if not isinstance(entry["facet_id"], str) or not _FACET_ID.fullmatch(
+        entry["facet_id"]
+    ):
+        raise SubmissionError("leaderboard_entry.facet_id is unsupported")
+    if not isinstance(entry["submission_id"], str) or not _HEX_DIGEST.fullmatch(
+        entry["submission_id"]
+    ):
+        raise SubmissionError("leaderboard_entry.submission_id is unsupported")
+    profile = _text(entry["profile"], "leaderboard_entry.profile", maximum=128)
+    suite_version = _text(
+        entry["suite_version"],
+        "leaderboard_entry.suite_version",
+        maximum=128,
+    )
+    active_registry = registry
+    try:
+        suite = (
+            active_registry[(profile, suite_version)]
+            if active_registry is not None
+            else resolve_public_suite(profile, suite_version)
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise SubmissionError("leaderboard_entry suite is unsupported") from error
+
+    source_version = entry["submission_schema_version"]
+    validity = entry["validity"]
+    if source_version == LEGACY_SUBMISSION_SCHEMA_VERSION:
+        if (
+            validity != "legacy_unreported"
+            or entry["measurement_period"] is not None
+            or entry["measurement_conditions"] is not None
+            or "determinism" in entry
+        ):
+            raise SubmissionError("leaderboard_entry legacy evidence is inconsistent")
+    elif source_version == SUBMISSION_SCHEMA_VERSION:
+        if validity not in _PUBLIC_VALIDITIES:
+            raise SubmissionError("leaderboard_entry validity is unsupported")
+        _validate_measurement_period(
+            entry["measurement_period"],
+            "leaderboard_entry.measurement_period",
+        )
+        conditions = _validate_measurement_conditions(
+            entry["measurement_conditions"],
+            "leaderboard_entry.measurement_conditions",
+        )
+        if validity != _derived_public_validity(conditions["pre"], conditions["post"]):
+            raise SubmissionError("leaderboard_entry validity is inconsistent")
+        if "determinism" in entry:
+            _validate_determinism(entry["determinism"], "leaderboard_entry.determinism")
+    else:
+        raise SubmissionError("leaderboard_entry source schema is unsupported")
+
+    environment = {
+        "schema_version": "1.0",
+        "hardware": entry["hardware"],
+        "runtime": entry["runtime"],
+    }
+    if "runtime_configuration" in entry:
+        environment["runtime_configuration"] = entry["runtime_configuration"]
+    validate_public_environment(environment)
+    model = _validate_model(
+        entry["model"],
+        "leaderboard_entry.model",
+        require_parameter_scale=True,
+    )
+    _validate_settings(
+        entry["settings"],
+        "leaderboard_entry.settings",
+        context_tokens=int(model["declared_context_tokens"]),
+    )
+    if "runtime_configuration" in entry:
+        configured_context = entry["runtime_configuration"]["context_window_tokens"]
+        if (
+            configured_context is not None
+            and entry["settings"]["max_output_tokens"] > configured_context
+        ):
+            raise SubmissionError(
+                "leaderboard_entry.settings.max_output_tokens exceeds the configured "
+                "context window"
+            )
+    metrics = _validate_derived_metrics(
+        entry["metrics"],
+        "leaderboard_entry.metrics",
+        suite_length=len(suite),
+    )
+
+    config_cell = _object(
+        entry["config_cell"],
+        {"key_version", "selection_version", "digest"},
+        "leaderboard_entry.config_cell",
+    )
+    if (
+        config_cell["key_version"] != _CONFIG_KEY_VERSION
+        or config_cell["selection_version"] != _CONFIG_SELECTION_VERSION
+        or not isinstance(config_cell["digest"], str)
+        or not _HEX_DIGEST.fullmatch(config_cell["digest"])
+    ):
+        raise SubmissionError("leaderboard_entry config cell is unsupported")
+    _canonical, expected_digest = _config_key(_facet_dimensions(entry))
+    if config_cell["digest"] != expected_digest:
+        raise SubmissionError("leaderboard_entry config digest is inconsistent")
+
+    corroboration = _validate_corroboration(
+        entry["corroboration"],
+        "leaderboard_entry.corroboration",
+        representative_validity=validity,
+        representative_period=entry["measurement_period"],
+    )
+    intervals = _object(
+        entry["score_intervals"],
+        {"method", "semantic", "exact_format"},
+        "leaderboard_entry.score_intervals",
+    )
+    if intervals["method"] != "wilson_95":
+        raise SubmissionError("leaderboard_entry score interval method is unsupported")
+    for name, count_field in (
+        ("semantic", "semantic_pass_count"),
+        ("exact_format", "exact_format_pass_count"),
+    ):
+        interval = _object(
+            intervals[name],
+            {"lower_percent", "upper_percent"},
+            f"leaderboard_entry.score_intervals.{name}",
+        )
+        expected = wilson_interval_95(
+            metrics[count_field],
+            metrics["scored_case_count"],
+        )
+        if dict(interval) != expected:
+            raise SubmissionError("leaderboard_entry Wilson interval is inconsistent")
+
+    performance = _object(
+        entry["performance_distribution"],
+        {"latency_ms_mean", "completion_tokens_per_second"},
+        "leaderboard_entry.performance_distribution",
+    )
+    maximum_samples = corroboration["accepted_record_count"]
+    latency = _validate_distribution(
+        performance["latency_ms_mean"],
+        "leaderboard_entry.performance_distribution.latency_ms_mean",
+        maximum_samples=maximum_samples,
+        representative_value=metrics["latency_ms_mean"],
+    )
+    if latency["sample_count"] != (
+        0 if metrics["latency_ms_mean"] is None else maximum_samples
+    ):
+        raise SubmissionError("leaderboard_entry latency sample count is inconsistent")
+    throughput = _validate_distribution(
+        performance["completion_tokens_per_second"],
+        "leaderboard_entry.performance_distribution.completion_tokens_per_second",
+        maximum_samples=maximum_samples,
+        representative_value=metrics["completion_tokens_per_second"],
+    )
+
+    plausibility = _object(
+        entry["plausibility"],
+        {
+            "policy_version",
+            "status",
+            "basis",
+            "evaluated_record_count",
+            "outside_envelope_record_count",
+            "signals",
+        },
+        "leaderboard_entry.plausibility",
+    )
+    expected_hardware = _hardware_class(entry["hardware"])
+    expected_bucket, expected_basis = _model_size_basis(entry["model"])
+    basis = _object(
+        plausibility["basis"],
+        {"hardware_class", "model_size_bucket", "model_size_basis"},
+        "leaderboard_entry.plausibility.basis",
+    )
+    if dict(basis) != {
+        "hardware_class": expected_hardware,
+        "model_size_bucket": expected_bucket,
+        "model_size_basis": expected_basis,
+    }:
+        raise SubmissionError("leaderboard_entry plausibility basis is inconsistent")
+    envelope = _PLAUSIBILITY_ENVELOPES.get(expected_hardware, {}).get(expected_bucket)
+    expected_signals: list[str] = []
+    if envelope is not None:
+        minimum_latency, maximum_throughput = envelope
+        if latency["sample_count"] and latency["minimum"] < minimum_latency:
+            expected_signals.append("latency_below_envelope")
+        if throughput["sample_count"] and throughput["maximum"] > maximum_throughput:
+            expected_signals.append("throughput_above_envelope")
+    evaluated = _integer(
+        plausibility["evaluated_record_count"],
+        "leaderboard_entry.plausibility.evaluated_record_count",
+        maximum=maximum_samples,
+    )
+    outside = _integer(
+        plausibility["outside_envelope_record_count"],
+        "leaderboard_entry.plausibility.outside_envelope_record_count",
+        maximum=evaluated,
+    )
+    expected_evaluated = (
+        0
+        if envelope is None
+        else max(latency["sample_count"], throughput["sample_count"])
+    )
+    expected_status = (
+        "not_evaluated" if evaluated == 0 else "caution" if outside else "within_envelope"
+    )
+    if (
+        evaluated != expected_evaluated
+        or plausibility["status"] != expected_status
+        or plausibility["policy_version"] != _PLAUSIBILITY_POLICY_VERSION
+        or plausibility["signals"] != expected_signals
+        or bool(outside) != bool(expected_signals)
+    ):
+        raise SubmissionError("leaderboard_entry plausibility is inconsistent")
+
+
+def validate_versioned_leaderboard(value: Mapping[str, Any]) -> None:
+    """Validate one complete logical schema 1.1 leaderboard and its rank bands."""
+
+    leaderboard = _object(value, {"schema_version", "entry_count", "entries"}, "leaderboard")
+    if leaderboard["schema_version"] != LEADERBOARD_SCHEMA_VERSION:
+        raise SubmissionError("leaderboard schema version is unsupported")
+    entries = leaderboard["entries"]
+    if not isinstance(entries, list):
+        raise SubmissionError("leaderboard.entries must be a list")
+    if _integer(leaderboard["entry_count"], "leaderboard.entry_count") != len(entries):
+        raise SubmissionError("leaderboard.entry_count is inconsistent")
+    seen_ids: set[str] = set()
+    seen_cells: set[tuple[str, str, str, str]] = set()
+    for entry in entries:
+        validate_leaderboard_entry(entry)
+        if entry["submission_id"] in seen_ids:
+            raise SubmissionError("leaderboard contains a duplicate representative")
+        seen_ids.add(entry["submission_id"])
+        scope = (
+            entry["facet_id"],
+            entry["profile"],
+            entry["suite_version"],
+            entry["config_cell"]["digest"],
+        )
+        if scope in seen_cells:
+            raise SubmissionError("leaderboard contains a duplicate config cell")
+        seen_cells.add(scope)
+    unranked = [
+        {key: copy.deepcopy(item) for key, item in entry.items() if key != "rank"}
+        for entry in entries
+    ]
+    expected = _assign_rank_bands(unranked)
+    if [
+        (entry["submission_id"], entry["rank"]) for entry in entries
+    ] != [
+        (entry["submission_id"], entry["rank"]) for entry in expected
+    ]:
+        raise SubmissionError("leaderboard rank bands are inconsistent")
 
 
 def build_leaderboard(
@@ -1551,40 +2471,24 @@ def build_leaderboard(
         contains_current_submission = contains_current_submission or not is_legacy
         rows.append(row)
 
-    rows.sort(
-        key=lambda row: (
-            -row["metrics"]["semantic_score_percent"],
-            -row["metrics"]["exact_format_score_percent"],
-            row["model"]["source"].casefold(),
-            row["model"]["display_name"].casefold(),
-            row["submission_id"],
-        )
+    versioned_projection = (
+        contains_current_submission
+        or contains_subset_projection
+        or facet != DEFAULT_FACET
     )
-    versioned_projection = contains_current_submission or contains_subset_projection
-    entries: list[dict[str, Any]] = []
-    previous_quality: tuple[float, float] | None = None
-    current_rank = 0
-    for row in rows:
-        quality = (
-            row["metrics"]["semantic_score_percent"],
-            row["metrics"]["exact_format_score_percent"],
-        )
-        if quality != previous_quality:
-            current_rank += 1
-            previous_quality = quality
-        submission_schema_version = row.pop("_submission_schema_version")
-        entry = {"rank": current_rank, **row}
-        if versioned_projection:
-            entry["submission_schema_version"] = submission_schema_version
-            if submission_schema_version == LEGACY_SUBMISSION_SCHEMA_VERSION:
-                entry.update(
+    if versioned_projection:
+        for row in rows:
+            if row["_submission_schema_version"] == LEGACY_SUBMISSION_SCHEMA_VERSION:
+                row.update(
                     {
                         "validity": "legacy_unreported",
                         "measurement_period": None,
                         "measurement_conditions": None,
                     }
                 )
-        entries.append(entry)
+        entries = _versioned_config_cells(rows, facet)
+    else:
+        entries = _legacy_leaderboard_rows(rows)
     leaderboard = {
         "schema_version": (
             LEADERBOARD_SCHEMA_VERSION
@@ -1594,6 +2498,8 @@ def build_leaderboard(
         "entry_count": len(entries),
         "entries": entries,
     }
+    if leaderboard["schema_version"] == LEADERBOARD_SCHEMA_VERSION:
+        validate_versioned_leaderboard(leaderboard)
     return leaderboard
 
 

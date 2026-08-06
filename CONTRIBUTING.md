@@ -95,6 +95,11 @@ Exact hardware and performance details can also make a setup recognizable. Do no
 have not read in full. The digest and deterministic build establish content integrity and schema
 conformance, not provenance or attestation that the self-reported benchmark run occurred.
 
+The derived board may collapse repeated exact configurations into one cell. Its corroboration count
+means distinct accepted content hashes, not independent people or reproduced runs; repeats do not
+narrow the representative Wilson interval. Plausibility is a caution-only annotation and never an
+acceptance or ranking gate.
+
 ## Pull requests
 
 Explain the user story and requirement IDs affected, the validation commands run, any schema impact,

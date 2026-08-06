@@ -8,7 +8,12 @@ const DATA_FETCH_TIMEOUT_MS = 15 * 1000;
 const MAX_SUBMISSION_BYTES = 256 * 1024;
 const LEADERBOARD_INDEX_VERSION = "1.0";
 const SUBMISSION_SCHEMA_VERSION = "1.1";
+const LEADERBOARD_SCHEMA_VERSION = "1.1";
 const LEADERBOARD_SCHEMA_VERSIONS = new Set(["1.0", "1.1"]);
+const CONFIG_KEY_VERSION = "1.0";
+const CONFIG_SELECTION_VERSION = "1.0";
+const WILSON_METHOD = "wilson_95";
+const PLAUSIBILITY_POLICY_VERSION = "1.0";
 const MODEL_DISPLAY_NAME_MAX = 160;
 const MODEL_SOURCE_MAX = 240;
 const MODEL_PRECISION_MAX = 80;
@@ -40,6 +45,64 @@ const OUTCOMES = new Set([
 ]);
 const PUBLIC_VALIDITIES = new Set(["clean", "nonquiescent", "degraded_midrun"]);
 const LEADERBOARD_VALIDITIES = new Set([...PUBLIC_VALIDITIES, "legacy_unreported"]);
+const CORROBORATION_VALIDITIES = [
+  "clean",
+  "nonquiescent",
+  "degraded_midrun",
+  "legacy_unreported",
+];
+const PLAUSIBILITY_STATUSES = new Set(["within_envelope", "caution", "not_evaluated"]);
+const PLAUSIBILITY_HARDWARE_CLASSES = new Set([
+  "cpu_only",
+  "shared_accelerator",
+  "discrete_accelerator",
+  "mixed_accelerator",
+  "unknown",
+]);
+const MODEL_SIZE_BUCKETS = new Set([
+  "under_4b",
+  "4b_to_under_14b",
+  "14b_to_under_35b",
+  "35b_to_under_70b",
+  "70b_and_above",
+  "unknown",
+]);
+const MODEL_SIZE_BASES = new Set(["active_billions", "total_billions", "unknown"]);
+const PLAUSIBILITY_SIGNAL_ORDER = [
+  "latency_below_envelope",
+  "throughput_above_envelope",
+];
+const PLAUSIBILITY_SIGNALS = new Set(PLAUSIBILITY_SIGNAL_ORDER);
+const PLAUSIBILITY_ENVELOPES = Object.freeze({
+  cpu_only: Object.freeze({
+    under_4b: Object.freeze([0.1, 2500]),
+    "4b_to_under_14b": Object.freeze([0.1, 1500]),
+    "14b_to_under_35b": Object.freeze([0.2, 800]),
+    "35b_to_under_70b": Object.freeze([0.5, 400]),
+    "70b_and_above": Object.freeze([1, 200]),
+  }),
+  shared_accelerator: Object.freeze({
+    under_4b: Object.freeze([0.1, 10000]),
+    "4b_to_under_14b": Object.freeze([0.1, 6000]),
+    "14b_to_under_35b": Object.freeze([0.1, 4000]),
+    "35b_to_under_70b": Object.freeze([0.1, 2500]),
+    "70b_and_above": Object.freeze([0.2, 1500]),
+  }),
+  discrete_accelerator: Object.freeze({
+    under_4b: Object.freeze([0.1, 20000]),
+    "4b_to_under_14b": Object.freeze([0.1, 12000]),
+    "14b_to_under_35b": Object.freeze([0.1, 8000]),
+    "35b_to_under_70b": Object.freeze([0.1, 5000]),
+    "70b_and_above": Object.freeze([0.2, 3000]),
+  }),
+  mixed_accelerator: Object.freeze({
+    under_4b: Object.freeze([0.1, 20000]),
+    "4b_to_under_14b": Object.freeze([0.1, 12000]),
+    "14b_to_under_35b": Object.freeze([0.1, 8000]),
+    "35b_to_under_70b": Object.freeze([0.1, 5000]),
+    "70b_and_above": Object.freeze([0.2, 3000]),
+  }),
+});
 const MEASUREMENT_OUTCOMES = new Set(["within_thresholds", "threshold_crossed"]);
 const MEASUREMENT_CATEGORY_ORDER = [
   "memory_pressure",
@@ -357,7 +420,14 @@ function decodeStrictUtf8(value) {
 }
 
 function isCanonicalFloatPath(path) {
-  const joined = path.join(".");
+  let normalized = path;
+  if (normalized[0] === "dimensions") {
+    normalized = normalized.slice(1);
+  }
+  if (normalized[0] === "model_identity") {
+    normalized = ["model", ...normalized.slice(1)];
+  }
+  const joined = normalized.join(".");
   if (
     [
       "hardware.memory.system_gb",
@@ -366,16 +436,18 @@ function isCanonicalFloatPath(path) {
       "metrics.latency_ms_mean",
       "metrics.completion_tokens_per_second",
       "determinism.semantic_pass_rate",
+      "model.parameter_scale.total_billions",
+      "model.parameter_scale.active_billions",
     ].includes(joined)
   ) {
     return true;
   }
   return (
-    path.length === 4 &&
-    path[0] === "hardware" &&
-    path[1] === "accelerators" &&
-    Number.isInteger(path[2]) &&
-    path[3] === "memory_gb"
+    normalized.length === 4 &&
+    normalized[0] === "hardware" &&
+    normalized[1] === "accelerators" &&
+    Number.isInteger(normalized[2]) &&
+    normalized[3] === "memory_gb"
   );
 }
 
@@ -459,6 +531,36 @@ async function computeSubmissionId(submission) {
   const payload = Object.fromEntries(
     Object.entries(submission).filter(([key]) => key !== "submission_id"),
   );
+  const encoded = new TextEncoder().encode(canonicalJson(payload));
+  const digest = await digestEngine().digest("SHA-256", encoded);
+  return [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function configDimensions(entry) {
+  const identityField = Object.hasOwn(entry.model, "revision") ? "revision" : "digest";
+  return {
+    hardware: entry.hardware,
+    model_identity: {
+      display_name: entry.model.display_name,
+      source: entry.model.source,
+      [identityField]: entry.model[identityField],
+      declared_context_tokens: entry.model.declared_context_tokens,
+      parameter_scale: entry.model.parameter_scale,
+    },
+    precision: entry.model.precision,
+    runtime: entry.runtime,
+    runtime_configuration: entry.runtime_configuration ?? null,
+    settings: entry.settings,
+  };
+}
+
+async function computeConfigCellDigest(entry) {
+  const payload = {
+    version: CONFIG_KEY_VERSION,
+    dimensions: configDimensions(entry),
+  };
   const encoded = new TextEncoder().encode(canonicalJson(payload));
   const digest = await digestEngine().digest("SHA-256", encoded);
   return [...new Uint8Array(digest)]
@@ -711,11 +813,37 @@ function isModelDescriptorText(value, maximum) {
   return isPublicDescriptorText(value, maximum);
 }
 
-function validateModel(model) {
+function hasAtMostThreeDecimalPlaces(value) {
+  return Number.isFinite(value) && Number(value.toFixed(3)) === value;
+}
+
+function validateParameterScale(parameterScale) {
+  if (!hasExactKeys(parameterScale, ["total_billions", "active_billions"])) {
+    return false;
+  }
+  const total = parameterScale.total_billions;
+  const active = parameterScale.active_billions;
+  const validValue = (value) =>
+    value === null ||
+    (isFiniteNumber(value, Number.MIN_VALUE, 1_000_000) &&
+      hasAtMostThreeDecimalPlaces(value));
+  return (
+    validValue(total) &&
+    validValue(active) &&
+    (total !== null || active === null) &&
+    (total === null || active === null || active <= total)
+  );
+}
+
+function validateModel(model, requireParameterScale = false) {
+  const required = ["display_name", "source", "precision", "declared_context_tokens"];
+  if (requireParameterScale) {
+    required.push("parameter_scale");
+  }
   if (
     !hasExactKeys(
       model,
-      ["display_name", "source", "precision", "declared_context_tokens"],
+      required,
       ["revision", "digest"],
     )
   ) {
@@ -728,7 +856,8 @@ function validateModel(model) {
     isModelDescriptorText(model.source, MODEL_SOURCE_MAX) &&
     isModelDescriptorText(model.precision, MODEL_PRECISION_MAX) &&
     isModelDescriptorText(model[identityFields[0]], 200) &&
-    isInteger(model.declared_context_tokens, 1)
+    isInteger(model.declared_context_tokens, 1) &&
+    (!Object.hasOwn(model, "parameter_scale") || validateParameterScale(model.parameter_scale))
   );
 }
 
@@ -913,6 +1042,326 @@ function scorePercent(count, total) {
   return Math.floor((2 * count * 1000 + total) / (2 * total)) / 10;
 }
 
+function wilsonInterval(successes, total) {
+  if (!isInteger(successes, 0) || !isInteger(total, 1) || successes > total) {
+    throw new Error("Wilson interval inputs are invalid.");
+  }
+  const z = 1.959963984540054;
+  const zSquared = z * z;
+  const proportion = successes / total;
+  const denominator = 1 + zSquared / total;
+  const center = (proportion + zSquared / (2 * total)) / denominator;
+  const margin =
+    (z * Math.sqrt((proportion * (1 - proportion) + zSquared / (4 * total)) / total)) /
+    denominator;
+  const lower = Math.max(0, center - margin);
+  const upper = Math.min(1, center + margin);
+  return {
+    lower_percent: Math.max(0, Math.min(100, Math.floor(lower * 100))),
+    upper_percent: Math.max(0, Math.min(100, Math.ceil(upper * 100))),
+  };
+}
+
+function sameInterval(left, right) {
+  return (
+    left.lower_percent === right.lower_percent &&
+    left.upper_percent === right.upper_percent
+  );
+}
+
+function validateWilsonInterval(interval, expected) {
+  return (
+    hasExactKeys(interval, ["lower_percent", "upper_percent"]) &&
+    isInteger(interval.lower_percent, 0, 100) &&
+    isInteger(interval.upper_percent, interval.lower_percent, 100) &&
+    sameInterval(interval, expected)
+  );
+}
+
+function validateScoreIntervals(scoreIntervals, metrics) {
+  try {
+    return (
+      hasExactKeys(scoreIntervals, ["method", "semantic", "exact_format"]) &&
+      scoreIntervals.method === WILSON_METHOD &&
+      validateWilsonInterval(
+        scoreIntervals.semantic,
+        wilsonInterval(metrics.semantic_pass_count, metrics.scored_case_count),
+      ) &&
+      validateWilsonInterval(
+        scoreIntervals.exact_format,
+        wilsonInterval(metrics.exact_format_pass_count, metrics.scored_case_count),
+      )
+    );
+  } catch (error) {
+    return false;
+  }
+}
+
+function validateConfigCell(configCell) {
+  return (
+    hasExactKeys(configCell, ["key_version", "selection_version", "digest"]) &&
+    configCell.key_version === CONFIG_KEY_VERSION &&
+    configCell.selection_version === CONFIG_SELECTION_VERSION &&
+    typeof configCell.digest === "string" &&
+    /^[a-f0-9]{64}$/u.test(configCell.digest)
+  );
+}
+
+function validateValidityCorroboration(summary, validity) {
+  if (
+    !hasExactKeys(summary, ["count", "earliest_period", "latest_period"]) ||
+    !isInteger(summary.count, 0)
+  ) {
+    return false;
+  }
+  if (summary.count === 0 || validity === "legacy_unreported") {
+    return summary.earliest_period === null && summary.latest_period === null;
+  }
+  return (
+    validateMeasurementPeriod(summary.earliest_period) &&
+    validateMeasurementPeriod(summary.latest_period) &&
+    summary.earliest_period <= summary.latest_period
+  );
+}
+
+function validateCorroboration(corroboration, entry) {
+  if (
+    !hasExactKeys(corroboration, ["accepted_record_count", "by_validity"]) ||
+    !isInteger(corroboration.accepted_record_count, 1) ||
+    !hasExactKeys(corroboration.by_validity, CORROBORATION_VALIDITIES)
+  ) {
+    return false;
+  }
+  let total = 0;
+  for (const validity of CORROBORATION_VALIDITIES) {
+    const summary = corroboration.by_validity[validity];
+    if (!validateValidityCorroboration(summary, validity)) {
+      return false;
+    }
+    total += summary.count;
+  }
+  const representativeSummary = corroboration.by_validity[entry.validity];
+  if (total !== corroboration.accepted_record_count || representativeSummary.count < 1) {
+    return false;
+  }
+  if (entry.validity === "legacy_unreported") {
+    return entry.measurement_period === null;
+  }
+  return (
+    entry.measurement_period >= representativeSummary.earliest_period &&
+    entry.measurement_period <= representativeSummary.latest_period
+  );
+}
+
+function hasAtMostTwoDecimalPlaces(value) {
+  return Number.isFinite(value) && Number(value.toFixed(2)) === value;
+}
+
+function validateDistribution(distribution, maximumSamples, representativeValue) {
+  if (
+    !hasExactKeys(distribution, ["sample_count", "median", "minimum", "maximum"]) ||
+    !isInteger(distribution.sample_count, 0, maximumSamples)
+  ) {
+    return false;
+  }
+  if (distribution.sample_count === 0) {
+    return (
+      distribution.median === null &&
+      distribution.minimum === null &&
+      distribution.maximum === null &&
+      representativeValue === null
+    );
+  }
+  const statistics = [distribution.minimum, distribution.median, distribution.maximum];
+  const minimumHundredths = Math.round(distribution.minimum * 100);
+  const medianHundredths = Math.round(distribution.median * 100);
+  const maximumHundredths = Math.round(distribution.maximum * 100);
+  const twoSampleTotal = minimumHundredths + maximumHundredths;
+  return (
+    statistics.every(
+      (value) => isFiniteNumber(value, 0, 1_000_000_000) && hasAtMostTwoDecimalPlaces(value),
+    ) &&
+    distribution.minimum <= distribution.median &&
+    distribution.median <= distribution.maximum &&
+    (distribution.sample_count !== 1 ||
+      (distribution.minimum === distribution.median &&
+        distribution.median === distribution.maximum)) &&
+    (distribution.sample_count !== 2 ||
+      (twoSampleTotal % 2 === 0 && medianHundredths === twoSampleTotal / 2)) &&
+    (representativeValue === null ||
+      (representativeValue >= distribution.minimum &&
+        representativeValue <= distribution.maximum))
+  );
+}
+
+function validatePerformanceDistribution(performance, entry) {
+  if (
+    !hasExactKeys(performance, ["latency_ms_mean", "completion_tokens_per_second"])
+  ) {
+    return false;
+  }
+  const maximumSamples = entry.corroboration.accepted_record_count;
+  return (
+    validateDistribution(
+      performance.latency_ms_mean,
+      maximumSamples,
+      entry.metrics.latency_ms_mean,
+    ) &&
+    performance.latency_ms_mean.sample_count ===
+      (entry.metrics.latency_ms_mean === null ? 0 : maximumSamples) &&
+    validateDistribution(
+      performance.completion_tokens_per_second,
+      maximumSamples,
+      entry.metrics.completion_tokens_per_second,
+    )
+  );
+}
+
+function plausibilityHardwareClass(hardware) {
+  if (hardware.execution_mode === "cpu_only") {
+    return "cpu_only";
+  }
+  if (!["accelerator_only", "hybrid"].includes(hardware.execution_mode)) {
+    return "unknown";
+  }
+  if (hardware.memory.architecture === "shared") {
+    return "shared_accelerator";
+  }
+  if (hardware.memory.architecture === "discrete") {
+    return "discrete_accelerator";
+  }
+  if (hardware.memory.architecture === "mixed") {
+    return "mixed_accelerator";
+  }
+  return "unknown";
+}
+
+function modelSizeBucket(value) {
+  if (value === null) {
+    return "unknown";
+  }
+  if (value < 4) {
+    return "under_4b";
+  }
+  if (value < 14) {
+    return "4b_to_under_14b";
+  }
+  if (value < 35) {
+    return "14b_to_under_35b";
+  }
+  if (value < 70) {
+    return "35b_to_under_70b";
+  }
+  return "70b_and_above";
+}
+
+function expectedPlausibilityBasis(entry) {
+  const parameterScale = entry.model.parameter_scale;
+  const modelSizeBasis =
+    parameterScale.active_billions !== null
+      ? "active_billions"
+      : parameterScale.total_billions !== null
+        ? "total_billions"
+        : "unknown";
+  const modelSize =
+    modelSizeBasis === "unknown" ? null : parameterScale[modelSizeBasis];
+  return {
+    hardware_class: plausibilityHardwareClass(entry.hardware),
+    model_size_bucket: modelSizeBucket(modelSize),
+    model_size_basis: modelSizeBasis,
+  };
+}
+
+function validatePlausibility(plausibility, entry) {
+  const expectedBasis = expectedPlausibilityBasis(entry);
+  const envelope =
+    PLAUSIBILITY_ENVELOPES[expectedBasis.hardware_class]?.[
+      expectedBasis.model_size_bucket
+    ] ?? null;
+  const signalIndexes = Array.isArray(plausibility?.signals)
+    ? plausibility.signals.map((signal) => PLAUSIBILITY_SIGNAL_ORDER.indexOf(signal))
+    : [];
+  if (
+    !hasExactKeys(plausibility, [
+      "policy_version",
+      "status",
+      "basis",
+      "evaluated_record_count",
+      "outside_envelope_record_count",
+      "signals",
+    ]) ||
+    plausibility.policy_version !== PLAUSIBILITY_POLICY_VERSION ||
+    !PLAUSIBILITY_STATUSES.has(plausibility.status) ||
+    !hasExactKeys(plausibility.basis, [
+      "hardware_class",
+      "model_size_bucket",
+      "model_size_basis",
+    ]) ||
+    !PLAUSIBILITY_HARDWARE_CLASSES.has(plausibility.basis.hardware_class) ||
+    !MODEL_SIZE_BUCKETS.has(plausibility.basis.model_size_bucket) ||
+    !MODEL_SIZE_BASES.has(plausibility.basis.model_size_basis) ||
+    plausibility.basis.hardware_class !== expectedBasis.hardware_class ||
+    plausibility.basis.model_size_bucket !== expectedBasis.model_size_bucket ||
+    plausibility.basis.model_size_basis !== expectedBasis.model_size_basis ||
+    !isInteger(
+      plausibility.evaluated_record_count,
+      0,
+      entry.corroboration.accepted_record_count,
+    ) ||
+    !isInteger(
+      plausibility.outside_envelope_record_count,
+      0,
+      plausibility.evaluated_record_count,
+    ) ||
+    !Array.isArray(plausibility.signals) ||
+    plausibility.signals.length > PLAUSIBILITY_SIGNAL_ORDER.length ||
+    plausibility.signals.some((signal) => !PLAUSIBILITY_SIGNALS.has(signal)) ||
+    signalIndexes.some(
+      (position, index) =>
+        position < 0 || (index > 0 && position <= signalIndexes[index - 1]),
+    )
+  ) {
+    return false;
+  }
+  const expectedStatus =
+    plausibility.evaluated_record_count === 0
+      ? "not_evaluated"
+      : plausibility.outside_envelope_record_count > 0
+        ? "caution"
+        : "within_envelope";
+  const expectedSignals = [];
+  if (envelope !== null) {
+    const [minimumLatency, maximumThroughput] = envelope;
+    const latency = entry.performance_distribution.latency_ms_mean;
+    const throughput = entry.performance_distribution.completion_tokens_per_second;
+    if (latency.sample_count > 0 && latency.minimum < minimumLatency) {
+      expectedSignals.push("latency_below_envelope");
+    }
+    if (throughput.sample_count > 0 && throughput.maximum > maximumThroughput) {
+      expectedSignals.push("throughput_above_envelope");
+    }
+  }
+  const expectedEvaluatedCount =
+    envelope === null
+      ? 0
+      : Math.max(
+          entry.performance_distribution.latency_ms_mean.sample_count,
+          entry.performance_distribution.completion_tokens_per_second.sample_count,
+        );
+  return (
+    plausibility.status === expectedStatus &&
+    plausibility.evaluated_record_count === expectedEvaluatedCount &&
+    plausibility.signals.length === expectedSignals.length &&
+    plausibility.signals.every((signal, index) => signal === expectedSignals[index]) &&
+    (plausibility.outside_envelope_record_count > 0) ===
+      (plausibility.signals.length > 0) &&
+    ((plausibility.basis.hardware_class !== "unknown" &&
+      plausibility.basis.model_size_basis !== "unknown" &&
+      plausibility.basis.model_size_bucket !== "unknown") ||
+      plausibility.evaluated_record_count === 0)
+  );
+}
+
 function validateEntry(entry, leaderboardSchemaVersion = "1.0", registry = SUITE_REGISTRY) {
   const legacyDataset = leaderboardSchemaVersion === "1.0";
   const required = [
@@ -929,6 +1378,12 @@ function validateEntry(entry, leaderboardSchemaVersion = "1.0", registry = SUITE
   const optional = ["runtime_configuration"];
   if (!legacyDataset) {
     required.push(
+      "facet_id",
+      "config_cell",
+      "corroboration",
+      "score_intervals",
+      "performance_distribution",
+      "plausibility",
       "submission_schema_version",
       "validity",
       "measurement_period",
@@ -962,7 +1417,7 @@ function validateEntry(entry, leaderboardSchemaVersion = "1.0", registry = SUITE
       evidenceValid = false;
     }
   }
-  return (
+  const coreValid = (
     isInteger(entry.rank, 1) &&
     typeof entry.submission_id === "string" &&
     /^[a-f0-9]{64}$/u.test(entry.submission_id) &&
@@ -971,7 +1426,7 @@ function validateEntry(entry, leaderboardSchemaVersion = "1.0", registry = SUITE
     validateRuntime(entry.runtime) &&
     (!Object.hasOwn(entry, "runtime_configuration") ||
       validateRuntimeConfiguration(entry.runtime_configuration)) &&
-    validateModel(entry.model) &&
+    validateModel(entry.model, !legacyDataset) &&
     validateSettings(
       entry.settings,
       entry.model.declared_context_tokens,
@@ -979,9 +1434,21 @@ function validateEntry(entry, leaderboardSchemaVersion = "1.0", registry = SUITE
     ) &&
     validateMetrics(entry.metrics, suite.length, legacyDataset)
   );
+  if (!coreValid || legacyDataset) {
+    return coreValid;
+  }
+  return (
+    typeof entry.facet_id === "string" &&
+    CASE_ID.test(entry.facet_id) &&
+    validateConfigCell(entry.config_cell) &&
+    validateCorroboration(entry.corroboration, entry) &&
+    validateScoreIntervals(entry.score_intervals, entry.metrics) &&
+    validatePerformanceDistribution(entry.performance_distribution, entry) &&
+    validatePlausibility(entry.plausibility, entry)
+  );
 }
 
-function validatePayload(payload) {
+async function validatePayload(payload) {
   if (
     !hasExactKeys(payload, ["schema_version", "entry_count", "entries"]) ||
     !LEADERBOARD_SCHEMA_VERSIONS.has(payload.schema_version) ||
@@ -992,6 +1459,16 @@ function validatePayload(payload) {
     !validateRanking(payload.entries)
   ) {
     throw new Error("Leaderboard data does not match the expected public schema.");
+  }
+  if (
+    payload.schema_version === LEADERBOARD_SCHEMA_VERSION &&
+    !(await Promise.all(
+      payload.entries.map(async (entry) =>
+        entry.config_cell.digest === (await computeConfigCellDigest(entry)),
+      ),
+    )).every(Boolean)
+  ) {
+    throw new Error("Leaderboard configuration digest does not match its public dimensions.");
   }
   return payload;
 }
@@ -1016,7 +1493,7 @@ function validateIndex(payload) {
   return payload;
 }
 
-function validateShard(payload, expectedShardId, expectedSchemaVersion) {
+async function validateShard(payload, expectedShardId, expectedSchemaVersion) {
   if (
     !hasExactKeys(payload, [
       "index_version",
@@ -1036,10 +1513,47 @@ function validateShard(payload, expectedShardId, expectedSchemaVersion) {
   ) {
     throw new Error("Leaderboard shard does not match the expected public schema.");
   }
+  if (
+    expectedSchemaVersion === LEADERBOARD_SCHEMA_VERSION &&
+    !(await Promise.all(
+      payload.entries.map(async (entry) =>
+        entry.config_cell.digest === (await computeConfigCellDigest(entry)),
+      ),
+    )).every(Boolean)
+  ) {
+    throw new Error("Leaderboard shard configuration digest is inconsistent.");
+  }
   return payload;
 }
 
 function validateRankingSegment(values) {
+  const versioned = values.length > 0 && Object.hasOwn(values[0], "facet_id");
+  if (values.some((entry) => Object.hasOwn(entry, "facet_id") !== versioned)) {
+    return false;
+  }
+  if (versioned) {
+    const seen = new Set();
+    const seenCells = new Set();
+    let previous = null;
+    for (const entry of values) {
+      const scope = configCellScope(entry);
+      if (seen.has(entry.submission_id) || seenCells.has(scope)) {
+        return false;
+      }
+      if (
+        previous !== null &&
+        (entry.rank < previous.rank ||
+          entry.rank > previous.rank + 1 ||
+          (entry.rank === previous.rank && entry.submission_id <= previous.submission_id))
+      ) {
+        return false;
+      }
+      seen.add(entry.submission_id);
+      seenCells.add(scope);
+      previous = entry;
+    }
+    return true;
+  }
   const seen = new Set();
   let previousEntry = null;
   let previousQuality = null;
@@ -1080,6 +1594,9 @@ function createShardRankingState() {
     entryCount: 0,
     previousEntry: null,
     submissionIds: new Set(),
+    cellScopes: new Set(),
+    versionedEntries: [],
+    versioned: null,
   };
 }
 
@@ -1090,13 +1607,26 @@ function hasSameLeaderboardQuality(left, right) {
   );
 }
 
-function validateAndTrackShardRanking(state, values) {
-  if (values.length === 0) {
+function validateAndTrackShardRanking(state, values, finalShard = false) {
+  if (values.length === 0 || !validateRankingSegment(values)) {
     return false;
   }
   const firstEntry = values[0];
+  const versioned = Object.hasOwn(firstEntry, "facet_id");
+  if (state.versioned !== null && state.versioned !== versioned) {
+    return false;
+  }
   if (state.previousEntry === null) {
     if (firstEntry.rank !== 1) {
+      return false;
+    }
+  } else if (versioned) {
+    if (
+      firstEntry.rank < state.previousEntry.rank ||
+      firstEntry.rank > state.previousEntry.rank + 1 ||
+      (firstEntry.rank === state.previousEntry.rank &&
+        firstEntry.submission_id <= state.previousEntry.submission_id)
+    ) {
       return false;
     }
   } else {
@@ -1113,11 +1643,27 @@ function validateAndTrackShardRanking(state, values) {
   if (values.some((entry) => state.submissionIds.has(entry.submission_id))) {
     return false;
   }
+  if (versioned && values.some((entry) => state.cellScopes.has(configCellScope(entry)))) {
+    return false;
+  }
+  if (
+    versioned &&
+    !validatePartialRankBands([...state.versionedEntries, ...values], finalShard)
+  ) {
+    return false;
+  }
   for (const entry of values) {
     state.submissionIds.add(entry.submission_id);
+    if (versioned) {
+      state.cellScopes.add(configCellScope(entry));
+    }
   }
   state.entryCount += values.length;
   state.previousEntry = values[values.length - 1];
+  if (versioned) {
+    state.versionedEntries.push(...values);
+  }
+  state.versioned = versioned;
   return true;
 }
 
@@ -1145,7 +1691,152 @@ function compareCanonicalLeaderboardOrder(left, right) {
   return 0;
 }
 
-function validateRanking(values) {
+function intervalsOverlap(left, right) {
+  return (
+    left.lower_percent <= right.upper_percent &&
+    right.lower_percent <= left.upper_percent
+  );
+}
+
+function configCellScope(entry) {
+  return `${entry.facet_id}\u0000${entry.profile}\u0000${entry.suite_version}\u0000${
+    entry.config_cell.digest
+  }`;
+}
+
+function compareAsciiText(left, right) {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
+}
+
+function intervalComponents(values, intervalName) {
+  const ordered = [...values].sort((left, right) => {
+    const leftInterval = left.score_intervals[intervalName];
+    const rightInterval = right.score_intervals[intervalName];
+    return (
+      rightInterval.upper_percent - leftInterval.upper_percent ||
+      rightInterval.lower_percent - leftInterval.lower_percent ||
+      compareAsciiText(left.submission_id, right.submission_id)
+    );
+  });
+  const components = [];
+  let current = [];
+  let connectedLower = null;
+  for (const entry of ordered) {
+    const interval = entry.score_intervals[intervalName];
+    if (current.length === 0 || interval.upper_percent >= connectedLower) {
+      current.push(entry);
+      connectedLower =
+        connectedLower === null
+          ? interval.lower_percent
+          : Math.min(connectedLower, interval.lower_percent);
+    } else {
+      components.push(current);
+      current = [entry];
+      connectedLower = interval.lower_percent;
+    }
+  }
+  if (current.length > 0) {
+    components.push(current);
+  }
+  return components;
+}
+
+function expectedRankBands(values) {
+  const bands = [];
+  for (const semanticComponent of intervalComponents(values, "semantic")) {
+    for (const exactComponent of intervalComponents(semanticComponent, "exact_format")) {
+      bands.push(exactComponent);
+    }
+  }
+  return bands;
+}
+
+function expectedRankBandOrder(values) {
+  const expected = [];
+  for (const [index, component] of expectedRankBands(values).entries()) {
+    const rank = index + 1;
+    const band = [...component].sort((left, right) =>
+      compareAsciiText(left.submission_id, right.submission_id),
+    );
+    expected.push(...band.map((entry) => ({ entry, rank })));
+  }
+  return expected;
+}
+
+function validatePartialRankBands(values, finalShard = false) {
+  if (values.length === 0) {
+    return false;
+  }
+  const components = expectedRankBands(values);
+  const componentCounts = new Map();
+  const componentRanks = [];
+  for (const component of components) {
+    const ranks = new Set(component.map((entry) => entry.rank));
+    if (ranks.size !== 1) {
+      return false;
+    }
+    const [rank] = ranks;
+    componentRanks.push(rank);
+    componentCounts.set(rank, (componentCounts.get(rank) ?? 0) + 1);
+  }
+  const openRank = values[values.length - 1].rank;
+  for (const [rank, count] of componentCounts) {
+    if ((finalShard || rank !== openRank) && count !== 1) {
+      return false;
+    }
+  }
+  if (componentRanks[0] !== 1) {
+    return false;
+  }
+  for (let index = 1; index < componentRanks.length; index += 1) {
+    const previous = componentRanks[index - 1];
+    const current = componentRanks[index];
+    if (
+      current < previous ||
+      current > previous + 1 ||
+      (current === previous && current !== openRank)
+    ) {
+      return false;
+    }
+  }
+  return !finalShard || validateFullRankBands(values);
+}
+
+function validateFullRankBands(values) {
+  const seen = new Set();
+  const seenCells = new Set();
+  if (
+    values.some(
+      (entry) => {
+        if (!Object.hasOwn(entry, "facet_id") || seen.has(entry.submission_id)) {
+          return true;
+        }
+        const cellScope = configCellScope(entry);
+        if (seenCells.has(cellScope)) {
+          return true;
+        }
+        seen.add(entry.submission_id);
+        seenCells.add(cellScope);
+        return false;
+      },
+    )
+  ) {
+    return false;
+  }
+  const expected = expectedRankBandOrder(values);
+  return expected.every(
+    ({ entry, rank }, index) =>
+      values[index] === entry && values[index].rank === rank,
+  );
+}
+
+function validateLegacyRanking(values) {
   const seen = new Set();
   let previousEntry = null;
   let previousQuality = null;
@@ -1179,6 +1870,17 @@ function validateRanking(values) {
     previousEntry = entry;
   }
   return true;
+}
+
+function validateRanking(values) {
+  if (values.length === 0) {
+    return true;
+  }
+  const versioned = Object.hasOwn(values[0], "facet_id");
+  if (values.some((entry) => Object.hasOwn(entry, "facet_id") !== versioned)) {
+    return false;
+  }
+  return versioned ? validateFullRankBands(values) : validateLegacyRanking(values);
 }
 
 function hasAtMostSixDecimalPlaces(value) {
@@ -1303,7 +2005,7 @@ async function validateSubmission(submission, registry = SUITE_REGISTRY) {
     submission.validity !== derivedMeasurementValidity(submission.measurement_conditions) ||
     (Object.hasOwn(submission, "determinism") &&
       !validateDeterminism(submission.determinism)) ||
-    !validateModel(submission.model) ||
+    !validateModel(submission.model, true) ||
     !validateSettings(
       submission.settings,
       submission.model.declared_context_tokens,
@@ -1330,10 +2032,6 @@ function makeElement(tagName, text, className) {
     element.className = className;
   }
   return element;
-}
-
-function percentage(value) {
-  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)}%`;
 }
 
 function decimal(value) {
@@ -1393,6 +2091,140 @@ function validityLabel(entry) {
   return validity === "legacy_unreported"
     ? "Not reported"
     : readableEnum(validity);
+}
+
+function entryScoreIntervals(entry) {
+  if (Object.hasOwn(entry, "score_intervals")) {
+    return entry.score_intervals;
+  }
+  return {
+    method: WILSON_METHOD,
+    semantic: wilsonInterval(
+      entry.metrics.semantic_pass_count,
+      entry.metrics.scored_case_count,
+    ),
+    exact_format: wilsonInterval(
+      entry.metrics.exact_format_pass_count,
+      entry.metrics.scored_case_count,
+    ),
+  };
+}
+
+function scoreEvidenceText(entry, metric) {
+  const passCount =
+    metric === "semantic"
+      ? entry.metrics.semantic_pass_count
+      : entry.metrics.exact_format_pass_count;
+  const interval = entryScoreIntervals(entry)[metric];
+  return `${integer(passCount)}/${integer(entry.metrics.scored_case_count)} (${integer(
+    interval.lower_percent,
+  )}\u2013${integer(interval.upper_percent)}%)`;
+}
+
+function displayRankBands(values) {
+  if (values.every((entry) => Object.hasOwn(entry, "score_intervals"))) {
+    return new Map(values.map((entry) => [entry.submission_id, entry.rank]));
+  }
+  const projected = values.map((entry) => ({
+    ...entry,
+    score_intervals: entryScoreIntervals(entry),
+  }));
+  return new Map(
+    expectedRankBandOrder(projected).map(({ entry, rank }) => [entry.submission_id, rank]),
+  );
+}
+
+function validitySummaryText(validity, summary) {
+  const label = validity === "legacy_unreported" ? "legacy unreported" : readableEnum(validity);
+  if (summary.count === 0) {
+    return `${label}: 0`;
+  }
+  if (validity === "legacy_unreported") {
+    return `${label}: ${integer(summary.count)} (month unavailable)`;
+  }
+  const period =
+    summary.earliest_period === summary.latest_period
+      ? summary.earliest_period
+      : `${summary.earliest_period}\u2013${summary.latest_period}`;
+  return `${label}: ${integer(summary.count)} (${period})`;
+}
+
+function plausibilityEvidenceText(entry) {
+  if (!Object.hasOwn(entry, "plausibility") || entry.plausibility.status === "not_evaluated") {
+    return "Plausibility not evaluated; this is not verification.";
+  }
+  if (entry.plausibility.status === "caution") {
+    const signals = entry.plausibility.signals.map(readableEnum).join("; ");
+    return `Caution: outside the broad plausibility envelope (${signals}); this is not verification, and the entry remains published.`;
+  }
+  return "No plausibility flag; this is not verification.";
+}
+
+function addEvidenceCell(row, entry) {
+  const cell = makeElement("td", undefined, "evidence-cell");
+  if (!Object.hasOwn(entry, "corroboration")) {
+    cell.append(
+      makeElement("span", "1 accepted hash (not a person)", "evidence-count"),
+      makeElement("span", "Legacy row; corroboration ranges unavailable", "cell-note"),
+      makeElement("span", plausibilityEvidenceText(entry), "plausibility-note"),
+    );
+    row.append(cell);
+    return;
+  }
+  cell.append(
+    makeElement(
+      "span",
+      `${integer(entry.corroboration.accepted_record_count)} accepted hash${
+        entry.corroboration.accepted_record_count === 1 ? "" : "es"
+      } (not people)`,
+      "evidence-count",
+    ),
+  );
+  for (const validity of CORROBORATION_VALIDITIES) {
+    cell.append(
+      makeElement(
+        "span",
+        validitySummaryText(validity, entry.corroboration.by_validity[validity]),
+        "cell-note evidence-validity",
+      ),
+    );
+  }
+  const plausibilityClass =
+    entry.plausibility.status === "caution"
+      ? "plausibility-note plausibility-caution"
+      : "plausibility-note";
+  cell.append(makeElement("span", plausibilityEvidenceText(entry), plausibilityClass));
+  row.append(cell);
+}
+
+function performanceDistribution(entry, metric) {
+  return Object.hasOwn(entry, "performance_distribution")
+    ? entry.performance_distribution[metric]
+    : null;
+}
+
+function addPerformanceCell(row, entry, metric, unit) {
+  const distribution = performanceDistribution(entry, metric);
+  const representativeValue = entry.metrics[metric];
+  if (distribution !== null) {
+    if (distribution.sample_count === 0) {
+      addCell(row, "Not available", "median/range unavailable | n=0");
+      return;
+    }
+    addCell(
+      row,
+      `${decimal(distribution.median)}${unit} median`,
+      `range ${decimal(distribution.minimum)}\u2013${decimal(distribution.maximum)}${unit} | n=${integer(
+        distribution.sample_count,
+      )} accepted hashes with values`,
+    );
+    return;
+  }
+  addCell(
+    row,
+    representativeValue === null ? "Not available" : `${decimal(representativeValue)}${unit}`,
+    representativeValue === null ? "legacy value unavailable" : "legacy representative mean",
+  );
 }
 
 function acceleratorSummary(hardware) {
@@ -1507,9 +2339,13 @@ function addCell(row, primary, secondary, className) {
   row.append(cell);
 }
 
-function addRow(entry) {
+function addRow(entry, displayRank = entry.rank) {
   const row = document.createElement("tr");
-  addCell(row, `#${integer(entry.rank)}`, `submission ${entry.submission_id.slice(0, 12)}`);
+  addCell(
+    row,
+    `Band #${integer(displayRank)}`,
+    `representative ${entry.submission_id.slice(0, 12)}`,
+  );
   addCell(
     row,
     entry.model.display_name,
@@ -1521,45 +2357,28 @@ function addRow(entry) {
     row,
     validityLabel(entry),
     entryValidity(entry) === "legacy_unreported"
-      ? "schema 1.0: conditions not reported"
-      : "self-reported measurement conditions",
+      ? "representative; schema 1.0 conditions not reported"
+      : "representative self-reported conditions; filters use this value",
   );
   addCell(
     row,
     entryMeasurementPeriod(entry) ?? "Not reported",
     "month resolution",
   );
+  addEvidenceCell(row, entry);
   addHardwareCell(row, entry);
   addCell(
     row,
-    percentage(entry.metrics.semantic_score_percent),
-    `${integer(entry.metrics.semantic_pass_count)} of ${integer(entry.metrics.scored_case_count)} scored`,
+    scoreEvidenceText(entry, "semantic"),
+    "95% Wilson interval; representative counts only",
   );
   addCell(
     row,
-    percentage(entry.metrics.exact_format_score_percent),
-    `${integer(entry.metrics.exact_format_pass_count)} of ${integer(entry.metrics.scored_case_count)} scored`,
+    scoreEvidenceText(entry, "exact_format"),
+    "95% Wilson interval; representative counts only",
   );
-  addCell(
-    row,
-    entry.metrics.completion_tokens_per_second === null
-      ? "--"
-      : decimal(entry.metrics.completion_tokens_per_second),
-    entry.metrics.completion_tokens_per_second === null
-      ? entry.metrics.latency_ms_mean === null
-        ? "full-suite aggregate omitted for this facet"
-        : "not fully reported"
-      : `${integer(entry.metrics.usage_coverage_cases)} of ${integer(entry.metrics.case_count)} cases`,
-  );
-  addCell(
-    row,
-    entry.metrics.latency_ms_mean === null
-      ? "Not available"
-      : `${decimal(entry.metrics.latency_ms_mean)} ms`,
-    entry.metrics.latency_ms_mean === null
-      ? "full-suite aggregate omitted for this facet"
-      : "observed mean",
-  );
+  addPerformanceCell(row, entry, "completion_tokens_per_second", " tokens/s");
+  addPerformanceCell(row, entry, "latency_ms_mean", " ms");
   const seed = entry.settings.seed === null ? "none" : integer(entry.settings.seed);
   const reasoning = Object.hasOwn(entry.settings, "reasoning_effort")
     ? ` | reasoning ${readableEnum(entry.settings.reasoning_effort)}`
@@ -1598,7 +2417,7 @@ function compareNullableAscending(left, right) {
   return left - right;
 }
 
-function sortedEntries(values, sort) {
+function sortedEntries(values, sort, rankBands = displayRankBands(values)) {
   const result = [...values];
   result.sort((left, right) => {
     let comparison = 0;
@@ -1606,13 +2425,15 @@ function sortedEntries(values, sort) {
       comparison = right.metrics.exact_format_score_percent - left.metrics.exact_format_score_percent;
     } else if (sort === "throughput") {
       comparison = compareNullableDescending(
-        left.metrics.completion_tokens_per_second,
-        right.metrics.completion_tokens_per_second,
+        performanceDistribution(left, "completion_tokens_per_second")?.median ??
+          left.metrics.completion_tokens_per_second,
+        performanceDistribution(right, "completion_tokens_per_second")?.median ??
+          right.metrics.completion_tokens_per_second,
       );
     } else if (sort === "latency") {
       comparison = compareNullableAscending(
-        left.metrics.latency_ms_mean,
-        right.metrics.latency_ms_mean,
+        performanceDistribution(left, "latency_ms_mean")?.median ?? left.metrics.latency_ms_mean,
+        performanceDistribution(right, "latency_ms_mean")?.median ?? right.metrics.latency_ms_mean,
       );
     } else if (sort === "context") {
       comparison = right.model.declared_context_tokens - left.model.declared_context_tokens;
@@ -1621,16 +2442,19 @@ function sortedEntries(values, sort) {
       const rightPeriod = entryMeasurementPeriod(right) ?? "";
       comparison = rightPeriod.localeCompare(leftPeriod);
     } else {
-      comparison = right.metrics.semantic_score_percent - left.metrics.semantic_score_percent;
+      comparison = rankBands.get(left.submission_id) - rankBands.get(right.submission_id);
     }
     if (comparison !== 0) {
       return comparison;
     }
-    comparison = right.metrics.exact_format_score_percent - left.metrics.exact_format_score_percent;
-    if (comparison !== 0) {
-      return comparison;
+    if (sort !== "rank") {
+      comparison =
+        rankBands.get(left.submission_id) - rankBands.get(right.submission_id);
+      if (comparison !== 0) {
+        return comparison;
+      }
     }
-    return 0;
+    return compareAsciiText(left.submission_id, right.submission_id);
   });
   return result;
 }
@@ -1673,7 +2497,8 @@ function render() {
     const matchesHardware = hardware === "all" || hardwareCategories(entry).includes(hardware);
     return matchesHardware && (!query || haystack.includes(query));
   });
-  const visible = sortedEntries(filtered, elements.sort.value);
+  const displayRanks = displayRankBands(entries);
+  const visible = sortedEntries(filtered, elements.sort.value, displayRanks);
   const shown =
     visible.length === entries.length
       ? `${integer(entries.length)} loaded result${entries.length === 1 ? "" : "s"}`
@@ -1700,7 +2525,7 @@ function render() {
     return;
   }
 
-  visible.forEach(addRow);
+  visible.forEach((entry) => addRow(entry, displayRanks.get(entry.submission_id)));
   elements.status.hidden = true;
   elements.table.hidden = false;
 }
@@ -1856,7 +2681,7 @@ async function loadNextShard() {
   updateLoadMoreButton();
   try {
     const expectedId = shardId(nextShardNumber);
-    const payload = validateShard(
+    const payload = await validateShard(
       await fetchBoundedJson(`${SHARD_URL_PREFIX}${expectedId}${SHARD_URL_SUFFIX}`),
       expectedId,
       leaderboardIndex.schema_version,
@@ -1869,7 +2694,11 @@ async function loadNextShard() {
       projectedEntryCount > leaderboardIndex.entry_count ||
       (remainingShards === 0) !== (remainingEntries === 0) ||
       remainingEntries < remainingShards ||
-      !validateAndTrackShardRanking(shardRankingState, payload.entries)
+      !validateAndTrackShardRanking(
+        shardRankingState,
+        payload.entries,
+        remainingShards === 0,
+      )
     ) {
       throw new Error("Leaderboard shards are inconsistent with their index.");
     }
@@ -1897,7 +2726,7 @@ async function loadLeaderboard() {
   try {
     const candidate = await fetchBoundedJson(DATA_URL);
     if (hasExactKeys(candidate, ["schema_version", "entry_count", "entries"])) {
-      const payload = validatePayload(candidate);
+      const payload = await validatePayload(candidate);
       leaderboardIndex = null;
       entries = payload.entries;
       populateHardwareFilter(entries);
@@ -1919,13 +2748,23 @@ async function loadLeaderboard() {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     SUITE_REGISTRY,
+    computeConfigCellDigest,
     computeSubmissionId,
     decodeStrictUtf8,
+    displayRankBands,
+    entryScoreIntervals,
+    expectedRankBandOrder,
     filterEntriesByValidity,
+    intervalsOverlap,
     parseStrictJson,
+    plausibilityEvidenceText,
     resolveSuite,
     scorePercent,
+    scoreEvidenceText,
     sortedEntries,
+    validateEntry,
+    validateFullRankBands,
+    validateParameterScale,
     validateSubmission,
     validateIndex,
     validateModel,
@@ -1934,6 +2773,7 @@ if (typeof module !== "undefined" && module.exports) {
     createShardRankingState,
     fetchBoundedJson,
     validateAndTrackShardRanking,
+    wilsonInterval,
   };
 }
 

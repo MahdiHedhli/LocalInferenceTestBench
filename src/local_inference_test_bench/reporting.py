@@ -16,6 +16,7 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 import uuid
 
+from .models import ParameterScaleValidationError, validate_parameter_scale_values
 from .safety import SafetyError, secure_directory
 from .suites import resolve_report_suite
 
@@ -362,6 +363,34 @@ def _validate_settings(value: Any, path: str) -> int:
     return maximum
 
 
+def _validate_parameter_scale(value: Any, path: str) -> None:
+    try:
+        validate_parameter_scale_values(value)
+    except ParameterScaleValidationError as error:
+        if error.code == "object_contract":
+            message = f"{path} has an unsupported object contract"
+        else:
+            error_path = f"{path}.{error.field}"
+            if error.code in {"invalid_number", "zero"}:
+                message = (
+                    f"{error_path} must be a finite number greater than 0 "
+                    "and at most 1000000"
+                )
+            elif error.code == "fractional_digits":
+                message = f"{error_path} supports at most three fractional digits"
+            elif error.code == "numeric_precision":
+                message = f"{error_path} has unsupported numeric precision"
+            elif error.code == "active_requires_total":
+                message = f"{path}.active_billions requires total_billions"
+            elif error.code == "active_exceeds_total":
+                message = f"{path}.active_billions cannot exceed total_billions"
+            else:
+                raise AssertionError(
+                    f"unsupported parameter-scale error code: {error.code}"
+                ) from error
+        raise ReportError(message) from error
+
+
 def _validate_provenance(value: Any, path: str) -> int:
     if not isinstance(value, Mapping):
         raise ReportError(f"{path} must be an object")
@@ -371,10 +400,14 @@ def _validate_provenance(value: Any, path: str) -> int:
         "precision",
         "declared_context_tokens",
     }
-    revision_keys = set(value) - base_keys
+    optional_keys = {"parameter_scale"}
+    revision_keys = set(value) - base_keys - optional_keys
     if revision_keys not in ({"revision"}, {"digest"}):
         raise ReportError(f"{path} must contain exactly one public revision identifier")
-    provenance = _object(value, base_keys | revision_keys, path)
+    expected_keys = base_keys | revision_keys
+    if "parameter_scale" in value:
+        expected_keys.add("parameter_scale")
+    provenance = _object(value, expected_keys, path)
     _string(provenance["display_name"], f"{path}.display_name")
     _string(provenance["source"], f"{path}.source")
     _string(provenance["precision"], f"{path}.precision")
@@ -385,6 +418,11 @@ def _validate_provenance(value: Any, path: str) -> int:
     )
     revision_field = next(iter(revision_keys))
     _string(provenance[revision_field], f"{path}.{revision_field}", maximum=200)
+    if "parameter_scale" in provenance:
+        _validate_parameter_scale(
+            provenance["parameter_scale"],
+            f"{path}.parameter_scale",
+        )
     return context_tokens
 
 

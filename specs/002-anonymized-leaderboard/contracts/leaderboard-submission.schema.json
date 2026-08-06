@@ -120,7 +120,8 @@
         "display_name",
         "source",
         "precision",
-        "declared_context_tokens"
+        "declared_context_tokens",
+        "parameter_scale"
       ],
       "properties": {
         "display_name": {
@@ -142,6 +143,9 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 9007199254740991
+        },
+        "parameter_scale": {
+          "$ref": "#/$defs/parameterScale"
         }
       },
       "oneOf": [
@@ -166,6 +170,30 @@
           }
         }
       ]
+    },
+    "parameterScaleValue": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "exclusiveMinimum": 0,
+      "maximum": 1000000
+    },
+    "parameterScale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_billions",
+        "active_billions"
+      ],
+      "properties": {
+        "total_billions": {
+          "$ref": "#/$defs/parameterScaleValue"
+        },
+        "active_billions": {
+          "$ref": "#/$defs/parameterScaleValue"
+        }
+      }
     },
     "settings": {
       "type": "object",
@@ -642,5 +670,5 @@
       }
     }
   },
-  "$comment": "Suite membership, ordered case identity and taxonomy, case-count arithmetic, at least one scored public case, validity derivation, future-period rejection, canonical category order, determinism-rate arithmetic, digest verification, numeric precision, and public deny rules are enforced in lockstep by the Python and browser validators. Numeric completion_tokens_per_second requires usage_coverage_cases to equal scored_case_count; null remains valid when token usage is incomplete or unavailable. No suite length is embedded in this portable schema; validation resolves it through the versioned suite registry. Decimal precision remains outside the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
+  "$comment": "Suite membership, ordered case identity and taxonomy, case-count arithmetic, at least one scored public case, validity derivation, future-period rejection, canonical category order, determinism-rate arithmetic, digest verification, numeric precision, parameter-scale relationships, and public deny rules are enforced in lockstep by the Python and browser validators. Numeric completion_tokens_per_second requires usage_coverage_cases to equal scored_case_count; null remains valid when token usage is incomplete or unavailable. No suite length is embedded in this portable schema; validation resolves it through the versioned suite registry. Decimal precision remains outside the portable schema because binary floating-point implementations disagree on fractional multipleOf values."
 }
