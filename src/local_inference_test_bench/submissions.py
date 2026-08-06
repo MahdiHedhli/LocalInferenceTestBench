@@ -298,7 +298,7 @@ def _number(
     *,
     minimum: float = 0.0,
     maximum: float = 1_000_000_000.0,
-    decimal_places: int = 6,
+    decimal_places: int | None = 6,
 ) -> float:
     if (
         isinstance(value, bool)
@@ -308,15 +308,16 @@ def _number(
         or float(value) > maximum
     ):
         raise SubmissionError(f"{path} must be a finite number between {minimum} and {maximum}")
-    try:
-        decimal = Decimal(str(value))
-        quantum = Decimal(1).scaleb(-decimal_places)
-        if decimal != decimal.quantize(quantum):
-            raise SubmissionError(
-                f"{path} supports at most {decimal_places} fractional digits"
-            )
-    except InvalidOperation as error:
-        raise SubmissionError(f"{path} has unsupported numeric precision") from error
+    if decimal_places is not None:
+        try:
+            decimal = Decimal(str(value))
+            quantum = Decimal(1).scaleb(-decimal_places)
+            if decimal != decimal.quantize(quantum):
+                raise SubmissionError(
+                    f"{path} supports at most {decimal_places} fractional digits"
+                )
+        except InvalidOperation as error:
+            raise SubmissionError(f"{path} has unsupported numeric precision") from error
     return float(value)
 
 
@@ -516,9 +517,14 @@ def _validate_determinism(value: Any, path: str) -> Mapping[str, Any]:
         determinism["semantic_pass_rate"],
         f"{path}.semantic_pass_rate",
         maximum=1,
+        decimal_places=None,
     )
-    possible_rates = {round(passed / n_runs, 6) for passed in range(n_runs + 1)}
-    if semantic_pass_rate not in possible_rates:
+    passed_runs = round(semantic_pass_rate * n_runs)
+    expected_rate = passed_runs / n_runs
+    if (
+        not 0 <= passed_runs <= n_runs
+        or abs(semantic_pass_rate - expected_rate) > 0.000000500001
+    ):
         raise SubmissionError(f"{path}.semantic_pass_rate is inconsistent with n_runs")
     envelope_stable = _boolean(
         determinism["envelope_class_stable"],
@@ -535,7 +541,7 @@ def _validate_determinism(value: Any, path: str) -> Mapping[str, Any]:
     verdict = determinism["verdict"]
     if not isinstance(verdict, str) or verdict not in _DETERMINISM_VERDICTS:
         raise SubmissionError(f"{path}.verdict is unsupported")
-    semantic_stable = semantic_pass_rate in {0.0, 1.0}
+    semantic_stable = passed_runs in {0, n_runs}
     expected_verdict = (
         "blocking_instability"
         if not semantic_stable or not envelope_stable or not finish_stable
@@ -1355,7 +1361,12 @@ def ensure_submissions(
 
 
 def _score_percent(count: int, total: int) -> float:
-    return round((count / total) * 100.0, 1) if total else 0.0
+    if not total:
+        return 0.0
+    # Round exact integer ratios to the nearest tenth, with ties away from zero.
+    # This is intentionally language-neutral rather than Python's half-even round.
+    tenths = (2 * count * 1000 + total) // (2 * total)
+    return tenths / 10.0
 
 
 def _validate_facet_selector(facet: FacetSelector) -> None:
@@ -1433,6 +1444,7 @@ def build_leaderboard(
     seen_ids: set[str] = set()
     rows: list[dict[str, Any]] = []
     contains_current_submission = False
+    contains_subset_projection = False
     for path in files:
         if path.is_symlink() or not path.is_file():
             raise SubmissionError("submission entries must be regular files")
@@ -1445,7 +1457,6 @@ def build_leaderboard(
             raise SubmissionError("duplicate submission_id")
         seen_ids.add(submission_id)
         is_legacy = submission["schema_version"] == LEGACY_SUBMISSION_SCHEMA_VERSION
-        contains_current_submission = contains_current_submission or not is_legacy
         normalized_submission = _normalize_submission_payload(
             {key: value for key, value in submission.items() if key != "submission_id"}
         )
@@ -1476,14 +1487,30 @@ def build_leaderboard(
         exact_format_pass_count = sum(
             case["outcome"] in {"pass", "format_only"} for case in scored_cases
         )
+        full_suite_performance = case_count == len(suite)
+        contains_subset_projection = contains_subset_projection or not full_suite_performance
         metrics = {
             **copy.deepcopy(source_metrics),
             "case_count": case_count,
             "semantic_pass_count": semantic_pass_count,
             "exact_format_pass_count": exact_format_pass_count,
             "scored_case_count": scored_case_count,
-            "usage_coverage_cases": min(
-                source_metrics["usage_coverage_cases"], scored_case_count
+            # Accepted submissions intentionally retain only full-suite aggregate
+            # performance. A strict subset facet cannot reconstruct honest timing
+            # or throughput from categorical case outcomes, so omit those values
+            # instead of relabeling full-suite measurements as facet measurements.
+            "usage_coverage_cases": (
+                min(source_metrics["usage_coverage_cases"], scored_case_count)
+                if full_suite_performance
+                else 0
+            ),
+            "latency_ms_mean": (
+                source_metrics["latency_ms_mean"] if full_suite_performance else None
+            ),
+            "completion_tokens_per_second": (
+                source_metrics["completion_tokens_per_second"]
+                if full_suite_performance
+                else None
             ),
         }
         leaderboard_metrics = copy.deepcopy(metrics)
@@ -1520,6 +1547,7 @@ def build_leaderboard(
             )
             if "determinism" in normalized_submission:
                 row["determinism"] = copy.deepcopy(normalized_submission["determinism"])
+        contains_current_submission = contains_current_submission or not is_legacy
         rows.append(row)
 
     rows.sort(
@@ -1531,6 +1559,7 @@ def build_leaderboard(
             row["submission_id"],
         )
     )
+    versioned_projection = contains_current_submission or contains_subset_projection
     entries: list[dict[str, Any]] = []
     previous_quality: tuple[float, float] | None = None
     current_rank = 0
@@ -1544,7 +1573,7 @@ def build_leaderboard(
             previous_quality = quality
         submission_schema_version = row.pop("_submission_schema_version")
         entry = {"rank": current_rank, **row}
-        if contains_current_submission:
+        if versioned_projection:
             entry["submission_schema_version"] = submission_schema_version
             if submission_schema_version == LEGACY_SUBMISSION_SCHEMA_VERSION:
                 entry.update(
@@ -1558,7 +1587,7 @@ def build_leaderboard(
     leaderboard = {
         "schema_version": (
             LEADERBOARD_SCHEMA_VERSION
-            if contains_current_submission
+            if versioned_projection
             else LEGACY_LEADERBOARD_SCHEMA_VERSION
         ),
         "entry_count": len(entries),

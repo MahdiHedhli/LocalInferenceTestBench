@@ -160,7 +160,9 @@ derived consistently from those categories.
 
 The optional determinism object records `n_runs` from 3 through 5, `semantic_pass_rate`, booleans for
 envelope-class, finish-reason, and fingerprint stability, and a consistent verdict of `stable`,
-`warning`, or `blocking_instability`. It contains no response fingerprint or content. The required
+`warning`, or `blocking_instability`. The pass rate must be within half of one six-decimal unit of an
+integer pass count divided by `n_runs`, accepting both exact fractional JSON values and their
+six-decimal forms. It contains no response fingerprint or content. The required
 `measurement_period` is derived from the source report's UTC creation month. Month resolution was
 chosen to surface runtime aging without publishing a precise, high-entropy event time.
 
@@ -173,7 +175,8 @@ appears in the public submission or any leaderboard projection.
 
 Contains `case_count`, `semantic_pass_count`, `exact_format_pass_count`, `scored_case_count`,
 `usage_coverage_cases`, `latency_ms_mean`, and `completion_tokens_per_second`. Performance values are
-rounded to one decimal place. Throughput may be `null`.
+rounded to one decimal place. Score percentages use exact integer-ratio, half-up rounding to one
+decimal so Python and browser validation agree at ties. Throughput may be `null`.
 
 Before hashing, the exporter normalizes public fields whose contract type is `number`. Equivalent
 spellings such as `1`, `1.0`, and negative zero therefore produce the same canonical content ID for
@@ -285,6 +288,12 @@ additive. A row with no applicable case in the selected facet is omitted rather 
 Every accepted public candidate must still contain at least one scored case across its complete
 suite, preserving the append-only candidate-plus-generated-data boundary. Dataset validation accepts
 registry-bounded subset counts even though no additional facet is rendered in this release.
+Accepted records contain only full-suite aggregate performance, not per-case timing or usage. A
+strict subset facet therefore sets latency and throughput to `null` and usage coverage to zero;
+consumers must not interpret the source suite's aggregate performance as a facet measurement.
+A strict subset projection uses logical leaderboard schema `1.1` even when every retained source is
+legacy `1.0`, so those null semantics and explicit `legacy_unreported` annotations remain valid. The
+shipped default all-legacy full-suite projection alone preserves the byte-identical `1.0` monolith.
 
 Configuration-dimension structure `1.0` names hardware, model identity including revision or digest,
 precision, runtime name/version/backend, runtime configuration, and settings. This named structure

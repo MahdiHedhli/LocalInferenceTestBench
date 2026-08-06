@@ -205,6 +205,32 @@ class SiteSafetyTests(unittest.TestCase):
             },
         )
 
+    def test_unavailable_facet_latency_sorts_last(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is unavailable")
+        completed = subprocess.run(
+            [
+                node,
+                str(PROJECT_ROOT / "tests" / "js_sorting_runner.js"),
+                str(SITE_ROOT / "app.js"),
+            ],
+            cwd=PROJECT_ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            json.loads(completed.stdout),
+            {
+                "latency_order": ["fast", "slow", "unavailable"],
+                "half_up_scores": [6.3, 93.8],
+            },
+        )
+
     def test_paginated_controls_describe_the_loaded_result_scope(self) -> None:
         visible_text = re.sub(r"<[^>]+>", " ", self.html)
         visible_text = re.sub(r"\s+", " ", visible_text).casefold()

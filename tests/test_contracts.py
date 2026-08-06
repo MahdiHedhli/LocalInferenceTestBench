@@ -16,6 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(PROJECT_ROOT / "tests"))
 
 from local_inference_test_bench.submissions import (  # noqa: E402
+    FacetSelector,
     SubmissionError,
     build_leaderboard,
     build_leaderboard_bundle,
@@ -132,6 +133,70 @@ class PublishedContractTests(unittest.TestCase):
             sum(shard["entry_count"] for shard in shards),
             index["entry_count"],
         )
+
+    def test_subset_facet_contract_requires_unavailable_performance(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        facet = FacetSelector(
+            facet_id="coding-text",
+            capabilities=frozenset({"coding"}),
+            modalities=frozenset({"text"}),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            submissions = Path(temporary)
+            path = submissions / f"{submission['submission_id']}.json"
+            path.write_text(json.dumps(submission), encoding="utf-8")
+            dataset = build_leaderboard(submissions, facet=facet)
+
+        self.validator.validate(dataset, "leaderboard-dataset.schema.json")
+        metrics = dataset["entries"][0]["metrics"]
+        self.assertEqual(metrics["usage_coverage_cases"], 0)
+        self.assertIsNone(metrics["latency_ms_mean"])
+        self.assertIsNone(metrics["completion_tokens_per_second"])
+
+        inconsistent = copy.deepcopy(dataset)
+        inconsistent["entries"][0]["metrics"]["usage_coverage_cases"] = 1
+        with self.assertRaises(SchemaValidationError):
+            self.validator.validate(inconsistent, "leaderboard-dataset.schema.json")
+
+        mislabeled = copy.deepcopy(dataset)
+        mislabeled["entries"][0]["metrics"]["latency_ms_mean"] = 10.0
+        with self.assertRaises(SchemaValidationError):
+            self.validator.validate(mislabeled, "leaderboard-dataset.schema.json")
+
+    def test_full_suite_contract_requires_observed_latency(self) -> None:
+        submission = prepare_submission(valid_report(), public_environment())
+        with tempfile.TemporaryDirectory() as temporary:
+            submissions = Path(temporary)
+            path = submissions / f"{submission['submission_id']}.json"
+            path.write_text(json.dumps(submission), encoding="utf-8")
+            dataset = build_leaderboard(submissions)
+
+        dataset["entries"][0]["metrics"].update(
+            {
+                "usage_coverage_cases": 0,
+                "latency_ms_mean": None,
+                "completion_tokens_per_second": None,
+            }
+        )
+        with self.assertRaises(SchemaValidationError):
+            self.validator.validate(dataset, "leaderboard-dataset.schema.json")
+
+    def test_legacy_subset_projection_matches_the_versioned_contract(self) -> None:
+        legacy_path = next(
+            iter(sorted((PROJECT_ROOT / "site" / "data" / "submissions").glob("*.json")))
+        )
+        facet = FacetSelector(
+            facet_id="legacy-coding-text",
+            capabilities=frozenset({"coding"}),
+            modalities=frozenset({"text"}),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / legacy_path.name).write_bytes(legacy_path.read_bytes())
+            dataset = build_leaderboard(directory, facet=facet)
+
+        self.assertEqual(dataset["schema_version"], "1.1")
+        self.validator.validate(dataset, "leaderboard-dataset.schema.json")
 
     def test_not_applicable_contracts_require_matching_route_and_termination(self) -> None:
         report = valid_report()

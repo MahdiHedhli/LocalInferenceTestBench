@@ -686,6 +686,7 @@ class SubmissionTests(unittest.TestCase):
 
         self.assertEqual(DEFAULT_FACET, explicit)
         self.assertEqual(default_board, explicit_board)
+        self.assertIsNotNone(default_board["entries"][0]["metrics"]["latency_ms_mean"])
 
     def test_non_default_facet_payload_remains_browser_valid(self) -> None:
         node = shutil.which("node")
@@ -718,8 +719,27 @@ class SubmissionTests(unittest.TestCase):
                 text=True,
             )
 
-        self.assertEqual(leaderboard["entries"][0]["metrics"]["case_count"], 1)
-        self.assertEqual(completed.stdout, "accepted\n")
+            metrics = leaderboard["entries"][0]["metrics"]
+            self.assertEqual(metrics["case_count"], 1)
+            self.assertEqual(metrics["usage_coverage_cases"], 0)
+            self.assertIsNone(metrics["latency_ms_mean"])
+            self.assertIsNone(metrics["completion_tokens_per_second"])
+            self.assertEqual(completed.stdout, "accepted\n")
+
+            metrics["latency_ms_mean"] = submission["metrics"]["latency_ms_mean"]
+            payload.write_text(json.dumps(leaderboard), encoding="utf-8")
+            rejected = subprocess.run(
+                [
+                    node,
+                    str(Path(__file__).resolve().parent / "js_payload_validator_runner.js"),
+                    str(Path(__file__).resolve().parents[1] / "site" / "app.js"),
+                    str(payload),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(rejected.stdout, "rejected\n")
 
     def test_dimension_and_graduation_seams_are_named_and_versioned(self) -> None:
         self.assertEqual(CONFIG_KEY_DIMENSIONS["version"], "1.0")
@@ -947,6 +967,76 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(legacy_entry["validity"], "legacy_unreported")
         self.assertIsNone(legacy_entry["measurement_period"])
         self.assertIsNone(legacy_entry["measurement_conditions"])
+
+    def test_filtered_current_record_does_not_relabel_legacy_projection(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        legacy_path = next(
+            iter(sorted((repository / "site" / "data" / "submissions").glob("*.json")))
+        )
+        legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
+        current = prepare_submission(valid_report(), public_environment())
+        legacy_identity = submissions_module._facet_dimensions(legacy)["model_identity"]
+        self.assertNotEqual(
+            submissions_module._facet_dimensions(current)["model_identity"],
+            legacy_identity,
+        )
+        facet = FacetSelector(
+            facet_id="legacy-only-text",
+            capabilities=None,
+            modalities=frozenset({"text"}),
+            dimension_filters=(("model_identity", legacy_identity),),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / legacy_path.name).write_text(json.dumps(legacy), encoding="utf-8")
+            (directory / f"{current['submission_id']}.json").write_bytes(
+                render_submission_bytes(current)
+            )
+            leaderboard = build_leaderboard(directory, facet=facet)
+
+        self.assertEqual(leaderboard["schema_version"], "1.0")
+        self.assertEqual(leaderboard["entry_count"], 1)
+        self.assertNotIn("submission_schema_version", leaderboard["entries"][0])
+
+    def test_legacy_subset_facet_uses_a_browser_valid_versioned_projection(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        legacy_path = next(
+            iter(sorted((repository / "site" / "data" / "submissions").glob("*.json")))
+        )
+        facet = FacetSelector(
+            facet_id="legacy-coding-text",
+            capabilities=frozenset({"coding"}),
+            modalities=frozenset({"text"}),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / legacy_path.name).write_bytes(legacy_path.read_bytes())
+            leaderboard = build_leaderboard(directory, facet=facet)
+            payload = directory / "leaderboard.json"
+            payload.write_text(json.dumps(leaderboard), encoding="utf-8")
+            node = shutil.which("node")
+            if node is not None:
+                completed = subprocess.run(
+                    [
+                        node,
+                        str(Path(__file__).resolve().parent / "js_payload_validator_runner.js"),
+                        str(repository / "site" / "app.js"),
+                        str(payload),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(completed.stdout, "accepted\n")
+
+        self.assertEqual(leaderboard["schema_version"], "1.1")
+        self.assertEqual(leaderboard["entry_count"], 1)
+        entry = leaderboard["entries"][0]
+        self.assertEqual(entry["submission_schema_version"], "1.0")
+        self.assertEqual(entry["validity"], "legacy_unreported")
+        self.assertIsNone(entry["metrics"]["latency_ms_mean"])
 
     def test_all_legacy_leaderboard_transport_remains_byte_identical(self) -> None:
         repository = Path(__file__).resolve().parents[1]
@@ -1756,6 +1846,10 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(entries[0]["metrics"]["semantic_score_percent"], 100.0)
         self.assertEqual(entries[2]["metrics"]["semantic_score_percent"], 80.0)
         self.assertNotIn("cases", entries[0])
+
+    def test_score_percent_uses_language_neutral_half_up_rounding(self) -> None:
+        self.assertEqual(submissions_module._score_percent(1, 16), 6.3)
+        self.assertEqual(submissions_module._score_percent(15, 16), 93.8)
 
     def test_leaderboard_rejects_a_filename_that_does_not_match_content(self) -> None:
         submission = prepare_submission(valid_report(), public_environment())

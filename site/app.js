@@ -658,7 +658,6 @@ function validateDeterminism(determinism) {
     ]) ||
     !isInteger(determinism.n_runs, 3, 5) ||
     !isFiniteNumber(determinism.semantic_pass_rate, 0, 1) ||
-    !hasAtMostSixDecimalPlaces(determinism.semantic_pass_rate) ||
     typeof determinism.envelope_class_stable !== "boolean" ||
     typeof determinism.finish_reason_stable !== "boolean" ||
     typeof determinism.fingerprint_stable !== "boolean" ||
@@ -666,14 +665,16 @@ function validateDeterminism(determinism) {
   ) {
     return false;
   }
-  const possibleRates = Array.from(
-    { length: determinism.n_runs + 1 },
-    (_unused, passed) => Number((passed / determinism.n_runs).toFixed(6)),
-  );
-  if (!possibleRates.includes(determinism.semantic_pass_rate)) {
+  const passedRuns = Math.round(determinism.semantic_pass_rate * determinism.n_runs);
+  const expectedRate = passedRuns / determinism.n_runs;
+  if (
+    passedRuns < 0 ||
+    passedRuns > determinism.n_runs ||
+    Math.abs(determinism.semantic_pass_rate - expectedRate) > 0.000000500001
+  ) {
     return false;
   }
-  const semanticStable = [0, 1].includes(determinism.semantic_pass_rate);
+  const semanticStable = passedRuns === 0 || passedRuns === determinism.n_runs;
   const expectedVerdict =
     !semanticStable || !determinism.envelope_class_stable || !determinism.finish_reason_stable
       ? "blocking_instability"
@@ -874,8 +875,23 @@ function validateMetrics(metrics, suiteLength, legacy = false) {
   ) {
     return false;
   }
-  const semanticPercent = Math.round((metrics.semantic_pass_count / metrics.scored_case_count) * 1000) / 10;
-  const formatPercent = Math.round((metrics.exact_format_pass_count / metrics.scored_case_count) * 1000) / 10;
+  const semanticPercent = scorePercent(
+    metrics.semantic_pass_count,
+    metrics.scored_case_count,
+  );
+  const formatPercent = scorePercent(
+    metrics.exact_format_pass_count,
+    metrics.scored_case_count,
+  );
+  const hasFullSuitePerformance = metrics.case_count === suiteLength;
+  const performanceIsValid = hasFullSuitePerformance
+    ? hasOneDecimalPlace(metrics.latency_ms_mean) &&
+      (metrics.completion_tokens_per_second === null ||
+        (hasOneDecimalPlace(metrics.completion_tokens_per_second) &&
+          metrics.usage_coverage_cases === metrics.scored_case_count))
+    : metrics.usage_coverage_cases === 0 &&
+      metrics.latency_ms_mean === null &&
+      metrics.completion_tokens_per_second === null;
   return (
     (!legacy ||
       (metrics.case_count === suiteLength && metrics.scored_case_count === suiteLength)) &&
@@ -886,11 +902,15 @@ function validateMetrics(metrics, suiteLength, legacy = false) {
     isFiniteNumber(metrics.exact_format_score_percent, 0, 100) &&
     metrics.semantic_score_percent === semanticPercent &&
     metrics.exact_format_score_percent === formatPercent &&
-    hasOneDecimalPlace(metrics.latency_ms_mean) &&
-    (metrics.completion_tokens_per_second === null ||
-      (hasOneDecimalPlace(metrics.completion_tokens_per_second) &&
-        metrics.usage_coverage_cases === metrics.scored_case_count))
+    performanceIsValid
   );
+}
+
+function scorePercent(count, total) {
+  if (total === 0) {
+    return 0;
+  }
+  return Math.floor((2 * count * 1000 + total) / (2 * total)) / 10;
 }
 
 function validateEntry(entry, leaderboardSchemaVersion = "1.0", registry = SUITE_REGISTRY) {
@@ -1526,10 +1546,20 @@ function addRow(entry) {
       ? "--"
       : decimal(entry.metrics.completion_tokens_per_second),
     entry.metrics.completion_tokens_per_second === null
-      ? "not fully reported"
+      ? entry.metrics.latency_ms_mean === null
+        ? "full-suite aggregate omitted for this facet"
+        : "not fully reported"
       : `${integer(entry.metrics.usage_coverage_cases)} of ${integer(entry.metrics.case_count)} cases`,
   );
-  addCell(row, `${decimal(entry.metrics.latency_ms_mean)} ms`, "observed mean");
+  addCell(
+    row,
+    entry.metrics.latency_ms_mean === null
+      ? "Not available"
+      : `${decimal(entry.metrics.latency_ms_mean)} ms`,
+    entry.metrics.latency_ms_mean === null
+      ? "full-suite aggregate omitted for this facet"
+      : "observed mean",
+  );
   const seed = entry.settings.seed === null ? "none" : integer(entry.settings.seed);
   const reasoning = Object.hasOwn(entry.settings, "reasoning_effort")
     ? ` | reasoning ${readableEnum(entry.settings.reasoning_effort)}`
@@ -1555,6 +1585,19 @@ function compareNullableDescending(left, right) {
   return right - left;
 }
 
+function compareNullableAscending(left, right) {
+  if (left === null && right === null) {
+    return 0;
+  }
+  if (left === null) {
+    return 1;
+  }
+  if (right === null) {
+    return -1;
+  }
+  return left - right;
+}
+
 function sortedEntries(values, sort) {
   const result = [...values];
   result.sort((left, right) => {
@@ -1567,7 +1610,10 @@ function sortedEntries(values, sort) {
         right.metrics.completion_tokens_per_second,
       );
     } else if (sort === "latency") {
-      comparison = left.metrics.latency_ms_mean - right.metrics.latency_ms_mean;
+      comparison = compareNullableAscending(
+        left.metrics.latency_ms_mean,
+        right.metrics.latency_ms_mean,
+      );
     } else if (sort === "context") {
       comparison = right.model.declared_context_tokens - left.model.declared_context_tokens;
     } else if (sort === "recency") {
@@ -1878,6 +1924,8 @@ if (typeof module !== "undefined" && module.exports) {
     filterEntriesByValidity,
     parseStrictJson,
     resolveSuite,
+    scorePercent,
+    sortedEntries,
     validateSubmission,
     validateIndex,
     validateModel,

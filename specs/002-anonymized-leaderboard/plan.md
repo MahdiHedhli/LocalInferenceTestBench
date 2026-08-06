@@ -81,6 +81,8 @@ the constitution already allows.
   runtime context make speed interpretable, but performance still does not change the quality rank.
 - Round retained aggregate performance values to reduce unnecessary precision. Do not retain source
   timestamps, local model IDs, manifest digests, or per-case performance traces.
+- Derive displayed score percentages with exact integer-ratio, half-up rounding to one decimal in
+  both Python and JavaScript so future suite lengths cannot create language-specific tie behavior.
 - Let the browser inspect only minimized JSON. It uses text-only rendering and does not transmit the
   selected file.
 - Build and deploy with pinned GitHub-authored actions and narrow job permissions.
@@ -251,4 +253,9 @@ dimensions are a named version `1.0` structure reused by later filtering and con
 hardware, model identity including revision or digest, precision, runtime name/version/backend,
 runtime configuration, and settings. The future view-graduation policy is also version `1.0`, with
 25 entries across five model families; nothing reads it yet. Python and browser validation continue
-as parallel closed-schema implementations exercised by shared fixtures.
+as parallel closed-schema implementations exercised by shared fixtures. Since minimized accepted
+records do not retain per-case timing or usage, any strict subset facet emits unavailable latency
+and throughput plus zero usage coverage; it never presents the retained full-suite aggregate as a
+facet-specific performance result. Such a subset uses the versioned logical `1.1` projection even
+when all source records are legacy; only the shipped all-legacy full-suite projection retains the
+byte-identical `1.0` transport.

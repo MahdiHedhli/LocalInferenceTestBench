@@ -237,6 +237,61 @@
             }
           }
         }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "profile": {
+                "const": "standard"
+              },
+              "suite_version": {
+                "const": "1.0"
+              }
+            }
+          },
+          "then": {
+            "if": {
+              "properties": {
+                "metrics": {
+                  "properties": {
+                    "case_count": {
+                      "const": 5
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "metrics": {
+                  "properties": {
+                    "latency_ms_mean": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "metrics": {
+                  "properties": {
+                    "usage_coverage_cases": {
+                      "const": 0
+                    },
+                    "latency_ms_mean": {
+                      "type": "null"
+                    },
+                    "completion_tokens_per_second": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       ]
     },
     "legacyLeaderboardMetrics": {
@@ -363,9 +418,16 @@
           "maximum": 1000000
         },
         "latency_ms_mean": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1000000000
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "completion_tokens_per_second": {
           "oneOf": [
@@ -389,7 +451,28 @@
           "minimum": 0,
           "maximum": 100
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "latency_ms_mean": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "usage_coverage_cases": {
+                "const": 0
+              },
+              "completion_tokens_per_second": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "$comment": "The logical 1.0 branch preserves the original unannotated monolith byte contract. A logical 1.1 dataset requires every row to declare its source submission schema: retained 1.0 rows use legacy_unreported with null measurement evidence, while 1.1 rows carry measured categorical validity. The Python builder is authoritative for entry_count, registry resolution, arithmetic, one-decimal precision, deterministic ordering, dense ranks, and bounded transport partitioning."

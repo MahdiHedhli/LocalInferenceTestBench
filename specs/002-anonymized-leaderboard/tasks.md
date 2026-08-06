@@ -133,3 +133,6 @@ new benchmark case, capability score, or capability-specific UI.
   and deterministic-build regressions
 - [ ] T039 Complete local and hosted cross-platform, Pages, exact-boundary, privacy, history, and
   secret-scanning verification before merging Stage 3
+- [x] T040 Keep strict subset facets quality-only by omitting unavailable latency and throughput,
+  with matching browser validation and regression coverage, rather than relabeling retained
+  full-suite aggregate performance as facet measurements

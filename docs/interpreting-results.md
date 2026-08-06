@@ -50,6 +50,9 @@ the record cannot imply that an unattempted case completed through an ordinary r
 - Exact artifact identity and suite/settings version are present.
 - All required workload cases pass semantically.
 - Exact-envelope performance meets the actual consumer's needs.
+- Facet latency and throughput are shown only when the selector covers the complete suite. A future
+  strict subset facet reports those performance values as unavailable because public records do not
+  retain per-case timing or usage from which an honest subset aggregate could be reconstructed.
 - No unresolved reasoning-only, truncation, or tool-schema behavior remains.
 - Performance was measured in a comparable environment and is acceptable at the intended concurrency.
 - Any required context experiment passed with measured input usage.

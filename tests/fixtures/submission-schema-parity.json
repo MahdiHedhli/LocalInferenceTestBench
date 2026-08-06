@@ -178,6 +178,27 @@
       ]
     },
     {
+      "name": "exact-fraction-determinism",
+      "expected": true,
+      "operations": [
+        {"op": "set", "path": ["determinism"], "value": {"n_runs": 3, "semantic_pass_rate": 0.3333333333333333, "envelope_class_stable": true, "finish_reason_stable": true, "fingerprint_stable": true, "verdict": "blocking_instability"}}
+      ]
+    },
+    {
+      "name": "tiny-rounded-zero-determinism",
+      "expected": true,
+      "operations": [
+        {"op": "set", "path": ["determinism"], "value": {"n_runs": 3, "semantic_pass_rate": 1e-18, "envelope_class_stable": true, "finish_reason_stable": true, "fingerprint_stable": true, "verdict": "stable"}}
+      ]
+    },
+    {
+      "name": "near-but-impossible-determinism",
+      "expected": false,
+      "operations": [
+        {"op": "set", "path": ["determinism"], "value": {"n_runs": 3, "semantic_pass_rate": 0.333334, "envelope_class_stable": true, "finish_reason_stable": true, "fingerprint_stable": true, "verdict": "blocking_instability"}}
+      ]
+    },
+    {
       "name": "bad-determinism-verdict",
       "expected": false,
       "operations": [

@@ -259,7 +259,8 @@ dataset and that Pages deployment runs only from the default branch.
 - **FR-038**: Schema `1.1` MAY carry one closed determinism object containing 3–5 runs, semantic pass
   rate, envelope-class, finish-reason, and fingerprint stability, and a consistent `stable`,
   `warning`, or `blocking_instability` verdict. The pass rate MUST be arithmetically possible for the
-  declared repetition count after six-decimal normalization. Missing determinism MUST remain missing.
+  declared repetition count within half of one six-decimal unit. Exact fractional JSON numbers and
+  their six-decimal forms MUST both validate. Missing determinism MUST remain missing.
 - **FR-039**: Public validation MUST resolve cases from a suite registry keyed by
   `(profile, suite_version)` and derive all counts and percentages from the resolved length. Every
   `1.1` case MUST record its registry-defined `capability` and `modality`. Current behavior remains
@@ -284,7 +285,9 @@ dataset and that Pages deployment runs only from the default branch.
   be named in one version `1.0` structure containing hardware, model identity including revision or
   digest, precision, runtime name/version/backend, runtime configuration, and settings. Browser
   validation MUST accept registry-bounded subset counts emitted by a non-default selector without
-  adding a current UI view.
+  adding a current UI view. Because accepted submissions retain only full-suite aggregate
+  performance, a strict subset facet MUST publish null latency and throughput with zero usage
+  coverage rather than relabeling full-suite values as measurements of that facet.
 - **FR-044**: A version `1.0` facet-graduation policy MUST record 25 entries across five distinct
   model families as the minimum for a dedicated future page, but no current code or UI MUST read it.
   The transport `index_version` MUST remain `1.0` when projected entry `schema_version` becomes

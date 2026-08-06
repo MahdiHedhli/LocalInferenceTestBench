@@ -166,6 +166,8 @@ version `1.0` configuration dimensions once and record, without consuming, a gra
 
 **Rationale**: Future capability views and config-cell aggregation should be additive. Fixing the
 minimum sample rule before results arrive avoids tuning it after observing favorable data.
+Minimized submissions retain full-suite aggregate performance only, so subset selectors suppress
+latency and throughput rather than mislabeling those aggregates as facet-specific measurements.
 
 **Alternatives considered**:
 
