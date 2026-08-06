@@ -127,6 +127,67 @@
         "accelerators": [
           {
             "count": 1,
+            "kind": "discrete_gpu",
+            "memory_gb": 4.0,
+            "model": "NVIDIA RTX A2000 Laptop GPU"
+          }
+        ],
+        "cpu": {
+          "logical_cores": 8,
+          "model": "11th Gen Intel(R) Core(TM) i7-11370H @ 3.30GHz"
+        },
+        "execution_mode": "accelerator_only",
+        "memory": {
+          "architecture": "discrete",
+          "system_gb": 32.0
+        }
+      },
+      "metrics": {
+        "case_count": 5,
+        "completion_tokens_per_second": 3.3,
+        "exact_format_pass_count": 5,
+        "exact_format_score_percent": 100.0,
+        "latency_ms_mean": 9553.1,
+        "scored_case_count": 5,
+        "semantic_pass_count": 5,
+        "semantic_score_percent": 100.0,
+        "usage_coverage_cases": 5
+      },
+      "model": {
+        "declared_context_tokens": 262144,
+        "display_name": "Qwen3.5-4B UD-Q4_K_XL",
+        "precision": "UD-Q4_K_XL GGUF",
+        "revision": "e87f176479d0855a907a41277aca2f8ee7a09523",
+        "source": "unsloth/Qwen3.5-4B-GGUF"
+      },
+      "profile": "standard",
+      "rank": 1,
+      "runtime": {
+        "backend": "llama.cpp CUDA b10236 (sm_86)",
+        "name": "Lemonade Server",
+        "version": "11.5.2"
+      },
+      "runtime_configuration": {
+        "concurrent_requests": 1,
+        "context_window_tokens": 8192,
+        "offload_mode": "maximum",
+        "speculative_decoding": "disabled"
+      },
+      "settings": {
+        "max_output_tokens": 2048,
+        "reasoning_effort": "none",
+        "seed": 0,
+        "temperature": 0.0,
+        "top_p": 1.0
+      },
+      "submission_id": "316a79155e30d53c26adaee0a484f2a9c39cee3e4cd340041ae2060adbb9360b",
+      "suite_version": "1.0"
+    },
+    {
+      "hardware": {
+        "accelerators": [
+          {
+            "count": 1,
             "kind": "integrated_gpu",
             "memory_gb": null,
             "model": "Apple M1 Ultra 64-core GPU"
@@ -304,6 +365,6 @@
       "suite_version": "1.0"
     }
   ],
-  "entry_count": 5,
+  "entry_count": 6,
   "schema_version": "1.0"
 }
