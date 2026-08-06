@@ -146,6 +146,9 @@
         "precision": {
           "$ref": "#/$defs/publicText"
         },
+        "parameter_scale": {
+          "$ref": "#/$defs/parameterScale"
+        },
         "declared_context_tokens": {
           "type": "integer",
           "minimum": 1
@@ -173,6 +176,54 @@
           }
         }
       ]
+    },
+    "parameterScale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_billions",
+        "active_billions"
+      ],
+      "properties": {
+        "total_billions": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "maximum": 1000000
+        },
+        "active_billions": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "total_billions": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "total_billions"
+            ]
+          },
+          "then": {
+            "properties": {
+              "active_billions": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
+      "$comment": "Run-record validation additionally enforces at most three fractional digits and active_billions no greater than total_billions."
     },
     "nullableTokenCount": {
       "type": [

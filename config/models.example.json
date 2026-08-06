@@ -9,6 +9,10 @@
       "source": "publisher/example-model",
       "revision": "public-revision-id",
       "precision": "runtime-declared",
+      "parameter_scale": {
+        "total_billions": 8.0,
+        "active_billions": null
+      },
       "declared_context_tokens": 8192,
       "runtime_model": "runtime-model-selector",
       "settings": {

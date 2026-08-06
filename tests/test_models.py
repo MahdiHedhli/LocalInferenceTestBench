@@ -118,6 +118,55 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(ManifestError, "reasoning_effort is unsupported"):
             parse_manifest(data)
 
+    def test_optional_parameter_scale_is_closed_normalized_public_provenance(self) -> None:
+        omitted = parse_manifest(valid_manifest_data())
+        self.assertIsNone(omitted.models[0].parameter_scale)
+        self.assertNotIn("parameter_scale", omitted.models[0].provenance())
+
+        data = valid_manifest_data()
+        data["models"][0]["parameter_scale"] = {
+            "total_billions": 30,
+            "active_billions": 3.25,
+        }
+        manifest = parse_manifest(data)
+
+        self.assertEqual(
+            manifest.models[0].provenance()["parameter_scale"],
+            {"total_billions": 30.0, "active_billions": 3.25},
+        )
+        self.assertNotEqual(manifest.public_sha256, omitted.public_sha256)
+
+        data["models"][0]["parameter_scale"] = {
+            "total_billions": None,
+            "active_billions": None,
+        }
+        unknown = parse_manifest(data)
+        self.assertEqual(
+            unknown.models[0].provenance()["parameter_scale"],
+            {"total_billions": None, "active_billions": None},
+        )
+
+    def test_parameter_scale_rejects_invalid_shape_range_precision_and_relationships(self) -> None:
+        invalid_scales = (
+            None,
+            {"total_billions": 8.0},
+            {"total_billions": 8.0, "active_billions": None, "extra": 1},
+            {"total_billions": True, "active_billions": None},
+            {"total_billions": 0, "active_billions": None},
+            {"total_billions": 1_000_000.001, "active_billions": None},
+            {"total_billions": 8.0001, "active_billions": None},
+            {"total_billions": None, "active_billions": 3.0},
+            {"total_billions": 8.0, "active_billions": 9.0},
+            {"total_billions": float("nan"), "active_billions": None},
+            {"total_billions": float("inf"), "active_billions": None},
+            {"total_billions": 10**10_000, "active_billions": None},
+        )
+        for index, scale in enumerate(invalid_scales):
+            data = valid_manifest_data()
+            data["models"][0]["parameter_scale"] = scale
+            with self.subTest(index=index), self.assertRaises(ManifestError):
+                parse_manifest(data)
+
     def test_public_fingerprint_excludes_credential_and_runtime_selector(self) -> None:
         first_data = valid_manifest_data()
         second_data = copy.deepcopy(first_data)

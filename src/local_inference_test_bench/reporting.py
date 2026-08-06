@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 import getpass
 import ipaddress
@@ -362,6 +363,45 @@ def _validate_settings(value: Any, path: str) -> int:
     return maximum
 
 
+def _validate_parameter_scale(value: Any, path: str) -> None:
+    scale = _object(value, {"total_billions", "active_billions"}, path)
+
+    def parameter_billions(field: str) -> float | None:
+        raw = scale[field]
+        if raw is None:
+            return None
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise ReportError(
+                f"{path}.{field} must be a finite number greater than 0 and at most 1000000"
+            )
+        try:
+            number = float(raw)
+        except OverflowError as error:
+            raise ReportError(
+                f"{path}.{field} must be a finite number greater than 0 and at most 1000000"
+            ) from error
+        if not math.isfinite(number) or not 0 < number <= 1_000_000:
+            raise ReportError(
+                f"{path}.{field} must be a finite number greater than 0 and at most 1000000"
+            )
+        try:
+            decimal = Decimal(str(raw))
+            if decimal != decimal.quantize(Decimal("0.001")):
+                raise ReportError(
+                    f"{path}.{field} supports at most three fractional digits"
+                )
+        except InvalidOperation as error:
+            raise ReportError(f"{path}.{field} has unsupported numeric precision") from error
+        return number
+
+    total = parameter_billions("total_billions")
+    active = parameter_billions("active_billions")
+    if total is None and active is not None:
+        raise ReportError(f"{path}.active_billions requires total_billions")
+    if total is not None and active is not None and active > total:
+        raise ReportError(f"{path}.active_billions cannot exceed total_billions")
+
+
 def _validate_provenance(value: Any, path: str) -> int:
     if not isinstance(value, Mapping):
         raise ReportError(f"{path} must be an object")
@@ -371,10 +411,14 @@ def _validate_provenance(value: Any, path: str) -> int:
         "precision",
         "declared_context_tokens",
     }
-    revision_keys = set(value) - base_keys
+    optional_keys = {"parameter_scale"}
+    revision_keys = set(value) - base_keys - optional_keys
     if revision_keys not in ({"revision"}, {"digest"}):
         raise ReportError(f"{path} must contain exactly one public revision identifier")
-    provenance = _object(value, base_keys | revision_keys, path)
+    expected_keys = base_keys | revision_keys
+    if "parameter_scale" in value:
+        expected_keys.add("parameter_scale")
+    provenance = _object(value, expected_keys, path)
     _string(provenance["display_name"], f"{path}.display_name")
     _string(provenance["source"], f"{path}.source")
     _string(provenance["precision"], f"{path}.precision")
@@ -385,6 +429,11 @@ def _validate_provenance(value: Any, path: str) -> int:
     )
     revision_field = next(iter(revision_keys))
     _string(provenance[revision_field], f"{path}.{revision_field}", maximum=200)
+    if "parameter_scale" in provenance:
+        _validate_parameter_scale(
+            provenance["parameter_scale"],
+            f"{path}.parameter_scale",
+        )
     return context_tokens
 
 
