@@ -44,7 +44,7 @@ Benchmark submissions use a public pull request. Before opening one, read
    explicit non-interactive flow. The model selection is required when the report contains more
    than one model and may be omitted for a single-model run.
 4. Read the complete identifier-minimized JSON and the public-account disclosure before confirming.
-5. Let the tool build and validate an isolated two-file change and open the reviewed pull request.
+5. Let the tool build and validate an isolated two-file change and open the pull request.
 
 If a publication attempt is cancelled or fails, use
 `litb publish-submission --candidate .local/leaderboard-submissions/<submission-id>.json` to retry
@@ -53,7 +53,19 @@ the already-saved candidate without rerunning the benchmark.
 The manual `litb prepare-submission` → copy → rebuild → validate → PR process remains available in
 [submitting a benchmark](docs/submitting-benchmarks.md). Automated benchmark PRs may add exactly one
 digest-named submission and update the generated leaderboard; do not mix code or documentation into
-them.
+them. To use the automated review and merge lane, a manual PR must use the exact branch name
+`litb/submission-<submission-id>`, with the digest matching the added filename and content ID.
+
+For an exact benchmark-only PR, trusted base code revalidates the file modes, schema, canonical
+digest, duplicate status, and deterministic leaderboard before requesting Codex and CodeRabbit.
+A same-head clean Codex signal starts another fail-closed revalidation and may arm GitHub's protected
+squash auto-merge. Branch protection still requires the publication and trusted-boundary checks plus
+an exact-head approval from the configured reviewer account. Findings, unresolved threads, stale
+data, general code changes, and rate-limit notices never enter this lane.
+
+Per-run automation checks public protected status, the GitHub-Actions-bound required-check summary,
+and native review decision. Administration-only protection settings remain repository-operator
+prerequisites and are not inferred from contributor-controlled events.
 
 The submission JSON has no contributor field, but your GitHub account and pull request are public.
 Exact hardware and performance details can also make a setup recognizable. Do not submit a file you

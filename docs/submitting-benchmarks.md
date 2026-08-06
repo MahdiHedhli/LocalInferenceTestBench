@@ -20,7 +20,7 @@ Share this result? [Enter] keep private, [s] save minimized JSON, [p] open publi
 `Enter` keeps the report private. `s` creates owner-only identifier-minimized JSON under
 `.local/leaderboard-submissions`. `p` saves the same JSON, displays the complete proposed public
 record, identifies the GitHub account that will be visible, and requires `PUBLISH` before creating a
-branch and reviewed pull request. A failed export or GitHub step never removes the private report.
+branch and pull request. A failed export or GitHub step never removes the private report.
 
 For scripts or unattended runs, choose the action explicitly:
 
@@ -153,6 +153,18 @@ check does not verify the content digest or replace local and hosted validation.
 
 ## Add the candidate to a branch
 
+For the automated review and merge lane, create the deterministic branch whose suffix is the
+candidate's submission ID:
+
+```sh
+litb_submission_id="replace-with-the-64-character-submission-id"
+git switch -c "litb/submission-${litb_submission_id}"
+```
+
+The digest in the branch name must match the one added JSON filename and its canonical content ID.
+Another branch name can still be reviewed manually, but it is ineligible for automated approval and
+merge.
+
 Copy the file without renaming it:
 
 ```sh
@@ -188,11 +200,37 @@ Use the benchmark submission template. Confirm that you read the JSON, that the 
 only the inference path, and that you accept public display of the hardware, performance figures,
 pull request, and GitHub account.
 
-Maintainers review the record and automated checks before merge. Published entries are
-self-reported, schema-validated, maintainer-reviewed, and not independently reproduced. Quality rank
-uses semantic score first and exact-format score second. Latency and throughput are shown with their
+Trusted base code validates the exact two-file shape, ordinary file modes, schema, canonical digest,
+duplicate status, and byte-exact generated leaderboard before requesting Codex and CodeRabbit.
+After a same-head clean Codex signal, a separate trusted workflow repeats those checks, requires all
+review threads to be resolved, verifies the public app-bound protection summary and native review
+decision, arms native squash auto-merge, and adds an exact-head approval from the configured reviewer
+account. CodeRabbit is best-effort: a green
+rate-limit status is not an approval. Any finding, stale base/head, unresolved thread, malformed
+record, or failed required check leaves the pull request open for a maintainer.
+
+GitHub may briefly report unknown mergeability; the workflow retries that state only for a bounded
+interval and otherwise leaves the PR open. An established `unstable` state may continue to native
+auto-merge, but it is not treated as a passed check. GitHub still waits for every configured required
+check. Administration-only protection settings are mandatory repository-operator prerequisites and
+are not claimed as per-run evidence by the read-only workflow.
+
+Retries remain exact-head operations. If a partial automation run already left the configured
+reviewer approval on the current head, the workflow may reuse that approval and re-arm missing native
+auto-merge only after every authorization check runs again. A dismissed approval, change request, or
+approval for another head cannot be reused.
+
+Published entries remain self-reported, schema-validated, and not independently reproduced. Bot
+review, the automated reviewer-account approval, and a content digest are policy gates—not evidence
+that a benchmark run occurred or an independent substantive reproduction. Quality rank uses
+semantic score first and exact-format score second. Latency and throughput are shown with their
 hardware context but never affect rank.
 
 Automated benchmark PRs are restricted to exactly one append-only submission JSON file plus the
 deterministically regenerated leaderboard. Mixed code-and-data PRs, rewrites, deletes, renames, and
 extra files are rejected by continuous integration.
+
+Auto-merge never uses the contributor-editable pull-request title or body as the squash commit
+message. It uses fixed bounded text that labels the record self-reported and the run unverified,
+plus the validated submission digest, and never bypasses branch protection or pushes directly to
+`main`.
