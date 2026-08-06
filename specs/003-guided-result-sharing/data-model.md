@@ -37,7 +37,7 @@ No token or credential value is represented.
 | `base_sha` | Clean canonical clone | Must still equal upstream before mutation |
 | `base_tree` | Same commit | Base for one atomic tree |
 | `submission_bytes` | Canonical renderer | Closed, validated, digest-named |
-| `leaderboard_bytes` | Deterministic builder | Includes all accepted upstream entries plus candidate |
+| `leaderboard_bytes` | Deterministic builder | Canonical monolith while bounded, otherwise the compact deterministic shard index for all accepted upstream entries plus candidate |
 
 If the reviewed local descriptor includes `runtime_configuration`, its closed values are preserved
 in both byte payloads. Older candidates without that optional object remain valid; no defaults are

@@ -190,6 +190,35 @@ A recorded digest establishes integrity of canonical retained content only. It d
 the provenance or truth of a self-reported benchmark, attest that inference occurred, or verify the
 reported measurements.
 
+### Public projection transport
+
+Public leaderboard submissions remain immutable schema `1.0` evidence addressed by their canonical
+content digests. Corpus growth does not change or replace those records. The committed
+`site/data/leaderboard.json` is a bounded deterministic transport file derived from the complete
+accepted set: the legacy monolith while it fits, then the constant-shape index. Leaderboard row pages
+are deterministic shards generated only in the temporary Pages artifact after that committed file
+passes a byte-for-byte rebuild check.
+
+The sharded index has constant shape
+`{index_version, schema_version, entry_count, shard_count}`. Shard fetch targets are not data: the
+browser derives one-based contiguous IDs zero-padded to a minimum width of six digits and synthesizes
+`data/leaderboard-NNNNNN.json`. Each shard has exactly
+`{index_version, schema_version, shard_id, entry_count, entries}`. The deterministic globally ranked
+row sequence splits greedily at stable record boundaries according to the exact UTF-8 byte length of
+each rendered shard JSON document. Each submission, the index, and every shard retains an individual
+hard byte cap, but there is no aggregate corpus-size rejection. The complete shard union must contain
+every accepted digest exactly once; corrupt, missing, duplicate, inconsistent, or individually
+oversized inputs still fail closed.
+
+The mixed code rollout preserves the current six-entry legacy monolith byte-for-byte and teaches
+readers and builders both closed transport shapes. A deterministic build switches to the index when
+the legacy cap would otherwise be crossed by an exact two-file append-only benchmark submission.
+Leaderboard-only early activation is unsupported. Pages always emits the index and shards in its
+temporary artifact.
+
+The index and temporary shards are rebuildable delivery representations. They do not become model
+evidence, change a submission digest, or authorize pruning of accepted submissions.
+
 ### Value object: Model Summary
 
 | Field | Type | Rules |

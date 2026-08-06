@@ -96,6 +96,15 @@ dataset and that Pages deployment runs only from the default branch.
 4. **Given** a community result, **When** it appears on the site, **Then** the site calls it
    self-reported and unverified and does not imply that schema checks, repository review, or its
    digest attest that a benchmark run occurred.
+5. **Given** an accepted corpus larger than the previous aggregate dataset cap, **When** publication
+   runs, **Then** the deterministic committed index still byte-validates and the Pages build emits
+   individually bounded deterministic shards without deleting, omitting, or rewriting an accepted
+   submission.
+6. **Given** the globally ranked row sequence exceeds one shard byte cap, **When** publication runs,
+   **Then** it is paginated deterministically by rendered UTF-8 JSON byte size and the browser
+   fetches only the pages needed for the current view.
+7. **Given** a corrupt accepted record at any corpus size, **When** validation or publication runs,
+   **Then** it fails closed rather than treating volume pagination as permission to skip the record.
 
 ### Edge cases
 
@@ -111,6 +120,10 @@ dataset and that Pages deployment runs only from the default branch.
   non-ASCII homoglyph.
 - A submission uses a supported schema but an unsupported suite or profile.
 - The dataset is empty, missing, malformed, or unavailable to the browser.
+- The accepted corpus exceeds the size of one browser payload or requires multiple byte-bounded
+  pages.
+- A generated shard reports the wrong ordinal, or an index/shard carries an arbitrary path,
+  cross-origin URL, duplicate record, missing record, or count inconsistent with its content.
 - A visitor has JavaScript disabled or uses a narrow screen.
 - A pull request is public before its checks finish.
 
@@ -178,6 +191,44 @@ dataset and that Pages deployment runs only from the default branch.
 - **FR-027**: Submission IDs MUST continue to prove canonical-content integrity and exact duplicate
   identity only. No documentation, user interface, pull-request text, or automated review may call
   the digest an attestation or evidence of benchmark provenance.
+- **FR-028**: Scale handling MUST be a transport-only change. Accepted submission files MUST remain
+  append-only under submission schema `1.0`, and the benchmark pull-request boundary MUST remain
+  exactly one added digest-named submission blob plus the modified generated
+  `site/data/leaderboard.json` canonical transport file.
+- **FR-029**: Once sharding is active, the committed `site/data/leaderboard.json` MUST be a small,
+  bounded, deterministic index derived from every accepted submission. Pull-request validation and
+  the Pages workflow MUST byte-compare it with an independent deterministic rebuild before
+  publication. Its sharded form MUST have exactly
+  `{index_version, schema_version, entry_count, shard_count}`, with both version fields `1.0` for
+  this transport-only increment.
+- **FR-030**: After the committed leaderboard transport file passes its byte check, the Pages
+  workflow MUST generate a constant-shape index and leaderboard shards from the validated accepted
+  submissions into a temporary static-site artifact. Pages MUST always deploy that sharded form,
+  whether the committed file is the bounded legacy monolith or the index. Generated shards MUST NOT
+  be committed or accepted as benchmark pull-request changes. The artifact MUST copy only the
+  allowlisted static site chrome plus generated transport data; it MUST NOT duplicate the retained
+  `site/data/submissions/` source corpus.
+- **FR-031**: Publication MUST retain hard byte caps for each submission, the committed leaderboard
+  transport file, and each fetched shard. Corpus growth by itself MUST NOT be a hard failure;
+  malformed, duplicate, inconsistent, or privacy-unsafe input MUST continue to fail closed.
+- **FR-032**: Pagination, shard identifiers, and record order MUST be deterministic. The globally
+  ranked rows MUST be paginated by the UTF-8 byte size of rendered shard JSON, not by an estimate or
+  a platform-dependent character count. Shards MUST have exactly
+  `{index_version, schema_version, shard_id, entry_count, entries}`, where `shard_id` is a contiguous
+  one-based ordinal string zero-padded to a minimum width of six digits.
+- **FR-033**: The site MUST load the bounded index first and fetch same-origin shard pages on demand.
+  It MUST derive only one-based contiguous shard IDs padded to at least six digits from `shard_count`
+  and synthesize `data/leaderboard-NNNNNN.json` locally; neither the index nor a submission may
+  supply an arbitrary path or URL for the browser to fetch.
+- **FR-034**: Every accepted submission MUST remain retained in the repository and addressable by
+  its digest. Pagination MAY change publication transport only and MUST NOT be a retention, pruning,
+  or silent-drop mechanism.
+- **FR-035**: The scale code change MUST leave the current bounded legacy monolith byte-identical and
+  support both its closed `{schema_version, entry_count, entries}` shape and the sharded index shape.
+  A deterministic build MUST switch to the index rather than fail when the legacy cap would be
+  crossed by an otherwise valid exact two-file append-only benchmark submission. A
+  leaderboard-only early migration is unsupported. Pages MUST generate the temporary sharded form
+  even while the committed source remains the legacy monolith.
 
 ### Key entities
 
@@ -187,7 +238,10 @@ dataset and that Pages deployment runs only from the default branch.
 - **Leaderboard case**: A case identifier plus categorical outcome, termination, and route fields.
 - **Hardware descriptor**: Structured public product details for the CPU, system memory,
   accelerators used during inference, execution mode, runtime, and optional runtime configuration.
-- **Leaderboard dataset**: The deterministic collection of accepted records with quality-only ranks.
+- **Leaderboard index**: The constant-shape bounded deterministic count manifest from which
+  contiguous one-based shard IDs padded to at least six digits are derived.
+- **Leaderboard shard**: One bounded deterministic same-origin JSON page generated only in the
+  temporary Pages artifact and fetched on demand.
 - **Submission review**: The public pull request and automated checks used before an entry is accepted.
 
 ## Success criteria
@@ -208,6 +262,14 @@ dataset and that Pages deployment runs only from the default branch.
 - **SC-008**: Shared adversarial fixtures prove that Python and browser validators reject the same
   overlong, descriptor-like, non-ASCII, bidi, homoglyph, and reviewer-injection-shaped model labels
   while existing hardware descriptor fixtures remain unchanged.
+- **SC-009**: A synthetic accepted corpus larger than the former aggregate cap builds successfully,
+  while every generated index and shard remains within its individual byte cap and all submission
+  identifiers occur exactly once.
+- **SC-010**: Repeated builds on supported platforms produce byte-identical committed indexes and
+  deployment shards, including deterministic exact-byte pagination of the global rank sequence.
+- **SC-011**: Browser tests prove shard fetch targets use only synthesized
+  `data/leaderboard-NNNNNN.json` names and cannot be redirected by an arbitrary path or URL in public
+  data.
 
 ## Assumptions
 
@@ -221,3 +283,7 @@ dataset and that Pages deployment runs only from the default branch.
   explicit contract and ranking change.
 - Accepted submission files are append-only. Corrections use a new reviewed record rather than an
   unreviewed rewrite.
+- Git history is the retention store for accepted submission records. The committed leaderboard
+  transport file is rebuildable, and the Pages index/shards are disposable deployment artifacts.
+- A growing valid corpus is expected. Per-file bounds protect reviewers and browsers; no aggregate
+  byte threshold may wedge all later submissions or require deletion of accepted evidence.

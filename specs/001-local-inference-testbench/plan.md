@@ -90,6 +90,17 @@ unknown fields so raw-content additions require an explicit specification and go
 - Frame every published result as self-reported and unverified. Canonical hashes establish that the
   accepted content has not changed; they do not establish who produced it, that inference occurred,
   or that the measurements are truthful.
+- Decouple public evidence retention from browser transport as the accepted corpus grows. Keep
+  schema `1.0` submissions append-only and the exact two-file benchmark pull-request boundary; commit
+  only the bounded leaderboard transport file, then always generate the exact-key index and
+  deterministic byte-bounded shards in a temporary Pages artifact after that file's byte check.
+- Preserve individual submission, index, and shard caps while eliminating aggregate corpus failure.
+  Valid volume selects deterministic byte-sized pages; corrupt evidence still fails. Browser fetch
+  targets are synthesized as `data/leaderboard-NNNNNN.json` from one-based contiguous IDs padded to
+  at least six digits and remain same-origin.
+- Keep the current six-entry legacy monolith byte-identical in the mixed code rollout. Support both
+  its closed shape and the constant-shape sharded index; switch deterministically when the monolith
+  cap would be crossed by an otherwise valid exact two-file append-only benchmark submission.
 
 The tradeoffs and rejected alternatives are recorded in [research.md](research.md).
 
@@ -212,3 +223,29 @@ descriptor validation remain behaviorally unchanged.
 Image and video generation remain outside this implementation plan. Their similarity- or
 preference-based scoring and separate runtime stack belong in a distinct benchmark, although that
 project may reuse the submission, privacy, and validity pipeline defined here.
+
+## Post-release Stage 2 scale hardening
+
+The second adversarial-hardening increment changes leaderboard delivery, not benchmark measurement
+or the accepted submission contract. Every schema `1.0` submission stays retained by digest. Once
+sharding is activated in the source tree, `site/data/leaderboard.json` is a bounded deterministic
+index that remains the only generated leaderboard file allowed in a benchmark pull request,
+alongside exactly one newly added submission.
+
+The mixed code rollout first leaves the current six-entry legacy monolith byte-identical and accepts
+both closed transport forms. The deterministic output switches to the constant-shape index when the
+legacy cap would be crossed by an otherwise valid exact two-file append-only benchmark submission.
+This stage does not authorize a leaderboard-only early migration.
+
+Pull-request validation continues to rebuild and byte-compare the canonical committed transport
+file. On trusted `main`, Pages performs the same check before copying only allowlisted static site
+chrome to a temporary artifact directory and always generating the exact-key index and one-based
+shard IDs padded to at least six digits. The retained source submissions are not duplicated into the
+artifact. Shards are discarded with the build workspace and are never committed. The
+browser loads the index first and fetches only synthesized `data/leaderboard-NNNNNN.json` pages
+needed for the current view.
+
+Per-file caps remain on submissions, the index, and each shard. The former aggregate corpus cap is
+replaced with exact rendered UTF-8 byte pagination of the deterministic global rank sequence. All
+source records must occur exactly once across the generated pages; missing, duplicated, malformed,
+inconsistent, or privacy-unsafe records remain publication failures.

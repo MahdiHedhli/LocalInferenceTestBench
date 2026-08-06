@@ -5,21 +5,31 @@
 **Normative contracts**:
 [hardware-descriptor.schema.json](contracts/hardware-descriptor.schema.json),
 [leaderboard-submission.schema.json](contracts/leaderboard-submission.schema.json), and
-[leaderboard-dataset.schema.json](contracts/leaderboard-dataset.schema.json)
+[leaderboard-dataset.schema.json](contracts/leaderboard-dataset.schema.json),
+[leaderboard-index.schema.json](contracts/leaderboard-index.schema.json), and
+[leaderboard-shard.schema.json](contracts/leaderboard-shard.schema.json)
+
+The submission and projected-entry schema remain `1.0`. During the hybrid rollout, the existing
+dataset contract continues to describe the bounded legacy monolith and its entry shape. The compact
+index and shard schemas describe the separate closed `index_version: "1.0"` transport envelopes;
+they do not migrate accepted submission content.
 
 ## Data boundary
 
 The feature separates a private run report from the smaller record a contributor chooses to make
 public. The exporter reads the private report and an ignored hardware descriptor locally. It writes
 one public candidate per model. Accepted candidates are reviewed in pull requests and compiled into
-the static Pages dataset.
+the bounded committed leaderboard transport file: the legacy monolith while it fits, then the
+constant-shape index. A trusted Pages build validates that file and always emits a temporary index
+plus byte-bounded shard pages for browser delivery.
 
 | Classification | May contain | Must not contain |
 |----------------|-------------|------------------|
 | Private run report | Existing minimized run evidence, local run ID, time, and local model selector | Raw prompt, completion, reasoning, tool arguments, endpoint, or credential |
 | Local hardware descriptor | Exact CPU, memory, accelerator, execution, runtime product details, and optional runtime configuration intended for publication | Hostname, account, network, serial, inventory ID, device UUID, unused inventory, or notes |
 | Public submission | Public model provenance, settings, structured hardware and runtime, optional runtime configuration, categorical cases, and rounded aggregate observations | Source run ID or time, local model selector, manifest digest, contributor field, or raw model content |
-| Generated dataset | Accepted submission fields, derived quality percentages, and quality rank | Per-case text, contributor identity, or unpublished local data |
+| Committed leaderboard index | Index version, submission schema version, total entry count, and shard count | Accepted row payloads, arbitrary paths or URLs, contributor identity, or unpublished local data |
+| Temporary leaderboard shard | Accepted submission fields, derived quality percentages, and quality rank for one bounded page | Per-case text, contributor identity, arbitrary fetch targets, or unpublished local data |
 
 Hardware and performance can weakly characterize a setup. The exporter removes direct machine
 identifiers, but the operator still reviews the candidate before opening a public pull request.
@@ -137,19 +147,83 @@ The submission identifier establishes integrity of the canonical public content 
 duplicates. It does not establish provenance, attest that a benchmark ran, verify who performed it,
 or validate the truth of self-reported measurements.
 
-## Entity: Leaderboard dataset
+## Entity: Leaderboard publication bundle
 
-Purpose: provide one deterministic, browser-readable file built from all accepted submissions.
+Purpose: represent every accepted submission through a bounded committed transport file and a
+temporary index plus zero or more bounded shard pages generated for every Pages deployment. This is
+a transport decomposition, not a submission migration: accepted submission records remain schema
+`1.0` and byte-for-byte retained.
+
+### Value object: Committed leaderboard index
+
+The deterministic `site/data/leaderboard.json` file is the only generated leaderboard artifact
+committed to the repository after sharding activates.
 
 | Field | Type | Rules |
 |-------|------|-------|
-| schema_version | string | Must be `1.0` |
-| entry_count | integer | Must equal the number of entries |
-| entries | list | Valid accepted records with cases removed and derived rank fields added |
+| index_version | string | Must be `1.0` for this transport increment |
+| schema_version | string | Must be `1.0`, shared by the projected entries |
+| entry_count | integer | Total number of accepted entries across all shards |
+| shard_count | integer | Number of contiguous ordinal shards |
 
-Each entry keeps submission ID, suite, profile, hardware, runtime, optional runtime configuration,
-model, settings, and aggregate metrics. It adds `semantic_score_percent`,
+This constant-shape index contains no row payload, path, URL, or attacker-selected identifier. Shard
+IDs are the one-based contiguous decimal range from one through `shard_count`, zero-padded to a
+minimum width of six digits.
+
+The index is derived from every validated submission and written in canonical deterministic JSON.
+When it is the committed canonical form, pull-request CI and the Pages workflow rebuild it
+independently and require a byte-for-byte match. During legacy-monolith retention, they apply that
+same byte check to the monolith before Pages generates the temporary index. The exact benchmark
+pull-request boundary remains one added digest-named submission blob plus the one modified
+leaderboard transport file; shard files are rejected as pull-request changes.
+
+The index has an individual hard byte cap. Its constant-shape representation prevents valid corpus
+volume from growing the file beyond that bound. Corpus row volume is not measured against the old
+aggregate dataset cap.
+
+For a safe code-only rollout, readers and builders also accept the existing bounded legacy monolith
+shape `{schema_version, entry_count, entries}`. The current six-entry monolith stays byte-identical in
+the mixed code change. While a deterministic rebuild remains within the legacy cap, it may remain
+the canonical committed output. The first build that would cross that cap switches the committed
+file to the constant-shape index; it never drops rows to preserve the monolith. A maintainer may
+not perform a leaderboard-only early migration under this stage's protected boundary. Pages always
+emits the index and shards in its temporary artifact, including while the committed source remains
+the legacy monolith.
+
+### Value object: Temporary leaderboard shard
+
+A shard is a deterministic same-origin JSON page containing a bounded subset of derived leaderboard
+entries. Each entry keeps submission ID, suite, profile, hardware, runtime, optional runtime
+configuration, model, settings, and aggregate metrics. It adds `semantic_score_percent`,
 `exact_format_score_percent`, and `rank`.
+
+| Field | Type | Rules |
+|-------|------|-------|
+| index_version | string | Must be `1.0` and match the committed or temporary index |
+| schema_version | string | Must match the index's projected-entry schema version |
+| shard_id | string | One-based contiguous ordinal, zero-padded to a minimum width of six digits |
+| entry_count | integer | Must equal the number of entries in this shard |
+| entries | list | Derived leaderboard rows in deterministic global rank order |
+
+Each shard is emitted only after the canonical committed transport file passes its byte check, into
+the temporary static-site directory uploaded as the Pages artifact. Shards are never committed, and
+the temporary output is discarded after deployment. Each shard has its own hard byte cap. The
+browser derives a one-based ID padded to at least six digits from the validated index, synthesizes
+`data/leaderboard-NNNNNN.json`, verifies bounded shape and size, and fetches pages on demand; public
+data cannot provide a path or URL.
+
+### Pagination
+
+Accepted rows first receive their deterministic global rank order. That ordered sequence is greedily
+split at deterministic entry boundaries according to the exact UTF-8 byte length of the rendered
+canonical shard JSON. Growth therefore adds contiguous numbered pages without relying on
+platform-specific string length.
+
+Every accepted `site/data/submissions/<submission_id>.json` remains retained and addressable by its
+digest. The union of shard entry IDs must equal the accepted submission IDs exactly: no missing,
+duplicate, or extra record is allowed. Pagination is never pruning. Malformed source records,
+duplicate digests, inconsistent counts or IDs, and individually oversized inputs still fail closed;
+only valid aggregate corpus growth selects more pages instead of failing.
 
 Ranking uses descending semantic percentage, then descending exact-format percentage. Equal quality
 pairs share a dense rank. Source, display name, and submission ID provide deterministic display order
@@ -161,9 +235,10 @@ inside a tie. Latency and throughput never affect rank.
 2. The contributor reviews the complete candidate and chooses whether to publish it.
 3. The candidate becomes proposed when it is added to a public pull request.
 4. Continuous integration validates the closed contract, digest, filename, privacy rules, and
-   deterministic dataset.
+   deterministic committed leaderboard transport file.
 5. Maintainer review and merge make the candidate accepted.
-6. The default-branch Pages workflow rebuilds and deploys the dataset.
+6. The default-branch Pages workflow byte-checks the canonical committed transport file, generates a
+   deterministic index and bounded shards in a temporary site artifact, and deploys that artifact.
 
 Accepted files are append-only. A correction creates a new candidate and uses normal review instead
 of silently replacing published evidence.

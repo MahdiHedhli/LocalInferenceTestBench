@@ -51,6 +51,9 @@ that the local publication gate and CI both fail; remove them and verify both pa
    scanner, and secret scanning pass.
 3. **Given** a benchmark run, **When** reports are written, **Then** raw prompts, completions, tool
    arguments, token text, endpoint addresses, and machine names are absent.
+4. **Given** an append-only public submission corpus that no longer fits one leaderboard payload,
+   **When** publication runs, **Then** all accepted source evidence remains retained while a bounded
+   deterministic index and temporary byte-bounded Pages shards carry the public view.
 
 ---
 
@@ -108,6 +111,8 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - A model display name, source label, or precision label contains a URL, email address, network
   value, UUID, serial/inventory label, reviewer mention, role-prefix instruction, bidi control, or
   non-ASCII homoglyph.
+- The accepted public-result corpus exceeds a previous aggregate payload cap and requires multiple
+  byte-bounded pages.
 - Secret-scanning software is unavailable locally or a GitHub security setting cannot be enabled.
 
 ## Requirements
@@ -153,6 +158,25 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - **FR-020**: Any public presentation of benchmark results MUST state that the measurements are
   self-reported and unverified. A content digest may be described only as evidence of content
   integrity; it MUST NOT be described as provenance, attestation, or proof that a run occurred.
+- **FR-021**: Public-result scale handling MUST preserve append-only schema `1.0` submissions and the
+  exact benchmark pull-request boundary. A valid corpus that exceeds one aggregate payload MUST be
+  paginated into a bounded deterministic committed index and bounded Pages-delivery shards rather
+  than rejected or pruned.
+- **FR-022**: Pages-delivery shards MUST be generated only after the canonical committed leaderboard
+  transport file passes its byte check, in a temporary deployment artifact, and MUST never become
+  accepted source evidence. The artifact MUST contain allowlisted static site chrome and generated
+  transport data, not a duplicate of the retained submission corpus. Per-submission, per-index, and
+  per-shard byte caps and all corrupt-input failures MUST remain fail-closed.
+- **FR-023**: Public shard identifiers and pagination MUST be deterministic. Browser fetch targets
+  MUST be one-based contiguous IDs padded to at least six digits and synthesized as
+  `data/leaderboard-NNNNNN.json`, never a path or URL supplied by public records.
+- **FR-024**: The mixed scale-code rollout MUST leave the current bounded legacy monolith
+  byte-identical and support both closed transport shapes. The deterministic builder MUST switch to
+  the constant-shape index when the monolith cap would otherwise be crossed. A leaderboard-only
+  early migration is unsupported; the transition MUST retain the exact append-only two-file
+  benchmark boundary. Pages MUST always emit an index with exactly
+  `{index_version, schema_version, entry_count, shard_count}` and shards with exactly
+  `{index_version, schema_version, shard_id, entry_count, entries}` in its temporary artifact.
 
 ### Key Entities
 
@@ -180,6 +204,9 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - **SC-006**: Every experimental item is clearly labeled and removable without breaking the baseline
   quickstart, runner, schemas, or tests.
 - **SC-007**: The public GitHub repository reports secret scanning and push protection as enabled.
+- **SC-008**: A synthetic public corpus larger than the former aggregate cap produces byte-identical,
+  individually bounded index and shard outputs with every accepted digest present exactly once and
+  no committed shard files.
 
 ## Assumptions
 
@@ -188,6 +215,9 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - Operators load and unload models outside the baseline runner and run large models sequentially.
 - Python 3.11 or newer is available; the reference implementation uses only the standard library.
 - Real run artifacts remain local by default; publication is a deliberate sanitized export workflow.
+- Accepted public submission files remain append-only and digest-addressable. The committed
+  leaderboard transport file and temporary Pages index/shards are rebuildable delivery artifacts,
+  not a pruning or evidence-retention policy.
 - The first public release favors clear, auditable cases over a large benchmark corpus.
 - Image and video generation are outside this test bench because their evaluation generally requires
   similarity models or human preference and a different runtime stack. A separate generation bench

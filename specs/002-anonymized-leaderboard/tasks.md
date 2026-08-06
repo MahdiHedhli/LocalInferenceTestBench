@@ -84,3 +84,29 @@ later aggregation work; they are not part of this no-schema-change increment.
 - [ ] T027 Add a computed, non-authoritative plausibility caution that never drops or gates an entry
 - [ ] T028 Add config-cell corroboration counts with an explicit definition that does not imply
   independent operators merely from distinct accepted content hashes
+
+## Phase 8: Post-release Stage 2 scale hardening
+
+**Sequence**: T029 fixes the transport contract in the specification. T030 precedes T031–T032.
+Hosted verification remains open until the merged workflow and live Pages artifact prove the new
+boundary. This stage does not change submission schema `1.0` or accepted submission bytes.
+
+- [x] T029 Amend `spec.md`, `plan.md`, `data-model.md`, and `docs/guide.md` with the bounded hybrid
+  committed transport, compact exact-key index, temporary Pages-only shards, deterministic
+  exact-byte global pagination, load-on-demand path safety, append-only retention, and
+  transport-only migration policy
+- [x] T030 Add synthetic over-cap and exact-byte split fixtures proving complete deterministic output,
+  individual index/shard byte caps, exact record coverage, corruption failure, fixed synthesized
+  shard targets, and the unchanged exact two-file benchmark pull-request boundary
+- [x] T031 Replace aggregate corpus failure with deterministic byte-sized pagination;
+  make `site/data/leaderboard.json` a bounded deterministic index while retaining per-submission,
+  per-index, and per-shard caps and schema `1.0` submissions
+- [x] T032 Update the static site to load the exact-key index before fetching one-based contiguous
+  shard IDs padded to at least six digits on demand, and update Pages to byte-check either canonical
+  committed form before always generating the index and uncommitted exact-key shards in a temporary
+  artifact directory
+- [x] T033 Run the focused scale suite, complete cross-platform unit suite, deterministic index/shard
+  rebuilds, JavaScript parsing and path-safety checks, exact PR-boundary regressions, and strict
+  publication/privacy gates locally
+- [ ] T034 Verify required hosted checks, the trusted benchmark boundary, Pages deployment, live
+  on-demand shard loading, and absence of committed shard files after the protected merge
