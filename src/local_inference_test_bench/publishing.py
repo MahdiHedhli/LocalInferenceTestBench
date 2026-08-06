@@ -837,6 +837,7 @@ def _verified_existing_pull_request(
         prepared,
         subject="pull request",
     )
+    _verify_branch_head(identity.target_repository, branch, head["sha"])
     return url
 
 
@@ -978,6 +979,10 @@ def publish_submission(
         )
         if verified_url is None:
             raise PublicationError("the created pull request could not be verified")
+        # The PR inspection above is pinned to the expected commit, but its source
+        # branch remains mutable. Recheck the ref after inspecting the PR files and
+        # tree so a concurrent branch update cannot be reported as a safe success.
+        _verify_branch_head(target, branch, expected_head_sha)
     except PublicationError as error:
         raise PublicationError(
             f"the PR could not be opened or verified; public PR/branch "

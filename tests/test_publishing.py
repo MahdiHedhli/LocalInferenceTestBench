@@ -276,6 +276,10 @@ class PublishingTests(unittest.TestCase):
             verifier.call_args_list[1].kwargs["expected_head_sha"],
             "5" * 40,
         )
+        self.assertEqual(
+            sum("/git/ref/heads/" in endpoint for endpoint, _, _ in api_calls),
+            2,
+        )
 
     def test_ref_mutation_before_pull_request_fails_closed(self) -> None:
         branch = f"litb/submission-{SUBMISSION_ID}"
@@ -362,6 +366,69 @@ class PublishingTests(unittest.TestCase):
             )
 
         files.assert_not_called()
+
+    def test_ref_mutation_during_pull_request_verification_fails_closed(self) -> None:
+        branch = f"litb/submission-{SUBMISSION_ID}"
+        expected_sha = "5" * 40
+        ref_checks = 0
+        pull_calls: list[object] = []
+
+        def api(
+            endpoint: str,
+            *,
+            method: str = "GET",
+            payload: object = None,
+            error_message: str,
+        ) -> dict:
+            nonlocal ref_checks
+            if endpoint.endswith("/git/trees"):
+                return {"sha": "4" * 40}
+            if endpoint.endswith("/git/commits"):
+                return {"sha": expected_sha}
+            if endpoint.endswith("/git/refs"):
+                return {"ref": f"refs/heads/{branch}"}
+            if "/git/ref/heads/" in endpoint:
+                ref_checks += 1
+                observed_sha = expected_sha if ref_checks == 1 else "6" * 40
+                return {
+                    "ref": f"refs/heads/{branch}",
+                    "object": {"type": "commit", "sha": observed_sha},
+                }
+            if endpoint.endswith("/pulls"):
+                pull_calls.append(payload)
+                return {"html_url": "https://github.com/example/pull/7"}
+            self.fail(f"unexpected GitHub API endpoint: {endpoint}")
+
+        with (
+            mock.patch.object(publishing, "validate_submission"),
+            mock.patch.object(
+                publishing, "render_submission_bytes", return_value=PREPARED.submission_bytes
+            ),
+            mock.patch.object(publishing, "_prepare_change", return_value=PREPARED),
+            mock.patch.object(
+                publishing, "_current_upstream_sha", return_value=PREPARED.base_sha
+            ),
+            mock.patch.object(
+                publishing,
+                "_verified_existing_pull_request",
+                side_effect=(None, "https://github.com/example/pull/7"),
+            ),
+            mock.patch.object(
+                publishing,
+                "_ensure_target_repository",
+                return_value=publishing.UPSTREAM_REPOSITORY,
+            ),
+            mock.patch.object(publishing, "_try_gh_api", return_value=None),
+            mock.patch.object(
+                publishing, "_create_blob", side_effect=("candidate-blob", "leaderboard-blob")
+            ),
+            mock.patch.object(publishing, "_gh_api", side_effect=api),
+            self.assertRaisesRegex(PublicationError, "public PR/branch .* may remain"),
+        ):
+            publish_submission(SUBMISSION, IDENTITY, b"private-literal\n")
+
+        self.assertEqual(len(pull_calls), 1)
+        self.assertEqual(ref_checks, 2)
 
     def test_retry_resumes_after_branch_creation_when_pr_creation_failed(self) -> None:
         branch = f"litb/submission-{SUBMISSION_ID}"
@@ -681,6 +748,60 @@ class PublishingTests(unittest.TestCase):
             self.assertRaisesRegex(PublicationError, "unexpected content"),
         ):
             publishing._verified_existing_pull_request(IDENTITY, branch, PREPARED)
+
+    def test_existing_pull_request_rejects_head_mutation_during_verification(self) -> None:
+        branch = f"litb/submission-{SUBMISSION_ID}"
+        inspected_head_sha = "6" * 40
+        events: list[str] = []
+        pull = {
+            "html_url": "https://github.com/example/pull/7",
+            "number": 7,
+            "base": {
+                "ref": "main",
+                "sha": PREPARED.base_sha,
+                "repo": {"full_name": publishing.UPSTREAM_REPOSITORY},
+            },
+            "head": {
+                "ref": branch,
+                "sha": inspected_head_sha,
+                "repo": {"full_name": IDENTITY.target_repository},
+            },
+        }
+        files = [
+            {
+                "status": "added",
+                "filename": f"site/data/submissions/{SUBMISSION_ID}.json",
+            },
+            {"status": "modified", "filename": "site/data/leaderboard.json"},
+        ]
+
+        def api(endpoint: str, **_: object) -> dict:
+            if "/git/commits/" in endpoint:
+                events.append("commit")
+                return {"tree": {"sha": "7" * 40}}
+            if "/git/ref/heads/" in endpoint:
+                events.append("ref")
+                return {
+                    "ref": f"refs/heads/{branch}",
+                    "object": {"type": "commit", "sha": "8" * 40},
+                }
+            self.fail(f"unexpected GitHub API endpoint: {endpoint}")
+
+        def verify_tree(*_: object, **__: object) -> None:
+            events.append("tree")
+
+        with (
+            mock.patch.object(publishing, "_existing_pull_request", return_value=pull),
+            mock.patch.object(publishing, "_gh_api_list", return_value=files),
+            mock.patch.object(publishing, "_gh_api", side_effect=api),
+            mock.patch.object(
+                publishing, "_verify_publication_tree", side_effect=verify_tree
+            ),
+            self.assertRaisesRegex(PublicationError, "publication branch changed"),
+        ):
+            publishing._verified_existing_pull_request(IDENTITY, branch, PREPARED)
+
+        self.assertEqual(events, ["commit", "tree", "ref"])
 
     def test_existing_pull_request_rejects_executable_public_file(self) -> None:
         branch = f"litb/submission-{SUBMISSION_ID}"
