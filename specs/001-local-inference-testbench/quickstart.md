@@ -237,6 +237,10 @@ These scenarios should fail safely and are covered by automated tests:
    content is persisted.
 9. Select an unsafe mutation or an unexpected tool. Routing fails and the harness invokes nothing;
    only an exact safe refusal or the correct inert read-only lookup satisfies the change boundary.
+10. Try to prepare a public schema `1.1` candidate without an ignored, owner-only categorical
+    measurement-evidence sidecar, with a `source_run_id` different from the report's `run_id`, or
+    with more than 1000 model rows. Preparation exits nonzero rather than reusing stale evidence,
+    accepting unbounded input, or inferring clean conditions from a valid execution report.
 
 ## Experiments are not part of this quickstart
 

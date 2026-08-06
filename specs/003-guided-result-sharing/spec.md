@@ -34,8 +34,9 @@ private report always exists before post-run processing begins.
 
 ### User story 2: Save a reusable minimized record (Priority: P1)
 
-An operator can turn the completed in-memory report and an approved public hardware descriptor into
-owner-only JSON immediately, then retry publication later without rerunning inference.
+An operator can turn the completed in-memory report, an approved public hardware descriptor, and a
+closed categorical measurement-evidence sidecar into owner-only JSON immediately, then retry
+publication later without rerunning inference.
 
 **Independent test**: Save one- and multi-model fixtures twice. Confirm exact repeated content is
 idempotent, permissions remain owner-only, and a symlink or different existing content is rejected.
@@ -52,6 +53,8 @@ idempotent, permissions remain owner-only, and a symlink or different existing c
 5. **Given** a securely saved canonical candidate, **When** publication is retried later, **Then** the
    operator can use that file without rerunning inference and receives the same disclosure and
    confirmation boundary.
+6. **Given** valid benchmark execution but no safe measurement sidecar, **When** save or PR is
+   selected, **Then** preparation fails closed and the already-written private report remains intact.
 
 ### User story 3: Open a reviewed public submission automatically (Priority: P1)
 
@@ -80,6 +83,9 @@ generated leaderboard, fixed digest metadata, and fixed repository routing.
 
 - The run contains several models and no publication model is selected.
 - The hardware descriptor exists but the strict local denylist is missing or empty.
+- The measurement-evidence sidecar is missing, tracked, linked, broadly readable, has no exact model
+  match, has a `source_run_id` different from the report's `run_id`, contains more than 1000 model
+  rows, contains raw host values, or is inconsistent with its declared public validity.
 - GitHub CLI is installed but authenticated to a host other than `github.com`.
 - Gitleaks is absent, too old, or rejects the exact staged bytes.
 - Upstream `main` changes between deterministic rebuild and branch creation.
@@ -98,7 +104,8 @@ generated leaderboard, fixed digest metadata, and fixed repository routing.
   default to keeping the result private.
 - **FR-003**: Non-interactive runs MUST perform no post-action unless `save` or `pr` is explicit.
 - **FR-004**: Local save MUST reuse the existing closed leaderboard-submission contract and separate
-  public hardware descriptor.
+  public hardware descriptor. For schema `1.1`, it MUST also require a separate ignored, owner-only
+  categorical measurement-evidence sidecar.
 - **FR-005**: Local candidates MUST remain ignored, owner-only, regular, append-only files; an exact
   existing candidate MAY count as idempotent success.
 - **FR-006**: Public publication MUST display the complete candidate and disclose the authenticated
@@ -113,12 +120,12 @@ generated leaderboard, fixed digest metadata, and fixed repository routing.
   MUST receive a scrubbed environment and uploaded bytes MUST be read from the checked Git index.
 - **FR-010**: Publication MUST operate in an isolated private temporary clone of canonical upstream
   and MUST stage exactly one new digest-named submission plus the generated leaderboard.
-- **FR-011**: Raw or private inputs—the source report, raw descriptor or environment, endpoint,
-  credentials, artifact directory, denylist, local paths, and private model selector—MUST NOT enter
-  a GitHub API request or PR body. Publication MAY upload only the validated candidate submission
-  and deterministically generated leaderboard payloads, including the approved public
-  `runtime_configuration` retained in those bytes; other PR metadata MUST remain fixed and
-  non-secret.
+- **FR-011**: Raw or private inputs—the source report, raw descriptor, measurement-evidence sidecar
+  or environment, endpoint, credentials, artifact directory, denylist, local paths, and private model
+  selector—MUST NOT enter a GitHub API request or PR body. Publication MAY upload only the validated
+  candidate submission and deterministically generated leaderboard payloads, including the approved
+  public `runtime_configuration` and categorical measurement projection retained in those bytes;
+  other PR metadata MUST remain fixed and non-secret.
 - **FR-012**: Publication MUST abort before branch creation when upstream changes during preparation.
 - **FR-013**: A multi-model public PR MUST require explicit selection of one result; local save MAY
   preserve all separated candidates.
@@ -136,6 +143,18 @@ generated leaderboard, fixed digest metadata, and fixed repository routing.
   contract, and exact canonical rendered bytes. A secure file outside a worktree MUST remain
   reusable. Retry MUST reuse FR-006 through FR-016 and require `--confirm-public` when
   non-interactive.
+- **FR-018**: The post-run and manual preparation commands MUST expose one explicit
+  `--measurement-evidence` path, defaulting to the ignored local area. The file MUST remain local and
+  MUST NOT enter the prepared pull-request change, GitHub API payload, or PR metadata. Its required
+  top-level `source_run_id` MUST exactly match the source report's `run_id`; its unique model list
+  MUST contain 1–1000 entries; and the run binding MUST be omitted from prepared public bytes.
+- **FR-019**: Guided sharing MUST distinguish source execution validity (`valid`) from public
+  measurement validity (`clean`, `nonquiescent`, or `degraded_midrun`). It MUST NOT infer one from the
+  other, and absent evidence MUST block candidate creation rather than silently selecting a public
+  validity.
+- **FR-020**: Newly prepared and published candidates MUST use public schema `1.1`. A saved schema
+  `1.0` candidate MAY remain local historical evidence but MUST be regenerated from its source report
+  and measurement evidence before entering a new benchmark pull request.
 
 ### Key entities
 
@@ -158,11 +177,16 @@ generated leaderboard, fixed digest metadata, and fixed repository routing.
 - **SC-005**: Existing non-interactive `litb run` users observe no prompt or network action by default.
 - **SC-006**: A securely saved candidate can be published later without a model server or benchmark
   rerun, while renamed, reformatted, visible, or permission-broad candidates are rejected.
+- **SC-007**: Tests prove missing, unsafe, raw-valued, stale-run, oversized, mismatched, and
+  inconsistent measurement sidecars issue zero GitHub mutations, omit the private binding from
+  public bytes, and leave the private run report intact.
 
 ## Assumptions
 
 - “Anonymous” means identifier-minimized, not unlinkable; exact setup data and GitHub identity remain
   public by design.
 - GitHub CLI is an optional publication dependency, not a core runner dependency.
-- The JSON schemas and leaderboard ranking contract do not change in this feature.
+- The original guided-sharing feature did not change JSON contracts. Stage 3 coordinates its CLI
+  with public schema `1.1`; the exact two-file PR boundary, confirmation, and publication controls
+  remain unchanged.
 - Maintainer review and required hosted checks remain the acceptance boundary.

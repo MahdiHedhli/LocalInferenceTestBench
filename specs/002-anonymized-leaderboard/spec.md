@@ -55,9 +55,9 @@ case fails without echoing sensitive values.
 
 **Acceptance scenarios**:
 
-1. **Given** a valid standard report with verified model identity, **When** the operator exports it,
-   **Then** the tool combines it with the public hardware descriptor and writes one closed submission
-   record per selected model.
+1. **Given** a valid standard report with verified model identity and valid categorical measurement
+   evidence, **When** the operator exports it, **Then** the tool combines it with the public hardware
+   descriptor and writes one closed schema `1.1` submission record per selected model.
 2. **Given** a smoke, limited, invalid, or identity-unverified report, **When** export is attempted,
    **Then** the tool refuses it and does not create a submission.
 3. **Given** an eligible report, **When** it is exported, **Then** the result retains bounded hardware
@@ -65,12 +65,19 @@ case fails without echoing sensitive values.
    manifest digest, endpoint, environment, host identity, serial and inventory identifiers, and
    contributor identity.
 4. **Given** an exported record on the Pages submission screen, **When** the visitor selects it,
-   **Then** validation and preview happen in the browser without uploading the file.
+   **Then** strict JSON parsing, duplicate-member rejection, closed-schema validation, canonical
+   digest recomputation, and preview happen in the browser without uploading the file.
 5. **Given** a prepared record, **When** the visitor continues, **Then** the site directs them to a
    reviewed pull-request workflow and explains that their GitHub account remains visible there.
 6. **Given** a model display name, source label, or precision label containing reviewer-directed
    instructions, non-ASCII homoglyphs, or descriptor-like identifiers, **When** export or browser
    validation runs, **Then** the record is rejected before it can reach a public review surface.
+7. **Given** a fully valid execution report but no safe measurement-evidence sidecar, **When** export
+   is attempted, **Then** it fails closed instead of claiming the run was measured under clean
+   conditions.
+8. **Given** current categorical evidence, **When** a candidate is prepared, **Then** it records only
+   pre/post threshold outcomes, closed threshold categories, optional aggregate determinism, and the
+   UTC measurement month rather than raw host samples or an event timestamp.
 
 ---
 
@@ -148,8 +155,9 @@ dataset and that Pages deployment runs only from the default branch.
 - **FR-009**: The command-line tool MUST export one minimized record for each selected eligible model
   and MUST require a separate public hardware descriptor.
 - **FR-010**: Export MUST call the existing closed run-record validator before reading result fields.
-- **FR-011**: Export MUST accept only the current standard profile, an overall valid report, verified
-  model preflight, matching runtime identity, a valid model result, and the complete standard case set.
+- **FR-011**: Export MUST accept only a complete suite resolved from the public registry, an overall
+  valid report, verified model preflight, matching runtime identity, a valid model result, and the
+  resolved ordered case set. The sole current public member remains `standard` / `1.0`.
 - **FR-012**: A submission MUST retain only public model provenance, public generation settings,
   structured hardware and runtime context, minimized categorical case outcomes, and rounded
   aggregate quality and performance observations.
@@ -163,7 +171,10 @@ dataset and that Pages deployment runs only from the default branch.
   MUST reject duplicate identifiers.
 - **FR-016**: Submission and dataset contracts MUST be closed, bounded, and versioned.
 - **FR-017**: The Pages submission screen MUST inspect only an already-minimized record and MUST NOT
-  upload, transmit, or accept a raw run report.
+  upload, transmit, or accept a raw run report. It MUST apply fatal UTF-8 decoding, reject byte-order
+  marks, parse strict JSON, reject duplicate member names, apply the parallel closed-schema
+  validator, and recompute the canonical payload-minus-ID digest before displaying a successful
+  preview. These browser checks MUST NOT replace authoritative Python and pull-request validation.
 - **FR-018**: Publication MUST use a reviewed pull request. The documentation MUST state that the
   pull request and its GitHub account are public even though the JSON record has no contributor field.
 - **FR-019**: Continuous integration MUST validate all accepted records and build the dataset before
@@ -183,18 +194,18 @@ dataset and that Pages deployment runs only from the default branch.
   context-window tokens, concurrent requests, speculative-decoding state, and offload mode. Export
   MUST preserve it when supplied, MUST preserve legacy records without it, and MUST NOT infer a
   default. Known context-window tokens MUST not be smaller than the generation output budget.
-- **FR-026**: `model.display_name`, `model.source`, and `model.precision` MUST be ASCII-only, bounded
-  to 160, 240, and 80 characters respectively, and rejected when they match the descriptor-grade
-  UUID, serial/inventory-label, network, URL, or email rules or explicit automated-reviewer and
-  instruction-injection shapes. Python and browser validation MUST enforce this in lockstep. The
-  hardware descriptor's existing character and validation behavior MUST remain unchanged.
+- **FR-026**: Every public hardware, runtime, model-label, and artifact revision/digest descriptor
+  MUST use visible ASCII and reject descriptor-grade UUID, serial/inventory-label, network, URL,
+  email, private-host, automated-reviewer, and instruction-injection shapes. `model.display_name`,
+  `model.source`, and `model.precision` MUST remain bounded to 160, 240, and 80 characters. Python and
+  browser validation MUST enforce this in lockstep.
 - **FR-027**: Submission IDs MUST continue to prove canonical-content integrity and exact duplicate
   identity only. No documentation, user interface, pull-request text, or automated review may call
   the digest an attestation or evidence of benchmark provenance.
-- **FR-028**: Scale handling MUST be a transport-only change. Accepted submission files MUST remain
-  append-only under submission schema `1.0`, and the benchmark pull-request boundary MUST remain
+- **FR-028**: Stage 2 scale handling MUST be a transport-only change. The then-accepted schema `1.0`
+  submission files MUST remain append-only, and the benchmark pull-request boundary MUST remain
   exactly one added digest-named submission blob plus the modified generated
-  `site/data/leaderboard.json` canonical transport file.
+  `site/data/leaderboard.json` canonical transport file through later schema evolution.
 - **FR-029**: Once sharding is active, the committed `site/data/leaderboard.json` MUST be a small,
   bounded, deterministic index derived from every accepted submission. Pull-request validation and
   the Pages workflow MUST byte-compare it with an independent deterministic rebuild before
@@ -219,9 +230,11 @@ dataset and that Pages deployment runs only from the default branch.
 - **FR-033**: The site MUST load the bounded index first and fetch same-origin shard pages on demand.
   It MUST derive only one-based contiguous shard IDs padded to at least six digits from `shard_count`
   and synthesize `data/leaderboard-NNNNNN.json` locally; neither the index nor a submission may
-  supply an arbitrary path or URL for the browser to fetch. Until every page is loaded, search,
-  hardware filters, alternate sorting, and no-match messages MUST be explicitly scoped to loaded
-  rows and MUST NOT claim that no matching published row exists.
+  supply an arbitrary path or URL for the browser to fetch. The legacy monolith, index, and every
+  shard response MUST be read as bounded bytes, decoded as fatal UTF-8 with byte-order marks
+  rejected, and parsed by the strict duplicate-member-rejecting JSON parser before validation. Until
+  every page is loaded, search, hardware filters, alternate sorting, and no-match messages MUST be
+  explicitly scoped to loaded rows and MUST NOT claim that no matching published row exists.
 - **FR-034**: Every accepted submission MUST remain retained in the repository and addressable by
   its digest. Pagination MAY change publication transport only and MUST NOT be a retention, pruning,
   or silent-drop mechanism.
@@ -231,6 +244,54 @@ dataset and that Pages deployment runs only from the default branch.
   crossed by an otherwise valid exact two-file append-only benchmark submission. A
   leaderboard-only early migration is unsupported. Pages MUST generate the temporary sharded form
   even while the committed source remains the legacy monolith.
+- **FR-036**: New leaderboard submissions and projected entries MUST use schema `1.1`. Export MUST
+  require a separate ignored, owner-only categorical measurement-evidence sidecar and MUST NOT
+  derive public measurement validity from the source report's `valid`, `limited`, or `invalid`
+  execution state. Absence, unsafe permissions, untracked model IDs, or inconsistent categorical
+  evidence MUST fail closed. The sidecar MUST carry a top-level `source_run_id` exactly matching the
+  source report's `run_id` and between 1 and 1000 unique model evidence rows. The run binding MUST be
+  consumed only locally and omitted from the public submission and projected leaderboard data.
+- **FR-037**: Schema `1.1` MUST require `validity` (`clean`, `nonquiescent`, or
+  `degraded_midrun`), a closed `measurement_conditions` object, and `measurement_period` at UTC month
+  resolution (`YYYY-MM`). The condition object MAY name only threshold outcomes and categories for
+  memory pressure, thermal state, sustained load, swap, and resident models; it MUST carry no raw
+  values or free text. Future periods MUST be rejected.
+- **FR-038**: Schema `1.1` MAY carry one closed determinism object containing 3–5 runs, semantic pass
+  rate, envelope-class, finish-reason, and fingerprint stability, and a consistent `stable`,
+  `warning`, or `blocking_instability` verdict. The pass rate MUST be arithmetically possible for the
+  declared repetition count after six-decimal normalization. Missing determinism MUST remain missing.
+- **FR-039**: Public validation MUST resolve cases from a suite registry keyed by
+  `(profile, suite_version)` and derive all counts and percentages from the resolved length. Every
+  `1.1` case MUST record its registry-defined `capability` and `modality`. Current behavior remains
+  the five `text` cases of `standard` / `1.0`; the tags MUST NOT be aggregated or displayed in this
+  stage.
+- **FR-040**: `not_applicable` MUST be a distinct outcome excluded from scored counts and score
+  denominators. The sum of applicable and not-applicable case positions MUST equal the resolved
+  suite length, and a public candidate MUST retain at least one scored case across its complete
+  suite. A result with no applicable case for a selected facet MUST be absent from that facet, never
+  ranked zero. Outcome, route, and termination MUST all equal `not_applicable` for an inapplicable
+  case; the route and termination sentinel MUST be rejected for every other outcome.
+- **FR-041**: Accepted schema `1.0` files MUST remain byte-for-byte retained and valid as historical
+  evidence, but the trusted append-only boundary MUST reject a newly proposed `1.0` file and require
+  it to be regenerated as `1.1`. A mixed `1.1` leaderboard MUST annotate historical rows as
+  `legacy_unreported` with null period and measurement conditions rather than inventing them. The
+  current all-legacy six-entry monolith MUST remain byte-identical until a `1.1` record is accepted.
+- **FR-042**: The site MUST present validity as a first-class field and default to clean rows only.
+  A user MAY deliberately select nonquiescent, degraded, or legacy-unreported evidence. This is a
+  comparison filter, not verification of self-reported conditions.
+- **FR-043**: Ranking MUST accept a facet selector over capability subsets, modality, and versioned
+  dimension filters. The only shipped selector is `all-cases-text`. Configuration dimensions MUST
+  be named in one version `1.0` structure containing hardware, model identity including revision or
+  digest, precision, runtime name/version/backend, runtime configuration, and settings. Browser
+  validation MUST accept registry-bounded subset counts emitted by a non-default selector without
+  adding a current UI view.
+- **FR-044**: A version `1.0` facet-graduation policy MUST record 25 entries across five distinct
+  model families as the minimum for a dedicated future page, but no current code or UI MUST read it.
+  The transport `index_version` MUST remain `1.0` when projected entry `schema_version` becomes
+  `1.1`.
+- **FR-045**: The site MUST display `measurement_period` as an “as of” month and provide month
+  filtering and recency sorting. Until every shard is loaded, these controls MUST be explicitly
+  scoped to loaded rows and MUST NOT imply a corpus-wide absence or ordering.
 
 ### Key entities
 
@@ -272,6 +333,15 @@ dataset and that Pages deployment runs only from the default branch.
 - **SC-011**: Browser tests prove shard fetch targets use only synthesized
   `data/leaderboard-NNNNNN.json` names and cannot be redirected by an arbitrary path or URL in public
   data.
+- **SC-012**: A shared fixture corpus proves Python and JavaScript accept and reject the same schema
+  `1.1` suites, capability/modality values, three-sentinel not-applicable cases, one-scored-public
+  boundary, measurement conditions, determinism blocks, month periods, and legacy projections.
+- **SC-013**: Raw candidate fixtures prove the Python loader and browser parser both reject duplicate
+  JSON member names and a payload whose declared submission ID differs from its recomputed canonical
+  digest, while accepting the same valid canonical candidates.
+- **SC-014**: Sidecar tests reject a missing or stale source-run binding and model lists outside
+  1–1000, prove the binding is absent from public bytes, and browser-loading tests reject invalid
+  UTF-8, byte-order-marked, or duplicate-member monolith, index, and shard responses.
 
 ## Assumptions
 
@@ -281,8 +351,8 @@ dataset and that Pages deployment runs only from the default branch.
   occurred.
 - Hardware combinations and performance values can weakly characterize a private setup. Contributors
   review the minimized JSON and choose whether to publish those details.
-- The first leaderboard accepts only the current standard suite. Future suite versions require an
-  explicit contract and ranking change.
+- The public suite registry currently contains only `standard` / `1.0`. A future suite is added by a
+  reviewed registry entry and contract fixtures rather than by rewriting literal five-case checks.
 - Accepted submission files are append-only. Corrections use a new reviewed record rather than an
   unreviewed rewrite.
 - Git history is the retention store for accepted submission records. The committed leaderboard

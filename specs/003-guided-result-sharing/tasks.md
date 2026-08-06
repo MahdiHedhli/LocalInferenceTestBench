@@ -27,3 +27,14 @@
 - [x] T015 Run the complete unit, syntax, deterministic, strict privacy, and secret checks.
 - [x] T016 Exercise isolated clone preparation with a synthetic candidate and no GitHub mutation.
 - [x] T017 Complete final privacy/security review and confirm the working tree contains no result data.
+
+## Phase 4: Schema `1.1` evidence coordination
+
+- [x] T018 Amend guided-sharing specifications and operator guidance for the owner-only measurement
+  sidecar, execution/measurement validity split, schema `1.1`, month period, and `1.0` regeneration
+  policy without weakening confirmation or the two-file publication boundary.
+- [x] T019 Add `--measurement-evidence` to run sharing and manual preparation, require exact per-model
+  categorical evidence, exact source-run binding, and 1–1000 model rows, while stripping the binding
+  and keeping the sidecar outside every saved candidate and network payload.
+- [x] T020 Add safe failure tests for missing, unsafe, malformed, stale-run, oversized, mismatched,
+  and inconsistent sidecars plus exact schema `1.1` candidate/publish retry coverage.

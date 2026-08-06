@@ -410,5 +410,31 @@ submission schema `1.0`, accepted evidence, or the exact benchmark pull-request 
   paths or URLs
 - [x] T069 Run the complete local cross-platform unit, deterministic build, browser safety,
   publication-boundary, privacy, history, and secret-scanning gates
-- [ ] T070 Verify required hosted checks, the trusted benchmark boundary, deployed on-demand shard
+- [x] T070 Verify required hosted checks, the trusted benchmark boundary, deployed on-demand shard
   behavior, full accepted-record coverage, and absence of committed shards after protected merge
+
+---
+
+## Phase 10: Post-release Stage 3 public evidence schema
+
+**Purpose**: Coordinate public schema `1.1` and structural seams without changing the five measured
+cases or adding capability views.
+
+- [x] T071 Amend feature specifications, plans, data models, task lists, operator documentation,
+  contribution guidance, and the benchmark PR template with the execution/measurement validity
+  split, owner-only evidence sidecar, month-resolution period, legacy policy, suite taxonomy, facet
+  seam, configuration dimensions, and unused graduation threshold
+- [x] T072 Replace literal suite/profile assumptions with a `(profile, suite_version)` registry; add
+  required capability/modality metadata and denominator-excluded, three-sentinel `not_applicable`
+  behavior while preserving current standard behavior and requiring one scored public case
+- [x] T073 Bump new public submissions and projected rows to schema `1.1`, require categorical
+  measurement evidence bound by exact private source run ID with 1–1000 model rows and `YYYY-MM`,
+  strip the binding from public output, support optional determinism, retain accepted `1.0` bytes,
+  and reject newly proposed `1.0` submissions
+- [x] T074 Mirror every schema rule in Python and browser validation—including strict raw JSON,
+  fatal UTF-8/BOM rejection for candidate and fetched leaderboard bytes, duplicate-member rejection,
+  canonical digest recomputation, and visible-ASCII/reviewer-neutral public descriptors—and add
+  shared parity, source-run binding/bounds, migration, suite-registry, `not_applicable`, month,
+  categorical-validity, punctuation-boundary, and unchanged-monolith regressions
+- [ ] T075 Run the complete cross-platform, deterministic-build, browser-safety, privacy, history,
+  secret, exact-boundary, and hosted Pages validation before merging Stage 3

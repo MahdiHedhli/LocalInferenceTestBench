@@ -66,6 +66,16 @@ litb run \
 Use `--profile standard` after smoke passes. Run artifacts stay ignored under `artifacts/` and are
 restricted to aggregate-safe fields.
 
+Public schema `1.1` export also requires categorical measurement-condition evidence produced by a
+compatible local sampler or adapter. Keep that JSON ignored and owner-only at
+`.local/measurement-evidence.json`. A valid benchmark report proves the execution and scoring path
+worked; it does not prove the host was quiescent, so the exporter never invents a clean measurement
+state when the sidecar is absent. Start from `config/measurement-evidence.example.json`, replace its
+`source_run_id` with the source report's exact `run_id`, replace its example row with the sampler's
+categorical result for the report model ID, and restrict the local copy to owner access. The tracked
+example is deliberately nonquiescent so an unchanged copy cannot accidentally claim clean
+conditions. The private binding ID is checked locally and omitted from every public candidate.
+
 At the end of a valid interactive standard run, the bench now offers three choices: keep the report
 private, save identifier-minimized JSON, or open a reviewed public pull request. Enter keeps the
 result private. Nothing is uploaded merely because a run finished.
@@ -78,6 +88,7 @@ litb run \
   --endpoint http://127.0.0.1:1234/v1 \
   --profile standard \
   --hardware .local/hardware.json \
+  --measurement-evidence .local/measurement-evidence.json \
   --submission save
 ```
 
@@ -111,10 +122,16 @@ measurements are true.
 Leaderboard records include exact CPU, memory, accelerator, execution-mode, runtime name and
 version, and—when supplied—the configured context window, concurrency, speculative-decoding state,
 and offload mode because performance without that context is not useful. Unknown numeric values are
-reported as `null`; categorical uncertainty is reported as `unknown`, never inferred. Records omit
-direct machine identifiers, source run IDs, timestamps, local model selectors, raw prompts,
-completions, reasoning, and tool arguments. Hardware plus performance can still make a setup
-recognizable, and the GitHub account used to open a submission pull request is public.
+reported as `null`; categorical uncertainty is reported as `unknown`, never inferred. Records carry
+a coarse UTC measurement month and categorical clean, nonquiescent, or degraded-midrun conditions.
+They omit direct machine identifiers, source run IDs, precise timestamps, local model selectors, raw
+prompts, completions, reasoning, and tool arguments. Hardware plus performance can still make a
+setup recognizable, and the GitHub account used to open a submission pull request is public.
+
+The leaderboard defaults to clean measurement evidence. This makes self-reported conditions easier
+to compare; it does not verify that the conditions or measurements are true. Accepted schema `1.0`
+files remain unchanged and appear as legacy-unreported once mixed with `1.1` evidence. New benchmark
+pull requests must use `1.1`.
 
 To prepare a result from a valid standard run:
 
@@ -125,6 +142,7 @@ chmod 600 .local/hardware.json
 litb prepare-submission \
   --report artifacts/<run-record>.json \
   --hardware .local/hardware.json \
+  --measurement-evidence .local/measurement-evidence.json \
   --model <report-model-id>
 ```
 
@@ -178,7 +196,9 @@ or quick start.
 Image and video generation are explicitly out of scope. Scoring generated media generally requires
 a similarity model or human preference, which conflicts with this project's judge-free,
 rule-based design, and generation uses a different runtime stack. A separate generation benchmark
-may reuse this project's submission pipeline, privacy gate, and validity model.
+may reuse this project's submission pipeline, privacy gate, and validity model. The reserved
+`vision` modality means image input to a rule-scored language task; it does not bring image or video
+generation into this benchmark.
 
 ## Specification
 

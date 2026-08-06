@@ -219,3 +219,34 @@ reduces the chance that force-added files expose raw or identifying context.
   deterministic pass criteria.
 - The public repository can be useful without a real result corpus; synthetic fixtures and contract
   tests are sufficient to validate the published process.
+
+## Stage 3 decision: registry and taxonomy are seams, not new measurements
+
+**Decision**: Resolve cases from a registry keyed by `(profile, suite_version)`. Record a closed task
+capability and modality on each public case, and distinguish denominator-excluded `not_applicable`
+from an attempted but unscored case. Keep `standard` / `1.0` as the only public suite and all current
+cases as text. Represent an inapplicable case with the same `not_applicable` sentinel in outcome,
+route, and termination, and require at least one scored case before public submission.
+
+**Rationale**: Literal profile and five-case assertions turn future suite expansion into a schema
+rewrite. Recording taxonomy now makes expansion additive without publishing statistically empty
+capability scores from the present one-case-per-task floor.
+
+**Rejected**: Add a new suite, vision case, capability score, or capability page during the schema
+migration; treat vision as a sixth task capability; or score an inapplicable modality as failure.
+
+## Stage 3 decision: measurement evidence fails closed outside execution validity
+
+**Decision**: Keep `valid` / `limited` / `invalid` on the Run Record as execution integrity. Require
+a separate ignored owner-only categorical sidecar before public schema `1.1` preparation and derive
+clean, nonquiescent, or degraded-midrun only from its pre/post categories. Bind the sidecar to one
+Run Record with a required top-level `source_run_id` exact-matched to `report.run_id`, cap its unique
+model evidence rows at 1–1000, and remove the binding ID from the public projection.
+
+**Rationale**: The baseline report does not contain host-quiescence observations. Inferring clean
+from transport and identity success would misrepresent absent evidence, while publishing raw sampler
+values would expand the fingerprinting boundary.
+
+**Rejected**: Synthesize clean; add raw host telemetry to the Run Record; accept a free-form operator
+assertion; accept unbound or stale-run evidence; allow an unbounded model list; publish the run
+binding; or discard non-clean evidence.

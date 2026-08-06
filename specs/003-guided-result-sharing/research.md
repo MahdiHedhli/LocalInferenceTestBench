@@ -60,3 +60,33 @@ one modified generated leaderboard. Validator, workflow, code, documentation, re
 multi-record changes are rejected in that lane.
 
 **Rejected**: Rely only on the PR template or execute a validator that the same benchmark PR may edit.
+
+## Stage 3 decision: require measurement evidence as a separate local input
+
+**Decision**: Public schema `1.1` preparation reads a closed categorical sidecar from an ignored,
+owner-only path. Execution validity continues to describe endpoint, identity, request, and scoring
+integrity; the sidecar separately describes coarse pre/post measurement conditions. Missing evidence
+fails closed. The sidecar binds to exactly one Run Record through a required `source_run_id` exact-
+matched to `report.run_id`, and its unique model evidence list is capped at 1–1000 entries. The
+binding is validation-only and is stripped from public output.
+
+**Rationale**: Treating `report.validity == valid` as proof of host quiescence would invent evidence
+the baseline runner did not collect. Keeping the sampler or adapter output separate also prevents
+raw host instrumentation from expanding the retained run record or public candidate.
+
+**Rejected**: Map execution-valid to clean; accept a CLI validity assertion; reuse unbound or stale-
+run evidence; accept an unbounded model list; collect general machine inventory in the core runner;
+publish the run binding; or publish raw pressure, thermal, load, swap, memory, or process values.
+
+## Stage 3 decision: regenerate new candidates without rewriting legacy evidence
+
+**Decision**: Newly prepared candidates use public schema `1.1`. Accepted schema `1.0` repository
+files retain their exact bytes and digests; a saved or open `1.0` candidate must be regenerated before
+new publication.
+
+**Rationale**: Rehashing historical files would destroy their content identities, while accepting
+new `1.0` files would let callers invisibly omit validity and recency. Explicit legacy projection
+preserves both facts.
+
+**Rejected**: Rewrite accepted source submissions, synthesize legacy measurement fields, or keep
+accepting new schema `1.0` proposals indefinitely.

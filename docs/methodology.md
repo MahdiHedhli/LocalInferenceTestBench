@@ -22,6 +22,21 @@ overwriting the old one:
 A display name is not an identity. Two files with the same friendly name may have different weights,
 templates, quantization, or runtime behavior.
 
+The public taxonomy separates tasks from dimensions:
+
+- **Tasks** say what is measured: `structured_output`, `coding`, `agent_tool_use`, `cyber_triage`,
+  and `safety_boundary`.
+- **Dimensions** say under what conditions it is measured: modality, context length, quantization,
+  runtime, and hardware.
+
+Modality crosses the task axis; it is not another capability. A future vision agent case would still
+be `agent_tool_use`. Every current case is text. Image and video generation remain outside this
+project because they require a different runtime and similarity or preference scoring.
+
+The current mapping is `structured-json` → `structured_output`, `python-ast` → `coding`,
+`defensive-triage` → `cyber_triage`, `read-only-tool` → `agent_tool_use`, and
+`unapproved-change-boundary` → `safety_boundary`.
+
 ## Staged process
 
 ### 1. Define the decision
@@ -75,6 +90,13 @@ Standard adds two inert tool-contract cases:
 
 The model may emit a tool-call object, but the harness never executes it.
 
+The standard suite's five binary cases are a compatibility floor and screen, not a statistically
+discriminating ranking instrument. A perfect five-of-five result still carries wide uncertainty.
+Resolution should come from expanding a reviewed suite, not from printing extra decimal places or
+inventing capability scores from roughly one case per task. The suite registry therefore records
+capability and modality now, while the site deliberately exposes no capability-specific score,
+column, view, or page.
+
 ### 7. Add experiments only when the decision needs them
 
 Long-context retrieval, bounded repeatability, reasoning-template analysis, dynamic agent tasks,
@@ -96,7 +118,8 @@ changes, and rollback planning belong to a separate reviewed change.
 | Reliability | Termination, refusal, empty-final, tool-route categories | How did failures present? |
 | Performance | End-to-end latency and API-reported token rate | Compare only within a normalized environment. |
 | Context | Declared target, measured input tokens, retrieval outcome | Keep output-budget and context failures distinct. |
-| Validity | Valid, limited, or invalid | Are quality and performance claims usable? |
+| Execution validity | Valid, limited, or invalid | Did endpoint, identity, request, and classification complete coherently? |
+| Measurement validity | Clean, nonquiescent, or degraded mid-run | What coarse self-reported host conditions surrounded the measurement? |
 
 ## Comparison rules
 
@@ -104,6 +127,12 @@ changes, and rollback planning belong to a separate reviewed change.
 - Compare latency and throughput only within the same non-identifying environment profile.
 - Do not mix cold-start latency with warmed generation latency.
 - Treat missing usage data as missing, not zero.
+- Treat `not_applicable` as absence from the applicable denominator, not a failed case. It is distinct
+  from `not_scored`, which means a case was attempted or reached but could not be scored and therefore
+  is not eligible for a public comparison row. An inapplicable case uses `not_applicable` consistently
+  for outcome, route, and termination; mixed sentinels are invalid.
+- Do not infer clean measurement conditions from valid execution. Public preparation requires a
+  separate categorical sidecar, and missing evidence is not a clean run.
 - A fenced but correct JSON object can pass semantics while failing exact-envelope adherence.
 - A response that consumes its output budget is not automatically a context-window failure.
 - A reasoning-only response at the configured output ceiling must be rerun with a justified larger

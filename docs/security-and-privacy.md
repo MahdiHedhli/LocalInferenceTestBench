@@ -59,46 +59,80 @@ usage/performance, categorical routing, and boolean checks. They do not contain 
 derive those values or a reusable fingerprint of that text. A repeatability experiment may compare
 responses transiently and retain only a stability boolean.
 
+Execution validity and measurement validity are separate. The run report's `valid`, `limited`, or
+`invalid` state describes endpoint, identity, request, and classification integrity. Public schema
+`1.1` preparation additionally requires an ignored owner-only measurement-evidence sidecar produced
+by a compatible local sampler or adapter. That sidecar may contain one top-level
+`source_run_id` that must exactly equal the source report's `run_id`. The bounded model list contains
+1–1000 unique entries with categorical pre/post outcomes and categories plus optional aggregate
+determinism. It must not contain raw memory, thermal, load, swap, process, path, inventory, additional
+timestamp, or free-text values. Missing, stale-run, oversized, or inconsistent evidence fails closed;
+the exporter never maps execution-valid to clean.
+
 ## Leaderboard submission boundary
 
-The leaderboard exporter accepts only a fully valid current-standard report. It combines one model
-result with a separate public environment descriptor and writes one candidate per model. The
-descriptor must be a regular, non-symlink file that Git ignores. It must be owner-only on systems
-that expose POSIX modes.
+The leaderboard exporter accepts only a fully execution-valid report from the public suite registry.
+The sole current public member is `standard` / `1.0`. It combines one model result with a separate
+public environment descriptor and categorical measurement-evidence sidecar, then writes one schema
+`1.1` candidate per model. Both local inputs must be regular, non-symlink files that Git ignores and
+owner-only on systems that expose POSIX modes.
 
-The candidate removes the source run ID and time, manifest digest, local model selector, contributor,
-raw content, per-case timing, and per-case token counts. It keeps public model provenance, settings,
-exact hardware and runtime fields, optional reported runtime configuration, categorical case
-outcomes, and rounded aggregate performance.
+The candidate removes the source run ID and precise time, manifest digest, local model selector,
+contributor, raw content, per-case timing, and per-case token counts. It keeps public model
+provenance, settings, exact hardware and runtime fields, optional reported runtime configuration,
+categorical case outcomes and measurement conditions, the UTC measurement month, and rounded
+aggregate performance. Month resolution was chosen over an event timestamp to show runtime-version
+recency without adding a high-entropy correlation value.
+All reviewer-visible hardware/runtime, model-label, and artifact revision/digest descriptors are
+visible ASCII and reject URL, network, private-host, machine-identifier, and reviewer-instruction
+shapes. This deliberately removes Unicode and punctuation-boundary ambiguity between Python and the
+browser.
 The content digest detects changes and duplicates. It does not prove that the benchmark was run.
 
-The Pages file picker reads only an already-prepared candidate. Its shape check runs in the browser,
-does not upload the file, and is not a replacement for the Python validator, privacy gate, or review.
+The Pages file picker reads only an already-prepared candidate. In the browser it parses strict JSON,
+rejects duplicate member names, validates the closed submission shape, and recomputes the canonical
+content digest without uploading the file. Those checks are defense in depth, not replacements for
+the Python validator, privacy gate, pull-request boundary, or review.
+
+The same byte-oriented path protects published leaderboard reads. The browser fetches the legacy
+monolith, index, and shards as bounded bytes, applies fatal UTF-8 decoding, rejects a leading
+byte-order mark, and uses the strict duplicate-member-rejecting parser before validating any
+transport or entry shape.
 
 Before deliberately publishing a result:
 
 1. put the exact public hardware and runtime details in `.local/hardware.json`;
-2. prepare the candidate with `litb prepare-submission`;
-3. read the entire candidate and decide whether its hardware and performance could identify the
+2. put the exact source report run binding and only categorical sampler/adapter output in the
+   owner-only ignored `.local/measurement-evidence.json`;
+3. prepare the candidate with `litb prepare-submission`;
+4. read the entire candidate and decide whether its hardware and performance could identify the
    setup more closely than intended;
-4. add only the candidate to `site/data/submissions/` and rebuild the leaderboard;
-5. run the full privacy and secret scans; and
-6. use the base-controlled exact-head review lane, with maintainer review when automation reports a
+5. add only the candidate to `site/data/submissions/` and rebuild the leaderboard;
+6. run the full privacy and secret scans; and
+7. use the base-controlled exact-head review lane, with maintainer review when automation reports a
    finding or cannot establish every gate.
 
-The guided `litb run --submission pr` path automates steps 2 through 5 without weakening them. Hosted
-automation performs step 6 only for an exact benchmark-only change; every other change stays manual.
+The guided `litb run --submission pr` path automates steps 3 through 6 without weakening them. Hosted
+automation performs step 7 only for an exact benchmark-only change; every other change stays manual.
 The `litb publish-submission --candidate <path>` retry applies the same gates to an existing
 canonical, owner-only, ignored minimized file, so a failed public step does not require another
 inference run.
-The post-run path always writes the private aggregate report first and saves the minimized candidate;
-both paths show the entire candidate, name the public GitHub account, and require an explicit
-publication confirmation. Both require the strict local denylist and Gitleaks before any mutating
-GitHub call.
+The post-run path always writes the private aggregate report first. When candidate preparation
+succeeds, both publication paths save and show the entire candidate, name the public GitHub account,
+and require an explicit publication confirmation. Both require the strict local denylist and
+Gitleaks before any mutating GitHub call.
+
+Accepted schema `1.0` source files retain their exact bytes and content IDs. A new benchmark pull
+request must use `1.1`; an old open or saved candidate must be regenerated from its source evidence.
+Once the projection contains `1.1`, historical rows are labeled `legacy_unreported` with null month
+and conditions. Those nulls are an honest absence of evidence, not inferred defaults. The current
+six-entry all-legacy monolith remains byte-identical until the first accepted current-schema record.
+The Pages `index_version` remains `1.0` because transport and submission schemas are independent.
 
 Publication uses a fixed canonical target and an isolated temporary clone. Only one validated
 candidate and the generated leaderboard may enter the Git index or GitHub API payload. The raw
-report, descriptor, endpoint, credentials, environment, artifact directory, and denylist never enter
+report, descriptor, measurement sidecar, endpoint, credentials, environment, artifact directory,
+and denylist never enter
 the network helper. Validation children receive a scrubbed environment so inference credentials and
 scanner configuration overrides are not inherited. Upload bytes are read back from the checked Git
 index, never from a potentially changed working tree. The helper creates a feature branch and pull request; it does not write
@@ -181,6 +215,22 @@ and publication time. Cancellation, end-of-input, an invalid choice, a missing t
 leaderboard base, or a failed local gate causes no branch or PR creation. If PR creation fails after
 the branch exists, the command reports the exact public branch that may remain instead of claiming a
 rollback.
+
+## Repository-operator checklist
+
+These are hosting controls, not code changes. Verify them in repository settings; do not treat this
+documentation or a workflow's self-report as proof that they are enabled.
+
+- Protect `main` with required status checks named **Trusted benchmark boundary** and **Publication
+  boundary**, and confirm administrators do not bypass protection when merging submission pull
+  requests. The trusted boundary is the only job that runs trusted base code against untrusted diff
+  data; without a required check it is advisory.
+- In Actions settings, select **Require approval for all outside collaborators**. The public-safety
+  workflow executes pull-request test code through unit-test discovery with a read-only token and no
+  meaningful secrets, so the remaining exposure is primarily compute-minutes abuse; approval gating
+  removes drive-by execution.
+- Consider serving the leaderboard from a custom domain or dedicated subdomain instead of the shared
+  account-level Pages origin so a future client-side defect cannot pivot across other Pages projects.
 
 ## If a leak is detected
 

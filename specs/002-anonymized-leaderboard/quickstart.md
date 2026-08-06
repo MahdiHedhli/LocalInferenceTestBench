@@ -32,26 +32,47 @@ hostname, username, IP address, serial number, inventory ID, device UUID, intern
 
 ## 3. Prepare one public candidate
 
+First place the categorical output of a compatible local measurement sampler or adapter in the
+ignored owner-only `.local/measurement-evidence.json`. Besides its private source-run binding, it may
+contain only closed pre/post threshold categories and optional aggregate determinism; do not infer
+clean from a valid execution report.
+
+```sh
+cp config/measurement-evidence.example.json .local/measurement-evidence.json
+chmod 600 .local/measurement-evidence.json
+```
+
+The tracked example is deliberately `nonquiescent`, so copying it unchanged cannot claim that a run
+was clean. Replace `source_run_id` with the source report's exact `run_id` and replace its example row
+with the sampler or adapter output for the selected report model. The file accepts 1–1000 unique
+model rows; the run binding is checked locally and does not enter the prepared public candidate.
+
 ```sh
 litb prepare-submission \
   --report artifacts/<run-record>.json \
   --hardware .local/hardware.json \
+  --measurement-evidence .local/measurement-evidence.json \
   --model <report-model-id>
 ```
 
-The default destination is `.local/leaderboard-submissions`. The command creates an owner-only file
+The default destination is `.local/leaderboard-submissions`. The command creates a schema `1.1`
+owner-only file
 whose name is its content digest. A report with one model does not need `--model`. Repeat `--model`
 to export several models as separate, unlinked files.
 
 ## 4. Review before publishing
 
 Open the prepared file and verify every hardware, runtime, model, setting, case, and metric value.
-The file should not contain the source run ID, run time, local model selector, manifest digest,
+The file should not contain the source run ID, precise run time, local model selector, manifest digest,
 endpoint, account, machine identifier, raw prompt, completion, reasoning, or tool argument.
 
-You may select the file on the Pages site for a browser-only shape check and preview. That check does
-not upload the file, but it is only a convenience. The Python validator in continuous integration is
-authoritative.
+It does contain a UTC measurement month and categorical measurement conditions. Accepted schema
+`1.0` source files remain unchanged, but every new pull request must use `1.1`.
+
+You may select the file on the Pages site for a browser-only fatal UTF-8/BOM, strict JSON,
+duplicate-member, closed-schema, and canonical-digest check plus preview. The check does not upload
+the file, but it remains a convenience. The Python validator and pull-request gates in continuous
+integration are authoritative.
 
 ## 5. Propose the record
 

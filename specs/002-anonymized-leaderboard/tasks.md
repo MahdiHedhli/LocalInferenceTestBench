@@ -108,5 +108,28 @@ boundary. This stage does not change submission schema `1.0` or accepted submiss
 - [x] T033 Run the focused scale suite, complete cross-platform unit suite, deterministic index/shard
   rebuilds, JavaScript parsing and path-safety checks, exact PR-boundary regressions, and strict
   publication/privacy gates locally
-- [ ] T034 Verify required hosted checks, the trusted benchmark boundary, Pages deployment, live
+- [x] T034 Verify required hosted checks, the trusted benchmark boundary, Pages deployment, live
   on-demand shard loading, and absence of committed shard files after the protected merge
+
+## Phase 9: Post-release Stage 3 schema `1.1` and structural seams
+
+**Sequence**: Land the public contract, evidence boundary, and migration together. This phase adds no
+new benchmark case, capability score, or capability-specific UI.
+
+- [x] T035 Amend the baseline, leaderboard, and guided-sharing specifications, plans, data models,
+  task lists, operator docs, contribution guidance, and benchmark PR template for schema `1.1`, the
+  measurement-evidence sidecar, month period, explicit legacy policy, suite taxonomy, facet seam,
+  versioned config dimensions, and unused graduation policy
+- [x] T036 Add the suite registry, required capability/modality metadata, denominator-excluded
+  three-sentinel `not_applicable`, one-scored-public eligibility, and the `all-cases-text` facet while
+  keeping standard `1.0` as the only public suite and leaving all current cases unchanged
+- [x] T037 Implement lockstep Python/browser schema `1.1` validation, categorical
+  measurement conditions bound to an exact private source run ID with 1–1000 model rows, optional
+  determinism, `YYYY-MM`, clean-default filtering, stripped run binding, and retained `1.0` mixed
+  projections without synthesizing evidence
+- [x] T038 Add shared parity, registry-extension, not-applicable, one-scored-public, migration, month,
+  source-run evidence bounds, unchanged-monolith, closed-key, fatal UTF-8/BOM, strict-JSON,
+  duplicate-member, digest, exact-filename, fetched-transport, public-descriptor punctuation/Unicode,
+  and deterministic-build regressions
+- [ ] T039 Complete local and hosted cross-platform, Pages, exact-boundary, privacy, history, and
+  secret-scanning verification before merging Stage 3

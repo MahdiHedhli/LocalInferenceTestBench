@@ -88,12 +88,16 @@ are still observations rather than controlled comparisons.
 
 ## Decision 6: Inspect files in the browser without uploading
 
-**Decision**: The Pages submission screen accepts only the minimized submission format, validates its
-basic closed shape, and renders a preview using text-only DOM APIs. Copy and download actions remain
-local to the browser.
+**Decision**: The Pages submission screen accepts only the minimized submission format, parses it as
+strict JSON with duplicate-member rejection, applies the parallel closed validator, recomputes its
+canonical payload-minus-ID digest, and renders a preview using text-only DOM APIs. Copy and download
+actions remain local to the browser. The same byte-oriented decoder and strict parser handles every
+fetched leaderboard monolith, index, and shard; fatal UTF-8 errors and byte-order marks are rejected
+before transport validation.
 
-**Rationale**: Contributors can review what they are about to publish without giving the site a write
-token or sending a private run report to another service.
+**Rationale**: Contributors can review what they are about to publish and catch raw-JSON or integrity
+drift without giving the site a write token or sending a private run report to another service. The
+Python validator and pull-request boundary remain authoritative.
 
 **Alternatives considered**:
 
@@ -116,3 +120,56 @@ a model ran or that a contributor left values unchanged before submission.
   not the physical experiment.
 - Running submissions on hosted hardware was rejected because the project tests local inference and
   intentionally does not manage model artifacts or infrastructure.
+
+## Decision 8: Bump new evidence without rewriting legacy records
+
+**Decision**: Require schema `1.1` for new submissions, retain accepted `1.0` bytes and digests, and
+annotate legacy rows only in a mixed projection as `legacy_unreported` with absent month and
+condition evidence. Keep transport `index_version` at `1.0`.
+
+**Rationale**: Rewriting accepted files would break their content identities. Synthesizing fields
+would falsely claim measurements that never occurred. Independent transport versioning avoids an
+unrelated Pages migration.
+
+**Alternatives considered**:
+
+- Continue accepting `1.0` was rejected because callers could invisibly omit comparable validity and
+  recency.
+- Rewrite or rehash historical submissions was rejected because accepted evidence is append-only.
+- Treat legacy rows as clean was rejected because absence of evidence is not clean evidence.
+
+## Decision 9: Use month-only recency and categorical measurement conditions
+
+**Decision**: Publish the source report's UTC month plus closed pre/post threshold outcomes and
+categories from an ignored owner-only sidecar. Optional determinism is limited to aggregate rates,
+booleans, and a closed verdict. Bind the sidecar to exactly one report with a required
+`source_run_id`, require exact equality with `report.run_id`, and bound its unique model rows to
+1–1000. The run binding remains local and is not part of the public schema.
+
+**Rationale**: Runtime versions age, so no date at all impairs interpretation. Month resolution has
+substantially less reidentification entropy than an event timestamp. Closed categorical conditions
+support comparison without exposing raw host telemetry.
+
+**Alternatives considered**:
+
+- A precise timestamp was rejected as unnecessary correlation data.
+- No recency field was rejected because runtime/version results become misleading with age.
+- Raw sampler output or free text was rejected as fingerprinting and reviewer-injection surface.
+- Unbound evidence, a caller-selected stale run, and an unbounded model list were rejected because
+  they weaken the local categorical handoff or its resource bounds without adding public value.
+
+## Decision 10: Add one facet seam and a precommitted graduation rule
+
+**Decision**: Parameterize ranking with a facet selector but ship only `all-cases-text`. Name the
+version `1.0` configuration dimensions once and record, without consuming, a graduation threshold of
+25 entries across five model families.
+
+**Rationale**: Future capability views and config-cell aggregation should be additive. Fixing the
+minimum sample rule before results arrive avoids tuning it after observing favorable data.
+
+**Alternatives considered**:
+
+- Capability pages now were rejected because roughly one binary case per task carries no useful
+  discriminating precision.
+- An inline unversioned config tuple was rejected because collapse and filtering would drift.
+- Enforcing the graduation policy now was rejected because no additional facet ships in this stage.

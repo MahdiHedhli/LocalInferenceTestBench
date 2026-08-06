@@ -1,8 +1,9 @@
 # Submitting a benchmark
 
-The public leaderboard accepts identifier-minimized results from the current standard suite. Each
-record covers one model and includes the exact hardware and runtime name and version used for
-inference. It can also include a closed runtime-configuration snapshot. The record
+The public leaderboard accepts identifier-minimized schema `1.1` results from the registered public
+suite. The sole current member is `standard` / `1.0`. Each record covers one model and includes the
+exact hardware and runtime name and version used for inference. It can also include a closed
+runtime-configuration snapshot. The record
 does not include a contributor field, but the GitHub account and pull request used to submit it are
 public.
 
@@ -22,6 +23,10 @@ Share this result? [Enter] keep private, [s] save minimized JSON, [p] open publi
 record, identifies the GitHub account that will be visible, and requires `PUBLISH` before creating a
 branch and pull request. A failed export or GitHub step never removes the private report.
 
+Save and PR preparation require `.local/measurement-evidence.json` by default. A valid execution
+report alone does not establish clean measurement conditions. If the ignored owner-only categorical
+sidecar is absent or invalid, preparation stops while the private report remains saved.
+
 For scripts or unattended runs, choose the action explicitly:
 
 ```sh
@@ -29,12 +34,14 @@ For scripts or unattended runs, choose the action explicitly:
 litb run <run-options> \
   --profile standard \
   --hardware .local/hardware.json \
+  --measurement-evidence .local/measurement-evidence.json \
   --submission save
 
 # Public branch and pull request. This never writes directly to main.
 litb run <run-options> \
   --profile standard \
   --hardware .local/hardware.json \
+  --measurement-evidence .local/measurement-evidence.json \
   --submission pr \
   --submission-model <report-model-id> \
   --confirm-public
@@ -67,6 +74,7 @@ You need:
 
 - a valid report from the current `standard` profile;
 - verified model preflight and a matching runtime identity;
+- ignored owner-only categorical measurement evidence for every selected model;
 - Python 3.11 or newer;
 - the repository hooks and local privacy denylist configured; and
 - Gitleaks 8.30.1 or newer.
@@ -76,6 +84,10 @@ local.
 
 Do not use a smoke, limited, invalid, partial, or hand-edited source report. The exporter rejects
 these records.
+
+Use short visible-ASCII product and revision labels in the public descriptor and model provenance.
+URLs, network/private-host shapes, machine identifiers, and reviewer-directed prose are rejected in
+both the Python and browser validators.
 
 ## Describe the environment you want to publish
 
@@ -108,6 +120,33 @@ or free-form note. The closed contract has no place for those values.
 The descriptor must remain ignored by Git and owner-only. The exporter fails closed if the file is a
 symlink, tracked, not ignored, or broadly readable.
 
+## Supply categorical measurement evidence
+
+Copy the closed example, then replace its example row with output from a compatible local sampler or
+adapter and restrict the file:
+
+```sh
+cp config/measurement-evidence.example.json .local/measurement-evidence.json
+chmod 600 .local/measurement-evidence.json
+```
+
+The example is deliberately nonquiescent so copying it cannot accidentally create a clean claim.
+Replace its top-level `source_run_id` with the exact `run_id` from the report being prepared.
+
+The sidecar is separate from the run report because the report's execution validity describes
+endpoint, identity, request, and scoring integrity—not host quiescence. Each selected model needs an
+exact model-ID match with pre/post outcomes and only these closed threshold categories: memory
+pressure, thermal state, sustained load, swap, and resident models. An optional determinism block
+may retain only 3–5-run aggregate rates and stability booleans. The sidecar must contain 1–1000
+unique model rows; a stale `source_run_id` or an oversized model list is rejected before export.
+
+Do not hand-assert that a run was clean. Do not include raw readings, process names, inventory,
+paths, precise timestamps, or free text. The file must be ignored, owner-only, regular, and
+non-symlinked. Missing, mismatched, unsafe, or inconsistent evidence blocks candidate preparation and
+is never uploaded. The top-level source binding is used only for local validation and is stripped
+with the report's run ID from every public candidate. The normative shape is
+[`measurement-evidence.schema.json`](../specs/002-anonymized-leaderboard/contracts/measurement-evidence.schema.json).
+
 ## Manual path: prepare the minimized record
 
 For a single-model report:
@@ -115,7 +154,8 @@ For a single-model report:
 ```sh
 litb prepare-submission \
   --report artifacts/<run-record>.json \
-  --hardware .local/hardware.json
+  --hardware .local/hardware.json \
+  --measurement-evidence .local/measurement-evidence.json
 ```
 
 For a report containing several models, choose one or repeat the option:
@@ -124,6 +164,7 @@ For a report containing several models, choose one or repeat the option:
 litb prepare-submission \
   --report artifacts/<run-record>.json \
   --hardware .local/hardware.json \
+  --measurement-evidence .local/measurement-evidence.json \
   --model <report-model-id>
 ```
 
@@ -135,21 +176,28 @@ changes and exact duplicates. It does not prove that the run took place.
 
 Check every value before it enters a public branch. A candidate contains:
 
-- suite and standard-profile versions;
+- public schema `1.1`, plus registered suite and profile versions;
+- a UTC month-resolution measurement period, measurement validity, closed pre/post condition
+  categories, and optional aggregate determinism;
 - public model provenance and generation settings;
 - the exact public hardware and runtime descriptor, including the optional reported runtime
   configuration;
 - one categorical outcome, route, and termination for each standard case; and
 - aggregate quality counts, mean latency, usage coverage, and optional weighted throughput.
 
-It does not contain the source run ID or time, manifest digest, local model selector, endpoint,
+It does not contain the source run ID or precise time, manifest digest, local model selector, endpoint,
 credential, environment content, contributor, hostname, account, network data, device identifier,
 raw prompt, completion, reasoning, tool argument, or per-case performance trace.
 
+Every case also records its registry-defined task capability and modality. All five current cases are
+text; these tags are validation seams and do not create a capability score or view.
+
 You can select the file on the
-[Pages site](https://mahdihedhli.github.io/LocalInferenceTestBench/#submit) to check its basic public
-shape and preview the model and hardware details. The file stays in your browser. This convenience
-check does not verify the content digest or replace local and hosted validation.
+[Pages site](https://mahdihedhli.github.io/LocalInferenceTestBench/#submit) to parse its strict public
+JSON with fatal UTF-8/BOM rejection, reject duplicate member names, validate the closed schema,
+recompute the canonical content digest, and preview the model and hardware details. The file stays in
+your browser. This convenience check does not replace the authoritative Python, privacy,
+pull-request, and hosted validation gates.
 
 ## Add the candidate to a branch
 
@@ -178,6 +226,10 @@ python3 scripts/build_leaderboard.py --check
 Commit the candidate and the regenerated `site/data/leaderboard.json`. Do not edit the generated
 leaderboard by hand.
 
+New pull requests must add schema `1.1`. Accepted `1.0` files stay unchanged under their original
+digests, while open or locally saved `1.0` candidates must be regenerated from the source report,
+descriptor, and measurement evidence. Do not edit a historical file to add missing fields.
+
 The committed generated file remains the canonical monolith while it fits the public per-file cap.
 When the corpus crosses that cap, the same command switches it deterministically to a compact index.
 Leaderboard shards are generated only in the trusted GitHub Pages artifact; contributors never add
@@ -187,7 +239,7 @@ The automated PR path performs these steps in a private temporary directory clon
 canonical upstream. It stages only one new digest-named submission and the regenerated leaderboard,
 runs the same contract, deterministic-build, privacy, unit, and redacted secret checks, and uploads
 only those two public files. It never stages or transmits the source report, endpoint, environment
-file, hardware descriptor, privacy denylist, or artifact directory.
+file, hardware descriptor, measurement sidecar, privacy denylist, or artifact directory.
 
 ## Run the release checks
 
@@ -249,6 +301,10 @@ substantive reproduction. Deterministic validation proves schema conformance and
 published bytes, not provenance. Quality rank uses
 semantic score first and exact-format score second. Latency and throughput are shown with their
 hardware context but never affect rank.
+
+The site defaults to clean self-reported measurement evidence. Users can deliberately include
+nonquiescent, degraded-midrun, or `legacy_unreported` rows; the filter does not verify any claim.
+Legacy rows have no synthesized period or condition evidence.
 
 Automated benchmark PRs are restricted to exactly one append-only submission JSON file plus the
 deterministically regenerated leaderboard. Mixed code-and-data PRs, rewrites, deletes, renames, and
