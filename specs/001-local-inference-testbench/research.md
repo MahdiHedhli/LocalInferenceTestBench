@@ -256,11 +256,21 @@ binding; or discard non-clean evidence.
 **Decision**: For non-interactive POSIX single-command export, create and validate the ordinary UUIDv4/UTC
 run identity before endpoint access. Invoke one explicitly selected adapter synchronously for a
 closed pre sample, execute the complete benchmark with that identity, then, when pre succeeded,
-invoke it for the closed post sample. Require exact run/model/phase echo, derive only the existing
-categorical fields, and
+invoke it for the closed post sample only if the benchmark returns successfully. A runner exception
+produces neither a post sample nor an export. Require exact run/model/phase echo, derive only the
+existing categorical fields, and
 atomically retain the resulting ordinary sidecar before passing the same object to preparation.
 Cap the selected executable at 16 MiB, execute only a private non-writable snapshot of the approved
-bytes, and fail the single-command option closed on Windows while retaining two-step preparation.
+bytes, and place a dedicated standard-library supervisor between the CLI and snapshot. It preserves
+the existing bounded standard streams, kills the adapter group before reaping the leader, never
+signals the PGID after reaping, and on Linux fails closed unless it can adopt and boundedly reap
+descendants as a child subreaper. Leader exit is observed without reaping: `waitid` where available,
+or `kqueue` `NOTE_EXIT` on supported macOS Python versions that omit `os.waitid`. macOS keeps the same
+ordering without a subreaper facility. Require
+the trusted sampler to stay synchronous and not daemonize or deliberately leave its session/process
+group. Require an owner-only snapshot directory on a writable filesystem that permits execution,
+allowing `TMPDIR` to select an owner-controlled non-repository location when the default is `noexec`. Fail the single-command option closed
+on Windows while retaining two-step preparation.
 
 **Rationale**: A sidecar cannot honestly contain a fresh unpredictable run ID and real post-run
 conditions before the run occurs. Providing the identity to a bounded collector before both samples
@@ -268,4 +278,7 @@ eliminates the rewrite race without turning digest integrity or source binding i
 
 **Rejected**: Replace an arbitrary sidecar's ID after inference; derive report identity from
 pre-existing results; accept missing samples; inherit credentials; execute shell fragments; capture
-unbounded output; or suppress an otherwise complete private report when the optional sampler fails.
+unbounded output; signal a potentially reused process group after reaping its leader; enable a
+process-wide subreaper in the long-lived CLI; claim portable containment for a sampler that
+deliberately daemonizes or escapes; or suppress an otherwise complete private report when the
+optional sampler fails.

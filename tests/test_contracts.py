@@ -32,6 +32,7 @@ from local_inference_test_bench.suites import (  # noqa: E402
 from schema_validator import LocalSchemaValidator, SchemaValidationError  # noqa: E402
 from test_models import valid_manifest_data  # noqa: E402
 from test_submissions import (  # noqa: E402
+    legacy_submission_fixture,
     prepare_submission,
     public_environment,
     runtime_configuration,
@@ -182,9 +183,7 @@ class PublishedContractTests(unittest.TestCase):
             self.validator.validate(dataset, "leaderboard-dataset.schema.json")
 
     def test_legacy_subset_projection_matches_the_versioned_contract(self) -> None:
-        legacy_path = next(
-            iter(sorted((PROJECT_ROOT / "site" / "data" / "submissions").glob("*.json")))
-        )
+        legacy_path, _ = legacy_submission_fixture()
         facet = FacetSelector(
             facet_id="legacy-coding-text",
             capabilities=frozenset({"coding"}),
@@ -328,10 +327,7 @@ class PublishedContractTests(unittest.TestCase):
 
     def test_mixed_legacy_and_current_dataset_matches_transport_contracts(self) -> None:
         current = prepare_submission(valid_report(), public_environment())
-        legacy_path = next(
-            iter(sorted((PROJECT_ROOT / "site" / "data" / "submissions").glob("*.json")))
-        )
-        legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
+        legacy_path, legacy = legacy_submission_fixture()
         self.assertEqual(legacy["schema_version"], "1.0")
 
         with tempfile.TemporaryDirectory() as temporary:

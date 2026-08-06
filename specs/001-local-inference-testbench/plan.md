@@ -149,8 +149,10 @@ The tradeoffs and rejected alternatives are recorded in [research.md](research.m
     └── local_inference_test_bench/
         ├── __init__.py
         ├── __main__.py
+        ├── _measurement_supervisor.py
         ├── cli.py
         ├── client.py
+        ├── measurement.py
         ├── models.py
         ├── runner.py
         ├── scoring.py
@@ -158,6 +160,7 @@ The tradeoffs and rejected alternatives are recorded in [research.md](research.m
         └── reporting.py
     tests/
     ├── test_client.py
+    ├── test_measurement.py
     ├── test_models.py
     ├── test_scoring.py
     ├── test_runner.py
@@ -296,8 +299,9 @@ stage on top of these seams.
 
 On POSIX, non-interactive run-and-export preallocates the same UUIDv4/UTC identity later written into the
 ordinary Run Record. One explicitly selected local executable receives a closed request immediately
-before the complete run and, when that pre sample succeeds, another immediately afterward. It must
-echo the schema version, run ID,
+before the complete run and, only when that pre sample succeeds and the complete benchmark returns
+successfully, another immediately afterward. A runner exception produces no post sample and no
+export. The adapter must echo the schema version, run ID,
 phase, and ordered public model IDs and return only one closed categorical sample. The CLI derives
 only the contract-defined validity and hard-threshold boolean, validates one row per report model,
 atomically retains the ignored owner-only sidecar, and passes that same in-memory object into public
@@ -307,7 +311,16 @@ The adapter is not a shell extension or a source of raw telemetry for the report
 at 16 MiB; its file mode, identity, and content are checked at launch; and only a private non-writable
 snapshot of approved bytes executes. Inherited environment keys are allowlisted without
 credentials, stderr is discarded, execution is timed, stdout is capped while the child is running,
-and its isolated process tree receives bounded cleanup. Sampling failure is
+and a dedicated standard-library supervisor owns its isolated process tree. The supervisor passes
+the bounded standard streams through, observes leader exit without consuming its wait status,
+signals the adapter process group before reaping its leader, and never signals that numeric PGID
+afterward. Linux uses `waitid`, fails closed unless child-subreaper setup succeeds, then boundedly
+reaps adopted descendants. macOS uses `waitid` where available and a `kqueue` `NOTE_EXIT` fallback on
+older supported Python, retaining the same kill-before-reap order.
+The trusted sampler must remain synchronous and must not daemonize, create another session/process
+group, or deliberately escape the boundary. Snapshot storage is owner-only under the system
+temporary location; `TMPDIR` may select an owner-controlled, non-repository directory on a writable
+filesystem that permits execution when the default is `noexec`. Sampling failure is
 remembered while inference completes so the private report is still persisted; candidate creation
 then fails closed. A static exact-bound sidecar remains a valid input to the separate two-step
 `prepare-submission` flow.

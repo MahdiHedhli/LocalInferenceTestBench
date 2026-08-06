@@ -83,11 +83,20 @@ publish the run binding; or publish raw pressure, thermal, load, swap, memory, o
 **Decision**: Make non-interactive POSIX run-and-export use an explicitly selected local adapter. Allocate
 the ordinary run identity first, send it with the phase and ordered public model IDs to a synchronous
 `pre` invocation, run the benchmark with that identity, then perform the matching `post` invocation
-when `pre` succeeded.
+when `pre` succeeded and the benchmark returns successfully. A runner exception produces no post
+sample and no export.
 Require closed categorical responses to echo every binding field. Build and atomically retain the
 ordinary sidecar only from those two measured samples, and reuse that in-memory object for export.
 Cap the source at 16 MiB, execute a private non-writable snapshot of approved bytes, and keep Windows
-on the two-step exact-bound sidecar flow until equivalent process-tree containment exists.
+on the two-step exact-bound sidecar flow until equivalent process-tree containment exists. Place a
+dedicated standard-library supervisor between the CLI and approved snapshot so it can signal the
+adapter group before reaping the leader and never signal a potentially reused PGID afterward. On
+Linux, fail closed unless child-subreaper setup succeeds and boundedly reap adopted descendants;
+observe leader exit without reaping via `waitid` or, on older supported macOS Python, `kqueue`
+`NOTE_EXIT`. macOS retains the same kill-before-reap ordering. Require the sampler to stay synchronous and inside
+its inherited session/process group. Require an owner-only snapshot directory on a writable
+filesystem that permits execution, with an owner-controlled non-repository `TMPDIR` option for
+`noexec` defaults.
 
 **Rationale**: A random run ID created only after inference cannot appear in a pre-existing sidecar,
 so the former documented one-command flow required an external rewrite race. Merely replacing the ID
@@ -96,8 +105,10 @@ samples makes the flow usable without treating binding as provenance or inventin
 
 **Rejected**: Rewrite an arbitrary sidecar after the run; choose the report ID from a fully formed
 pre-existing sidecar; accept a free-form validity flag; invoke shell fragments; inherit credential
-variables; capture unbounded output; or let sampler failure prevent retention of an otherwise
-completed private benchmark report.
+variables; capture unbounded output; signal a process group after reaping its leader; enable a
+process-wide subreaper in the long-lived CLI; claim containment for a sampler that deliberately
+daemonizes or escapes; or let sampler failure prevent retention of an otherwise completed private
+benchmark report.
 
 ## Stage 3 decision: regenerate new candidates without rewriting legacy evidence
 

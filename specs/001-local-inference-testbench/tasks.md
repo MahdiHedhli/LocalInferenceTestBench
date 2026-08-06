@@ -451,12 +451,16 @@ categorical evidence and preserving the private report on optional sampler failu
 
 - [x] T076 Add regression tests for validated preallocated run identity, pre/run/post ordering,
   exact adapter binding, in-flight output bounds, executable safety, credential-free invocation,
-  approved-byte snapshot execution, POSIX process-tree cleanup, Windows fail-closed behavior,
-  atomic owner-only retention, and private-report preservation in `tests/test_runner.py`,
-  `tests/test_measurement.py`, and `tests/test_cli.py`
-- [x] T077 Implement the POSIX synchronous adapter bridge, approved-byte snapshot, bounded child
-  process tree, exact-bound evidence construction, atomic local retention, Windows two-step
-  fallback, and same-object export handoff in
-  `src/local_inference_test_bench/measurement.py`, `runner.py`, and `cli.py`
+  approved-byte snapshot execution, no-post behavior after a runner exception, Linux subreaper and
+  zombie cleanup, Darwin `kqueue` non-reaping fallback, kill-before-reap/PID-reuse safety, POSIX
+  process-tree cleanup, Windows fail-closed behavior, atomic owner-only retention, and private-report
+  preservation in `tests/test_runner.py`, `tests/test_measurement.py`, and `tests/test_cli.py`
+- [x] T077 Implement the POSIX synchronous adapter bridge, approved-byte snapshot, dedicated
+  standard-library supervisor, Linux child-subreaper descendant reaping, Darwin `kqueue` observer,
+  kill-before-reap process-group cleanup, exact-bound evidence construction, atomic local retention,
+  Windows two-step fallback, and same-object export handoff in
+  `src/local_inference_test_bench/measurement.py`, `_measurement_supervisor.py`, `runner.py`, and
+  `cli.py`
 - [x] T078 Document the single-command sampler and separate static-sidecar flow across the feature
-  specifications, CLI contract, README, and operator guidance
+  specifications, CLI contract, README, and operator guidance, including the synchronous no-escape
+  boundary and owner-controlled executable `TMPDIR` requirement

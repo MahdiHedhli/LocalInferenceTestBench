@@ -235,16 +235,28 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
   measurement-sampler executable. The runner MUST accept only a validated preallocated UUIDv4/UTC
   identity, and the CLI MUST pass that identity plus the ordered public model IDs to synchronous
   closed `pre` and `post` adapter calls around the complete run, with `post` required only after a
-  successful `pre` sample. Responses MUST echo the exact
+  successful `pre` sample and a successfully returned complete benchmark. A runner exception MUST
+  produce no `post` call and no export. Responses MUST echo the exact
   binding and contain only the existing categorical sample. Invocation MUST use no shell, an
   allowlisted credential-free environment, discarded stderr, a timeout, and an in-flight stdout
-  cap, isolated execution, and bounded process-tree cleanup. The executable MUST be at most 16 MiB,
+  cap, isolated execution, and bounded process-tree cleanup. A dedicated standard-library
+  supervisor MUST start the snapshot in its own process group, observe leader exit without reaping
+  it, signal that group before reaping its leader, and never signal the numeric PGID after that
+  leader has been reaped. Supported macOS Python versions MAY use `kqueue` when `waitid` is absent;
+  they MUST retain the same non-reaping ordering. On Linux the supervisor MUST fail
+  closed unless it can become a child subreaper and MUST boundedly reap adopted descendants. The
+  trusted sampler MUST remain synchronous and MUST NOT daemonize, create another session or process
+  group, or otherwise deliberately escape the supervisor boundary. The executable MUST be at most 16 MiB,
   regular, non-symlinked, executable, not group/world-writable, and identity/content rechecked at
-  launch. Only a private non-writable snapshot of the approved bytes MAY execute. Windows MUST fail
-  this option closed and retain the two-step exact-bound sidecar path. Failure MUST leave a completed
-  private report intact while blocking export; missing samples
-  and clean conditions MUST never be synthesized. Static exact-bound sidecars remain supported by
-  the separate two-step preparation command.
+  launch. Only a private non-writable snapshot of the approved bytes MAY execute. Its directory MUST
+  be owner-only and its backing filesystem MUST be writable and permit execution; an operator MAY
+  select an owner-controlled location through `TMPDIR`, but MUST NOT use a tracked or shared
+  repository directory. Windows MUST fail
+  this option closed and retain the two-step exact-bound sidecar path. A sampler or evidence failure
+  after the benchmark returns MUST leave the completed private report intact while blocking export;
+  a runner exception follows the existing no-completed-report path. Missing samples and clean
+  conditions MUST never be synthesized. Static exact-bound sidecars remain supported by the separate
+  two-step preparation command.
 
 ### Key Entities
 
@@ -282,10 +294,12 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - **SC-010**: Tests prove stale source-run evidence and a model-evidence list outside 1–1000 are
   rejected, the source run ID is absent from public bytes, and every browser-fetched leaderboard
   transport rejects invalid UTF-8, a byte-order mark, and duplicate JSON member names.
-- **SC-011**: Tests prove single-command measurement ordering is pre → run → post, adapter responses
-  are exact-bound and byte-bounded during execution, malformed identities fail before preflight,
-  credential values do not cross the process boundary, retained evidence is atomic and owner-only,
-  and sampler failure preserves the private report while producing no candidate.
+- **SC-011**: Tests prove single-command measurement ordering is pre → run → post only after a
+  successfully returned run, adapter responses are exact-bound and byte-bounded during execution,
+  malformed identities fail before preflight, credential values do not cross the process boundary,
+  Linux descendants are adopted and reaped without post-reap PGID signaling, macOS Python 3.11 and
+  3.12 observe exit without reaping, retained evidence is atomic and owner-only, and sampler failure
+  preserves a completed private report while producing no candidate.
 
 ## Assumptions
 

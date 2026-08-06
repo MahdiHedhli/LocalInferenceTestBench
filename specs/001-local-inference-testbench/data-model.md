@@ -332,15 +332,22 @@ second-resolution `created_at` before endpoint access. Its `pre` and `post` requ
 the sampler protocol version, source run ID, phase, and ordered public model IDs. A response echoes
 those fields and adds one exact-key categorical sample with `outcome` and `categories`.
 
-After a successful `pre`, the calls synchronously bracket the complete selected model run. Their samples are copied into one
-sidecar row per report model, while measurement validity and `hard_threshold_crossed` are derived
-from the closed category sets. The sidecar validator remains authoritative and no raw value or
-missing-sample default is introduced. The bound evidence is atomically retained locally and the same
-object is used for immediate preparation, so there is no mutable-file handoff between collection and
-export.
+After a successful `pre`, the calls synchronously bracket the complete selected model run only when
+that run returns successfully. A runner exception produces no `post` response object and no export.
+The samples are copied into one sidecar row per report model, while measurement validity and
+`hard_threshold_crossed` are derived from the closed category sets. The sidecar validator remains
+authoritative and no raw value or missing-sample default is introduced. The bound evidence is
+atomically retained locally and the same object is used for immediate preparation, so there is no
+mutable-file handoff between collection and export.
 The selected executable is capped at 16 MiB and only a private non-writable snapshot of its approved
-bytes executes. Windows retains the static exact-bound sidecar path until equivalent process-tree
-containment exists.
+bytes executes. A dedicated standard-library supervisor owns the adapter group, observes leader exit
+without reaping, signals the group before the reap, and never signals the PGID afterward. Linux
+requires child-subreaper setup and bounded adopted-descendant reaping; macOS uses `kqueue` when
+`waitid` is unavailable and retains the same kill-before-reap ordering. The trusted
+sampler is synchronous and does not daemonize, change session/process group, or deliberately escape.
+The snapshot directory must be owner-only and its backing filesystem writable and executable;
+`TMPDIR` may select an owner-controlled non-repository location. Windows retains the static exact-bound sidecar path
+until equivalent process-tree containment exists.
 
 ## Value object: Public measurement context
 

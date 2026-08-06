@@ -33,13 +33,20 @@ already-produced static sidecar is consumed by the separate `prepare-submission`
 The sampler argument is one POSIX executable path of at most 16 MiB, never shell syntax. Windows
 fails this option closed and retains the two-step exact-bound sidecar path. The CLI creates a UUIDv4/UTC run
 identity before endpoint access, invokes the executable for `pre` and, only after a successful pre
-sample and completed run, once for `post`, and sends
+sample and successfully returned complete run, once for `post`, and sends
 strict JSON containing only schema version, source run ID, phase, and ordered public model IDs. Each
 response must echo those fields and contain only a closed categorical sample. The adapter has a
 30-second timeout and a 256 KiB in-flight stdout cap; stderr is discarded and credential environment
 keys are absent. Its approved file identity is rechecked at launch, only a private non-writable
-snapshot of approved bytes executes, and its isolated process tree
-receives bounded cleanup. Any failure blocks export after preserving the private report.
+snapshot of approved bytes executes, and a dedicated standard-library supervisor owns its isolated
+process tree. The supervisor observes leader exit without reaping, signals the group before the
+reap, never signals the numeric PGID afterward, and on Linux requires child-subreaper setup and
+bounded adopted-descendant reaping. Older supported macOS Python uses a `kqueue` observer when
+`waitid` is unavailable.
+The sampler must stay synchronous and must not daemonize, change session/process group, or
+deliberately escape. The snapshot directory must be owner-only and its backing filesystem writable
+and executable; an owner-controlled non-repository `TMPDIR` can replace a `noexec` default. A runner exception produces no post sample or export. Any
+sampler failure blocks export after preserving a completed private report.
 
 ## Exit status
 

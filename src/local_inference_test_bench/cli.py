@@ -409,22 +409,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             except MeasurementError as error:
                 measurement_error = error
-        try:
-            report = (
-                runner.run(run_identity=run_identity)
-                if run_identity is not None
-                else runner.run()
-            )
-        finally:
-            if sampler is not None and run_identity is not None and pre_sample is not None:
-                try:
-                    post_sample = sampler.sample(
-                        phase="post",
-                        source_run_id=run_identity[0],
-                        model_ids=sampler_model_ids,
-                    )
-                except MeasurementError as error:
-                    measurement_error = error
+        report = (
+            runner.run(run_identity=run_identity)
+            if run_identity is not None
+            else runner.run()
+        )
+        if sampler is not None and run_identity is not None and pre_sample is not None:
+            try:
+                post_sample = sampler.sample(
+                    phase="post",
+                    source_run_id=run_identity[0],
+                    model_ids=sampler_model_ids,
+                )
+            except MeasurementError as error:
+                measurement_error = error
         path = write_report(report, args.artifacts_dir)
         print(f"run complete: {path.name}")
         run_status = 0 if report["validity"] != "invalid" else 1

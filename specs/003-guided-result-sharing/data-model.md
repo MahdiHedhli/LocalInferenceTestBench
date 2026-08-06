@@ -60,7 +60,8 @@ run binding stays local and is absent from both the saved candidate and network 
 
 For POSIX single-command run-and-export, the CLI preallocates the same UUIDv4/UTC identity later retained
 by the Run Record. It invokes one explicitly selected adapter for `pre`, runs the complete selected
-model set, then invokes it for `post` only when `pre` succeeded. Each request contains exactly `schema_version`,
+model set, then invokes it for `post` only when `pre` and the complete benchmark return successfully.
+A runner exception produces no post sample and no export. Each request contains exactly `schema_version`,
 `source_run_id`, `phase`, and the ordered `model_ids`. Each response echoes those four fields and adds
 exactly one `sample` with `outcome` and canonically ordered `categories`.
 
@@ -72,8 +73,14 @@ enters candidate preparation, eliminating a file-reload race.
 
 The exchange has no raw values, free text, process names, paths, inventory, or extra timestamps. The
 adapter is capped at 16 MiB and only a private non-writable snapshot of approved bytes executes.
-Windows uses the two-step exact-bound sidecar path. The process boundary is constrained by the CLI
-contract.
+A dedicated standard-library supervisor observes leader exit without reaping, signals the snapshot's
+process group before the reap, and never signals that numeric PGID afterward. Linux child-subreaper
+setup and bounded adopted-descendant reaping are mandatory; macOS uses `kqueue` when `waitid` is
+unavailable and retains kill-before-reap ordering. The trusted adapter must
+remain synchronous and must not daemonize, change its session/process group, or deliberately escape.
+The snapshot directory must be owner-only and its backing filesystem writable and executable;
+`TMPDIR` may select an owner-controlled non-repository location. Windows uses the two-step exact-bound sidecar path. The process boundary is
+constrained by the CLI contract.
 
 New candidate bytes use public schema `1.1`. The source report's UTC creation time is reduced to
 `YYYY-MM`; exact event time remains private. Accepted repository schema `1.0` files stay unchanged,

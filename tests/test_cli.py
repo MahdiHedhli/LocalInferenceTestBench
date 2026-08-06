@@ -17,6 +17,7 @@ from local_inference_test_bench.publishing import (  # noqa: E402
     PublicationIdentity,
     PublicationResult,
 )
+from local_inference_test_bench.runner import RunnerError  # noqa: E402
 from local_inference_test_bench.submissions import SubmissionError  # noqa: E402
 
 
@@ -219,6 +220,49 @@ class PostRunCliTests(unittest.TestCase):
             evidence, Path(".local/measurement-evidence.json")
         )
         self.assertIs(post_run.call_args.kwargs["measurement_evidence"], evidence)
+
+    def test_failed_run_skips_the_unused_post_sample(self) -> None:
+        run_id = VALID_RUN_ID
+        events: list[str] = []
+
+        class FailedRunner:
+            models = (SimpleNamespace(id="public-model"),)
+
+            def run(self, *, run_identity: tuple[str, str]) -> dict:
+                events.append("run")
+                raise RunnerError("preflight failed")
+
+        class Sampler:
+            def sample(self, *, phase: str, **_: object) -> dict:
+                events.append(phase)
+                return {"outcome": "within_thresholds", "categories": []}
+
+        errors = io.StringIO()
+        with (
+            mock.patch.object(cli, "_runner_from_args", return_value=FailedRunner()),
+            mock.patch.object(cli, "LocalMeasurementSampler", return_value=Sampler()),
+            mock.patch.object(
+                cli,
+                "new_run_identity",
+                return_value=(run_id, "2026-08-06T12:00:00Z"),
+            ),
+            mock.patch.object(cli, "write_report") as report_writer,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(errors),
+        ):
+            result = cli.main(
+                run_arguments(
+                    "--submission",
+                    "save",
+                    "--measurement-sampler",
+                    ".local/sampler",
+                )
+            )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(events, ["pre", "run"])
+        report_writer.assert_not_called()
+        self.assertIn("run error: preflight failed", errors.getvalue())
 
     def test_sampler_failure_preserves_private_report_and_blocks_export(self) -> None:
         run_id = VALID_RUN_ID

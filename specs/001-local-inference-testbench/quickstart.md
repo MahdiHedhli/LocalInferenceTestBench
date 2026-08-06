@@ -244,8 +244,11 @@ These scenarios should fail safely and are covered by automated tests:
 11. Request a non-interactive single-command save or PR without `--measurement-sampler`, or use an
     adapter that is linked, permission-broad, slow, oversized, malformed, raw-valued, or returns a
     different run/model/phase binding. The aggregate report remains private and export exits nonzero.
-    The single-command adapter is POSIX-only; Windows uses the exact-bound sidecar with
-    `prepare-submission`.
+    If benchmark execution itself raises, no post sample or export is attempted. The sampler must
+    remain synchronous and inside its inherited session/process group. Snapshot execution also
+    requires an owner-only directory on a writable filesystem that permits execution; use an
+    owner-controlled, non-repository `TMPDIR` if the system default is `noexec`. The single-command adapter is POSIX-only; Windows uses the
+    exact-bound sidecar with `prepare-submission`.
 
 ## Experiments are not part of this quickstart
 

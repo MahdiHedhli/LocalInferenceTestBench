@@ -28,9 +28,9 @@ report alone does not establish clean measurement conditions. If the ignored own
 sidecar is absent or invalid, preparation stops while the private report remains saved.
 
 For a non-interactive single-command POSIX run, also provide an explicitly trusted sampler executable.
-The CLI invokes it immediately before the run and, after a successful pre sample, immediately after
-the complete run, then writes its exact-bound closed output to the evidence path. Without that
-integration, use the two-step `prepare-submission` path;
+The CLI invokes it immediately before the run and, only after a successful pre sample and successful
+benchmark return, immediately after the run, then writes its exact-bound closed output to the
+evidence path. Without that integration, use the two-step `prepare-submission` path;
 the CLI will not race an external process or relabel a pre-existing sidecar after inference.
 
 For scripts or unattended runs, choose the action explicitly:
@@ -162,8 +162,9 @@ an argument string. It must be at most 16 MiB, regular, non-symlinked, and not w
 or world. Its approved file identity and content are rechecked before each launch, and the CLI
 executes only a private non-writable snapshot of those approved bytes. The CLI
 invokes `pre` with a 30-second bound immediately before the complete benchmark run and invokes
-`post` immediately afterward only if `pre` succeeded. The adapter receives one compact JSON
-object on standard input:
+`post` immediately afterward only if `pre` succeeded and the complete benchmark returned
+successfully. If benchmark execution raises, no post sample is collected and no export is attempted.
+The adapter receives one compact JSON object on standard input:
 
 ```json
 {
@@ -199,7 +200,22 @@ to `--measurement-evidence`. A model subset may then be selected with `--submiss
 
 The adapter receives an allowlisted environment without credential variables. Its stderr is
 discarded and its stdout is read through a 256 KiB in-flight cap, so diagnostics must remain local.
-It runs in an isolated process group and its process tree receives bounded cleanup on every exit.
+A dedicated standard-library supervisor starts the approved snapshot in an isolated process group
+while passing its standard input and output directly through the existing bounded channels. Cleanup
+observes leader exit without reaping it and signals the group before the reap, so the numeric PGID
+cannot be reused between those operations. It uses `waitid` where available and `kqueue` on older
+supported macOS Python. On Linux the supervisor fails closed unless it can become a child subreaper, then
+boundedly reaps adopted descendants after the direct child exits. macOS uses the same
+kill-before-reap ordering and relies on the host init process for orphan reaping.
+
+The sampler is a trusted synchronous adapter. It must not daemonize, call `setsid` or `setpgid`, or
+otherwise intentionally escape the inherited process group; portable POSIX process management
+cannot contain a process that deliberately leaves that boundary without a separate OS sandbox or
+cgroup. An uninterruptible kernel task may outlive any signal, so the bridge reports a bounded
+categorical cleanup failure rather than waiting indefinitely. Snapshot creation uses an owner-only
+directory under the system temporary location. If its filesystem is mounted `noexec`, set `TMPDIR`
+to an owner-controlled, non-repository directory on a writable filesystem that permits execution.
+
 Timeout, nonzero exit, malformed/duplicate JSON, extra fields, mismatched bindings, file replacement,
 or incomplete samples fail closed after the private run report is saved. The owner-only sidecar is
 bounded at 2 MiB so every valid 1–1000-row evidence document remains representable.

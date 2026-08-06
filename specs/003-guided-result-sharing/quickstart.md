@@ -60,8 +60,11 @@ litb run \
 The sampler is one explicitly trusted POSIX regular non-symlink executable of at most 16 MiB that
 produces synchronous closed categorical pre/post samples. It must not be group- or world-writable;
 only a private non-writable snapshot of its approved bytes executes. These single-command
-run-and-export examples require it. Windows and static sidecar flows use the separate
-`prepare-submission` command.
+run-and-export examples require it. It must stay synchronous and inside its inherited
+session/process group. If the system temporary location is `noexec`, select an owner-controlled,
+non-repository directory on a writable filesystem that permits execution with `TMPDIR`. A
+post sample is collected only after both pre sampling and benchmark execution return successfully.
+Windows and static sidecar flows use the separate `prepare-submission` command.
 
 Read the complete JSON and disclosure, then type `PUBLISH`. In a non-interactive environment, add
 `--submission-model <report-model-id> --confirm-public`. A successful command prints the PR URL. A

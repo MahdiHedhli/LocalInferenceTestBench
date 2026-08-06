@@ -59,6 +59,15 @@ CASE_IDS = (
 )
 
 
+def legacy_submission_fixture() -> tuple[Path, dict]:
+    submissions = Path(__file__).resolve().parents[1] / "site" / "data" / "submissions"
+    for path in sorted(submissions.glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("schema_version") == "1.0":
+            return path, payload
+    raise AssertionError("repository has no schema 1.0 submission fixture")
+
+
 def public_environment(*, cpu_model: str = "Example CPU") -> dict:
     return {
         "schema_version": "1.0",
@@ -948,12 +957,8 @@ class SubmissionTests(unittest.TestCase):
             prepare_submission(report, public_environment())
 
     def test_legacy_records_remain_accepted_but_new_candidates_require_1_1(self) -> None:
-        repository = Path(__file__).resolve().parents[1]
-        legacy_path = next(
-            iter(sorted((repository / "site" / "data" / "submissions").glob("*.json")))
-        )
+        legacy_path, legacy = legacy_submission_fixture()
         legacy_bytes = legacy_path.read_bytes()
-        legacy = json.loads(legacy_bytes)
 
         validate_accepted_submission(legacy)
         with self.assertRaisesRegex(SubmissionError, "regenerated"):
@@ -984,11 +989,7 @@ class SubmissionTests(unittest.TestCase):
         self.assertIsNone(legacy_entry["measurement_conditions"])
 
     def test_filtered_current_record_does_not_relabel_legacy_projection(self) -> None:
-        repository = Path(__file__).resolve().parents[1]
-        legacy_path = next(
-            iter(sorted((repository / "site" / "data" / "submissions").glob("*.json")))
-        )
-        legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
+        legacy_path, legacy = legacy_submission_fixture()
         current = prepare_submission(valid_report(), public_environment())
         legacy_identity = submissions_module._facet_dimensions(legacy)["model_identity"]
         self.assertNotEqual(
@@ -1016,9 +1017,7 @@ class SubmissionTests(unittest.TestCase):
 
     def test_legacy_subset_facet_uses_a_browser_valid_versioned_projection(self) -> None:
         repository = Path(__file__).resolve().parents[1]
-        legacy_path = next(
-            iter(sorted((repository / "site" / "data" / "submissions").glob("*.json")))
-        )
+        legacy_path, _ = legacy_submission_fixture()
         facet = FacetSelector(
             facet_id="legacy-coding-text",
             capabilities=frozenset({"coding"}),

@@ -153,13 +153,21 @@ change describes a different candidate result.
 Before public schema `1.1` preparation, obtain categorical pre/post measurement evidence from a
 compatible local sampler or adapter. On POSIX, non-interactive single-command save/PR uses
 `--measurement-sampler <executable>`. The CLI allocates the run ID before endpoint access, invokes
-the adapter synchronously before the run and, when that pre sample succeeds, after the complete run,
-verifies the echoed run/model/phase
+the adapter synchronously before the run and, only when that pre sample and the complete benchmark
+both return successfully, after the run. If benchmark execution raises, no post sample or public
+export is attempted. The CLI verifies the echoed run/model/phase
 binding, and atomically retains the closed sidecar at `--measurement-evidence`. The executable must
 be at most 16 MiB, regular, non-symlinked, and not group- or world-writable. Its approved bytes are
 copied into a private non-writable snapshot for execution while the source identity/content are
 rechecked for every launch. Adapter stdout is bounded strict JSON; stderr and inherited
-credentials are not captured or forwarded, and the isolated process tree receives bounded cleanup.
+credentials are not captured or forwarded. A dedicated standard-library supervisor keeps the
+snapshot and its descendants in one process group, kills that group before reaping its leader, and
+on Linux adopts and reaps descendants. The sampler must remain synchronous: it must not daemonize,
+call `setsid`/`setpgid`, or otherwise deliberately escape the process group. Snapshot creation uses
+an owner-only directory under the system temporary location; on a host where its filesystem is
+mounted `noexec`, set `TMPDIR` to an owner-controlled, non-repository directory on a writable
+filesystem that permits execution. Do not relocate snapshots into a tracked or shared repository
+directory.
 Windows uses the separate exact-bound sidecar plus `prepare-submission` until equivalent safe
 process-tree containment is available.
 

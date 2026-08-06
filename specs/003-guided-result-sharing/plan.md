@@ -52,7 +52,7 @@ state, or weakening of the existing contract
    operation outside the two-file append-only shape.
 8. For single-command non-interactive sharing, preallocate the ordinary UUIDv4/UTC run identity and
    invoke one explicitly selected adapter synchronously before the run and, after a successful pre
-   sample, after the complete run. Require
+   sample and successful benchmark return, after the complete run. Require
    exact run/model/phase echo, accept only the existing closed categorical sample, retain the bound
    sidecar atomically, and pass the same in-memory evidence to preparation.
 
@@ -76,14 +76,21 @@ The adapter bridge is POSIX-local-only and standard-library-only. It caps the se
 16 MiB, executes only a private non-writable snapshot of approved bytes without a shell, rejects
 group/world-writable sources, rechecks source identity/content at launch, strips credential
 environment keys, discards stderr, caps stdout while
-the child runs, and applies bounded cleanup to the isolated process tree. A sampler failure is remembered while
-the benchmark continues; the private report is written before export fails. Static exact-bound
+the child runs, and delegates the isolated process tree to a dedicated standard-library supervisor.
+That supervisor signals the adapter group before reaping its leader, never signals a reaped numeric
+PGID, and observes leader exit without consuming its wait status (`waitid`, or `kqueue` on older
+supported macOS Python). On Linux it fails closed unless it can adopt and boundedly reap descendants
+as a child subreaper. The sampler must remain synchronous and inside its inherited session/process group. The
+snapshot directory must be owner-only and its backing filesystem writable and executable; `TMPDIR`
+can select an owner-controlled non-repository location if the default is `noexec`. A post sample is attempted only after the pre sample and complete
+benchmark return successfully. A sampler failure is remembered while the benchmark continues; the private report is written before export fails. Static exact-bound
 sidecars remain supported by the separate two-step `prepare-submission` command.
 Windows fails the single-command option closed and uses that two-step path.
 
 ## Project structure
 
     src/local_inference_test_bench/
+    |-- _measurement_supervisor.py
     |-- cli.py
     |-- measurement.py
     |-- publishing.py

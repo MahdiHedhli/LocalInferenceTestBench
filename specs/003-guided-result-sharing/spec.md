@@ -158,16 +158,25 @@ generated leaderboard, fixed digest metadata, and fixed repository routing.
 - **FR-021**: On POSIX, non-interactive `run --submission save` and `run --submission pr` MUST require an
   explicitly selected local measurement-sampler executable. The CLI MUST allocate and validate the
   run identity before endpoint access, invoke the adapter synchronously immediately before the run
-  and, when the pre sample succeeds, immediately after the complete run, and require each closed
-  categorical response to echo the exact run ID, phase,
+  and, when the pre sample succeeds and the complete benchmark returns successfully, immediately
+  after the run. A runner exception MUST produce no post sample and no export. Each closed
+  categorical response MUST echo the exact run ID, phase,
   and ordered public model IDs. Invocation MUST use no shell, a credential-free allowlisted
   environment, discarded stderr, a bounded timeout, an in-flight stdout byte cap, isolated process
-  execution, and bounded process-tree cleanup. The adapter file MUST be at most 16 MiB, regular,
+  execution, and bounded process-tree cleanup. A dedicated standard-library supervisor MUST signal
+  the adapter process group before reaping its leader and MUST NOT signal the numeric PGID after the
+  reap. It MUST observe leader exit without reaping; supported macOS Python versions MAY use
+  `kqueue` when `waitid` is absent. On Linux it MUST fail closed unless child-subreaper setup succeeds and MUST boundedly reap
+  adopted descendants. The sampler MUST stay synchronous and MUST NOT daemonize, change its
+  session/process group, or otherwise deliberately escape. The adapter file MUST be at most 16 MiB, regular,
   non-symlinked, executable, not group/world-writable, and identity/content rechecked at launch.
-  Only a private non-writable snapshot of approved bytes MAY execute. Windows MUST fail this option
-  closed and retain two-step exact-bound preparation. Missing,
-  stale, malformed, oversized, timed-out, nonzero, or incomplete output MUST preserve the private
-  report and block export. The CLI MUST NOT synthesize a missing sample or replace the binding on
+  Only a private non-writable snapshot of approved bytes MAY execute. Its directory MUST be
+  owner-only and its backing filesystem writable and executable; `TMPDIR` MAY select an
+  owner-controlled non-repository location when the default is `noexec`. Windows MUST fail this option
+  closed and retain two-step exact-bound preparation. Missing, stale, malformed, oversized,
+  timed-out, nonzero, or incomplete sampler output after the benchmark returns MUST preserve the
+  completed private report and block export; a runner exception follows the existing
+  no-completed-report path. The CLI MUST NOT synthesize a missing sample or replace the binding on
   evidence that was not collected through this invocation.
 
 ### Key entities
@@ -195,9 +204,10 @@ generated leaderboard, fixed digest metadata, and fixed repository routing.
   inconsistent measurement sidecars issue zero GitHub mutations, omit the private binding from
   public bytes, and leave the private run report intact.
 - **SC-008**: A non-interactive standard run can save or prepare a PR in one command through an
-  explicitly selected sampler, with tests proving pre → run → post ordering, exact binding, bounded
-  capture, credential-free invocation, atomic owner-only evidence retention, and private-report
-  preservation on every sampler failure.
+  explicitly selected sampler, with tests proving pre → run → post ordering only after a successful
+  runner return, exact binding, bounded capture, credential-free invocation, Linux adopted-child
+  reaping without post-reap PGID signaling, non-reaping observation on macOS Python 3.11 and 3.12,
+  atomic owner-only evidence retention, and private-report preservation on every sampler failure.
 
 ## Assumptions
 

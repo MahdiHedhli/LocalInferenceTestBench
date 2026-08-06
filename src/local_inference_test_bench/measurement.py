@@ -8,9 +8,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -35,6 +35,7 @@ _MAX_ADAPTER_REQUEST_BYTES = 256 * 1024
 _MAX_ADAPTER_EXECUTABLE_BYTES = 16 * 1024 * 1024
 _ADAPTER_TIMEOUT_SECONDS = 30.0
 _CLEANUP_TIMEOUT_SECONDS = 2.0
+_SUPERVISOR_PATH = Path(__file__).with_name("_measurement_supervisor.py")
 _SAFE_ENVIRONMENT_KEYS = (
     "PATH",
     "HOME",
@@ -215,6 +216,7 @@ def _approved_adapter_snapshot(
     directory: Path | None = None
     snapshot: Path | None = None
     descriptor: int | None = None
+    operation_failed = False
     try:
         temporary = tempfile.TemporaryDirectory(prefix="litb-measurement-sampler-")
         directory = Path(temporary.name)
@@ -240,11 +242,16 @@ def _approved_adapter_snapshot(
             directory.chmod(0o500)
         yield snapshot, snapshot_identity
     except MeasurementError:
+        operation_failed = True
         raise
     except OSError as error:
+        operation_failed = True
         raise MeasurementError(
             "measurement sampler snapshot could not be created safely"
         ) from error
+    except BaseException:
+        operation_failed = True
+        raise
     finally:
         if descriptor is not None:
             try:
@@ -266,9 +273,10 @@ def _approved_adapter_snapshot(
             try:
                 temporary.cleanup()
             except OSError as error:
-                raise MeasurementError(
-                    "measurement sampler snapshot could not be removed safely"
-                ) from error
+                if not operation_failed:
+                    raise MeasurementError(
+                        "measurement sampler snapshot could not be removed safely"
+                    ) from error
 
 
 def _strict_adapter_response(raw: bytes) -> dict[str, Any]:
@@ -287,29 +295,31 @@ def _strict_adapter_response(raw: bytes) -> dict[str, Any]:
     return decoded
 
 
-def _terminate_adapter_tree(process: subprocess.Popen[bytes]) -> None:
-    """Best-effort bounded teardown of the isolated adapter process tree."""
+def _terminate_supervisor(process: subprocess.Popen[bytes]) -> None:
+    """Ask the trusted supervisor to clean its tree, then reap only it."""
 
-    pid = getattr(process, "pid", None)
-    if isinstance(pid, int) and pid > 0:
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            pass
-    else:
+    # The supervisor owns the adapter process group.  The parent must never
+    # signal that numeric group, particularly after either leader was reaped.
+    if process.returncode is not None:
+        return
+    try:
+        process.terminate()
+    except OSError:
+        pass
+    try:
+        process.wait(timeout=_CLEANUP_TIMEOUT_SECONDS + 0.5)
+        return
+    except OSError:
+        return
+    except subprocess.TimeoutExpired:
         try:
             process.kill()
         except OSError:
             pass
     try:
-        if process.poll() is None:
-            process.kill()
-    except OSError:
-        pass
-    try:
         process.wait(timeout=_CLEANUP_TIMEOUT_SECONDS)
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        return
 
 
 def _close_pipe_descriptor(pipe: Any) -> None:
@@ -338,7 +348,14 @@ def _run_adapter_bounded(
     _verify_adapter_identity(executable, expected_identity)
     try:
         process = subprocess.Popen(
-            [os.fspath(executable)],
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                os.fspath(_SUPERVISOR_PATH),
+                os.fspath(executable),
+                repr(_CLEANUP_TIMEOUT_SECONDS),
+            ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -403,7 +420,7 @@ def _run_adapter_bounded(
     except (OSError, RuntimeError) as error:
         raise MeasurementError("measurement sampler could not run safely") from error
     finally:
-        _terminate_adapter_tree(process)
+        _terminate_supervisor(process)
         if writer_started and writer.is_alive():
             _close_pipe_descriptor(process.stdin)
         if reader_started and reader.is_alive():

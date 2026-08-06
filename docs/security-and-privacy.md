@@ -70,18 +70,27 @@ timestamp, or free-text values. Missing, stale-run, oversized, or inconsistent e
 the exporter never maps execution-valid to clean.
 
 For non-interactive `litb run --submission save|pr` on POSIX, evidence is collected through an
-explicitly selected `--measurement-sampler` executable of at most 16 MiB. The CLI creates the private run identity before
-endpoint access and invokes the adapter immediately before the run, then immediately after the
-complete run only when the pre sample succeeded. Each response must be strict, closed categorical
-JSON and echo the exact run ID, phase, and
+explicitly selected `--measurement-sampler` executable of at most 16 MiB. The CLI creates the private
+run identity before endpoint access and invokes the adapter immediately before the run, then
+immediately after it only when the pre sample and complete benchmark both return successfully. A
+runner exception causes no post sample and no export. Each response must be strict, closed
+categorical JSON and echo the exact run ID, phase, and
 ordered public model IDs. The adapter runs without a shell, credential-bearing environment keys, or
 captured stderr; stdout is bounded while it executes. The executable must be a regular non-symlink
 and must not be group- or world-writable; its identity and content are rechecked at launch, and only
-a private non-writable snapshot of the approved bytes is executed. The isolated adapter process tree
-is torn down through bounded cleanup. Windows fails this single-command option closed and retains the
-two-step exact-bound sidecar path. A failure still leaves the
-private report but blocks candidate creation. The CLI never fills a missing sample or derives clean
-from run validity.
+a private non-writable snapshot of the approved bytes is executed. A dedicated, isolated
+standard-library supervisor owns that execution boundary. It terminates the adapter group before
+reaping its leader, avoiding a reused-PGID signal. Exit observation is non-reaping on every supported
+POSIX/Python combination (`waitid` where available and `kqueue` on older macOS Python), and on Linux
+the supervisor acts as a child subreaper and boundedly reaps adopted descendants. macOS uses the same
+kill-before-reap order and relies on the host init process for orphan reaping. Cleanup covers descendants that stay in the inherited process
+group; the trusted sampler must remain synchronous and must not daemonize, call `setsid`/`setpgid`, or
+deliberately escape it. Uninterruptible kernel tasks can only produce a bounded, categorical failure.
+The snapshot is created in an owner-only directory under the system temporary location; if that
+filesystem is `noexec`, set `TMPDIR` to an owner-controlled, non-repository directory on a writable
+filesystem that permits execution. Windows fails this single-command option closed and retains the two-step exact-bound
+sidecar path. A sampler failure after a completed run leaves the private report but blocks candidate
+creation. The CLI never fills a missing sample or derives clean from run validity.
 
 ## Leaderboard submission boundary
 

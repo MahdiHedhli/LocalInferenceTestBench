@@ -71,11 +71,10 @@ compatible local sampler or adapter. A valid benchmark report proves the executi
 worked; it does not prove the host was quiescent, so the exporter never invents a clean measurement
 state when evidence is absent. On POSIX, a single-command run-and-export flow can pass an explicitly
 trusted executable of at most 16 MiB with `--measurement-sampler`. The CLI allocates the private run
-ID before endpoint access,
-collects one synchronous categorical sample immediately before the run and, after a successful pre
-sample, one immediately after the complete run, requires
-the adapter to echo the exact run/model/phase binding, executes only a private approved-byte snapshot,
-then retains the closed result owner-only at
+ID before endpoint access, collects one synchronous categorical sample immediately before the run
+and, only when the pre sample and complete benchmark both return successfully, one immediately after
+the run. It requires the adapter to echo the exact run/model/phase binding, executes only a private
+approved-byte snapshot, then retains the closed result owner-only at
 `.local/measurement-evidence.json`. Raw readings and free text are never accepted.
 
 For two-step preparation, a compatible sampler may instead produce the ignored owner-only sidecar
@@ -104,8 +103,16 @@ litb run \
 
 Non-interactive `run --submission save` and `run --submission pr` require the sampler option; an
 already-produced static sidecar belongs to the two-step `prepare-submission` path. The adapter must
-be a regular non-symlink executable and must not be group- or world-writable. This exact process-tree
-containment is currently POSIX-only. Windows users retain the two-step `prepare-submission` path.
+be a regular non-symlink executable and must not be group- or world-writable. A dedicated
+standard-library supervisor keeps the approved snapshot and its descendants in one process group,
+terminates that group before reaping its leader, and on Linux adopts and reaps descendants so a
+conforming sampler does not leave zombies under a minimal PID 1. The sampler must stay synchronous
+and must not daemonize or deliberately escape that group; uninterruptible kernel tasks can only fail
+closed after a bounded wait. Snapshot creation uses an owner-only directory under the system
+temporary location; if its filesystem is mounted `noexec`, set `TMPDIR` to an owner-controlled,
+non-repository directory on a writable filesystem that permits execution. This cleanup boundary is
+currently POSIX-only. Windows users retain the two-step
+`prepare-submission` path.
 
 To automate the public contribution path, replace `save` with `pr`. The tool saves and displays the
 complete minimized record, runs the privacy and secret gates in an isolated clone, then creates a

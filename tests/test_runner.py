@@ -395,6 +395,14 @@ class RunnerTests(unittest.TestCase):
                 "-".join(("11111111", "2222", "4333", "8444", "555555555555")),
                 "2026-08-06T08:00:00-04:00",
             ),
+            (
+                "-".join(("AAAAAAAA", "BBBB", "4CCC", "8DDD", "EEEEEEEEEEEE")),
+                "2026-08-06T12:00:00Z",
+            ),
+            (
+                "-".join(("11111111", "2222", "4333", "8444", "555555555555")),
+                "2026-08-06T12:00:00.500000Z",
+            ),
         )
         with mock.patch.object(runner, "preflight") as preflight:
             for identity in invalid_identities:

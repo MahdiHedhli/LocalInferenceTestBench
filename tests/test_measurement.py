@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import json
 import io
+import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ from local_inference_test_bench.measurement import (  # noqa: E402
     build_measurement_evidence,
     write_measurement_evidence,
 )
+from local_inference_test_bench import _measurement_supervisor as supervisor  # noqa: E402
 from local_inference_test_bench.submissions import (  # noqa: E402
     load_measurement_evidence_file,
 )
@@ -51,17 +53,24 @@ class _FakeProcess:
     def __init__(self, stdout: bytes, *, returncode: int = 0) -> None:
         self.stdin = _InputSink()
         self.stdout = io.BytesIO(stdout)
-        self.returncode = returncode
+        self._configured_returncode = returncode
+        self.returncode: int | None = None
         self.killed = False
 
     def poll(self) -> int | None:
-        return self.returncode if not self.killed else -9
+        return self.returncode
 
     def wait(self, timeout: float | None = None) -> int:
-        return -9 if self.killed else self.returncode
+        if self.returncode is None:
+            self.returncode = -9 if self.killed else self._configured_returncode
+        return self.returncode
 
     def kill(self) -> None:
         self.killed = True
+        self.returncode = -9
+
+    def terminate(self) -> None:
+        self.kill()
 
 
 class _BlockingInput(_InputSink):
@@ -96,6 +105,287 @@ def adapter_response(phase: str, sample: dict | None = None) -> bytes:
             or {"outcome": "within_thresholds", "categories": []},
         }
     ).encode("utf-8")
+
+
+def _process_identity(pid: int) -> str | None:
+    """Return a reuse-resistant test identity without retaining host details."""
+
+    if sys.platform.startswith("linux"):
+        try:
+            stat_line = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        except OSError:
+            return None
+        closing = stat_line.rfind(")")
+        fields = stat_line[closing + 2 :].split()
+        return fields[19] if closing >= 0 and len(fields) > 19 else None
+    completed = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "lstart="],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    identity = completed.stdout.strip()
+    return identity or None
+
+
+def _test_process_has_marker(pid: int, marker: str) -> bool:
+    if sys.platform.startswith("linux"):
+        try:
+            command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ")
+        except OSError:
+            return False
+        return marker.encode("utf-8") in command
+    completed = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "command="],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return completed.returncode == 0 and marker in completed.stdout
+
+
+def _cleanup_test_process(pid: int | None, marker: str) -> None:
+    """Never signal a PID unless its current command retains our unique marker."""
+
+    if pid is None or not _test_process_has_marker(pid, marker):
+        return
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+def _wait_for_original_process_to_disappear(pid: int, identity: str | None) -> None:
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        current = _process_identity(pid)
+        if current is None or current != identity:
+            return
+        time.sleep(0.02)
+    raise AssertionError("measurement sampler descendant remained resident or zombie")
+
+
+@POSIX_SAMPLER_ONLY
+class MeasurementSupervisorTests(unittest.TestCase):
+    def test_darwin_kqueue_fallback_observes_exit_without_waiting(self) -> None:
+        process_id = 424242
+        event = mock.Mock(ident=process_id, flags=0, fflags=0x80000000)
+        registration = mock.Mock()
+        queue = mock.Mock()
+        queue.control.side_effect = (None, [event])
+        darwin_select = mock.Mock()
+        darwin_select.kqueue.return_value = queue
+        darwin_select.kevent.return_value = registration
+        darwin_select.KQ_FILTER_PROC = -5
+        darwin_select.KQ_EV_ADD = 0x1
+        darwin_select.KQ_EV_ENABLE = 0x4
+        darwin_select.KQ_EV_ONESHOT = 0x10
+        darwin_select.KQ_EV_ERROR = 0x4000
+        darwin_select.KQ_NOTE_EXIT = 0x80000000
+        supervisor._termination_requested = False
+
+        with (
+            mock.patch.object(supervisor.sys, "platform", "darwin"),
+            mock.patch.object(supervisor.os, "waitid", None, create=True),
+            mock.patch.object(supervisor, "select", darwin_select),
+        ):
+            observed = supervisor._observe_exit_without_reaping(process_id)
+
+        self.assertTrue(observed)
+        darwin_select.kevent.assert_called_once_with(
+            process_id,
+            filter=darwin_select.KQ_FILTER_PROC,
+            flags=(
+                darwin_select.KQ_EV_ADD
+                | darwin_select.KQ_EV_ENABLE
+                | darwin_select.KQ_EV_ONESHOT
+            ),
+            fflags=darwin_select.KQ_NOTE_EXIT,
+        )
+        self.assertEqual(
+            queue.control.call_args_list,
+            [mock.call([registration], 0, 0), mock.call(None, 1, 0.05)],
+        )
+        queue.close.assert_called_once_with()
+
+    @unittest.skipUnless(sys.platform == "darwin", "Darwin kqueue integration")
+    def test_real_darwin_kqueue_fallback_leaves_leader_unreaped(self) -> None:
+        process = subprocess.Popen(
+            ["/usr/bin/true"],
+            start_new_session=True,
+        )
+        supervisor._termination_requested = False
+        try:
+            with mock.patch.object(supervisor.os, "waitid", None, create=True):
+                observed = supervisor._observe_exit_without_reaping(process.pid)
+
+            self.assertTrue(observed)
+            self.assertIsNone(process.returncode)
+            with mock.patch.object(supervisor.signal, "signal"):
+                returncode, cleaned = supervisor._cleanup_adapter_group(
+                    process,
+                    cleanup_timeout=0.5,
+                    leader_exited=True,
+                )
+            self.assertEqual(returncode, 0)
+            self.assertTrue(cleaned)
+        finally:
+            if process.returncode is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except OSError:
+                    pass
+                process.wait(timeout=1.0)
+
+    def test_cleanup_signals_group_before_direct_wait_and_never_after(self) -> None:
+        events: list[str] = []
+
+        class Process:
+            pid = 424242
+            returncode: int | None = None
+
+            def wait(self, timeout: float | None = None) -> int:
+                events.append("direct-wait")
+                self.returncode = 0
+                return 0
+
+            def kill(self) -> None:
+                events.append("direct-kill")
+
+        process = Process()
+
+        def kill_group(pid: int, sent_signal: int) -> None:
+            self.assertEqual((pid, sent_signal), (process.pid, signal.SIGKILL))
+            events.append("group-kill")
+
+        def reap_group(pid: int, options: int) -> tuple[int, int]:
+            self.assertEqual((pid, options), (-process.pid, os.WNOHANG))
+            events.append("descendant-wait")
+            raise ChildProcessError
+
+        with (
+            mock.patch.object(supervisor.signal, "signal"),
+            mock.patch.object(supervisor.os, "killpg", side_effect=kill_group),
+            mock.patch.object(supervisor.os, "waitpid", side_effect=reap_group),
+        ):
+            returncode, cleaned = supervisor._cleanup_adapter_group(
+                process,  # type: ignore[arg-type]
+                cleanup_timeout=0.2,
+            )
+
+        self.assertEqual(returncode, 0)
+        self.assertTrue(cleaned)
+        self.assertEqual(events, ["group-kill", "direct-wait", "descendant-wait"])
+
+    def test_cleanup_never_signals_an_already_reaped_group_leader(self) -> None:
+        process = mock.Mock(pid=424242, returncode=0)
+        with mock.patch.object(supervisor.os, "killpg") as kill_group:
+            returncode, cleaned = supervisor._cleanup_adapter_group(
+                process,
+                cleanup_timeout=0.2,
+            )
+
+        self.assertEqual(returncode, 0)
+        self.assertFalse(cleaned)
+        kill_group.assert_not_called()
+        process.wait.assert_not_called()
+
+    def test_linux_subreaper_failure_is_fail_closed_before_spawn(self) -> None:
+        with (
+            mock.patch.object(supervisor, "_prepare_signal_state"),
+            mock.patch.object(
+                supervisor,
+                "_enable_linux_subreaper",
+                side_effect=supervisor._SupervisorError("unavailable"),
+            ),
+            mock.patch.object(supervisor.subprocess, "Popen") as spawn,
+        ):
+            exit_code = supervisor._main(
+                ["_measurement_supervisor.py", "/private/snapshot", "0.2"]
+            )
+
+        self.assertEqual(exit_code, supervisor._SUPERVISOR_FAILURE)
+        spawn.assert_not_called()
+
+    def test_linux_prctl_error_is_categorical(self) -> None:
+        fake_libc = mock.Mock()
+        fake_libc.prctl.return_value = -1
+        with (
+            mock.patch.object(supervisor.sys, "platform", "linux"),
+            mock.patch.object(supervisor.ctypes, "CDLL", return_value=fake_libc),
+            mock.patch.object(supervisor.ctypes, "get_errno", return_value=1),
+            self.assertRaises(supervisor._SupervisorError),
+        ):
+            supervisor._enable_linux_subreaper()
+
+        fake_libc.prctl.assert_called_once_with(
+            supervisor._PR_SET_CHILD_SUBREAPER,
+            1,
+            0,
+            0,
+            0,
+        )
+
+    def test_term_during_spawn_assignment_still_cleans_the_bound_process(self) -> None:
+        process = mock.Mock(pid=424242, returncode=None)
+
+        def spawn(*_args: object, **_kwargs: object) -> mock.Mock:
+            supervisor._request_termination(signal.SIGTERM, None)
+            return process
+
+        with (
+            mock.patch.object(supervisor, "_prepare_signal_state"),
+            mock.patch.object(supervisor, "_enable_linux_subreaper"),
+            mock.patch.object(supervisor.subprocess, "Popen", side_effect=spawn),
+            mock.patch.object(
+                supervisor,
+                "_cleanup_adapter_group",
+                return_value=(-9, True),
+            ) as cleanup,
+        ):
+            exit_code = supervisor._main(
+                ["_measurement_supervisor.py", "/private/snapshot", "0.2"]
+            )
+
+        self.assertEqual(exit_code, supervisor._SUPERVISOR_TERMINATED)
+        cleanup.assert_called_once_with(
+            process,
+            cleanup_timeout=0.2,
+            leader_exited=False,
+        )
+
+    def test_term_at_exit_observation_still_runs_cleanup(self) -> None:
+        process = mock.Mock(pid=424242, returncode=None)
+
+        def observe(*_args: object) -> bool:
+            supervisor._request_termination(signal.SIGTERM, None)
+            return True
+
+        with (
+            mock.patch.object(supervisor, "_prepare_signal_state"),
+            mock.patch.object(supervisor, "_enable_linux_subreaper"),
+            mock.patch.object(supervisor.subprocess, "Popen", return_value=process),
+            mock.patch.object(
+                supervisor,
+                "_observe_exit_without_reaping",
+                side_effect=observe,
+            ),
+            mock.patch.object(
+                supervisor,
+                "_cleanup_adapter_group",
+                return_value=(0, True),
+            ) as cleanup,
+        ):
+            exit_code = supervisor._main(
+                ["_measurement_supervisor.py", "/private/snapshot", "0.2"]
+            )
+
+        self.assertEqual(exit_code, supervisor._SUPERVISOR_TERMINATED)
+        cleanup.assert_called_once_with(
+            process,
+            cleanup_timeout=0.2,
+            leader_exited=True,
+        )
 
 
 class MeasurementSamplerTests(unittest.TestCase):
@@ -133,6 +423,11 @@ class MeasurementSamplerTests(unittest.TestCase):
         self.assertEqual(runner.call_args.kwargs["env"], {"PATH": "/safe/bin"})
         self.assertNotIn("shell", runner.call_args.kwargs)
         self.assertIs(runner.call_args.kwargs["stderr"], subprocess.DEVNULL)
+        self.assertTrue(runner.call_args.kwargs["start_new_session"])
+        command = runner.call_args.args[0]
+        self.assertEqual(command[:3], [sys.executable, "-I", "-S"])
+        self.assertTrue(command[3].endswith("_measurement_supervisor.py"))
+        self.assertNotIn(os.fspath(executable), command[:4])
 
     @POSIX_SAMPLER_ONLY
     def test_real_approved_snapshot_completes_the_closed_protocol(self) -> None:
@@ -391,7 +686,8 @@ class MeasurementSamplerTests(unittest.TestCase):
             snapshot_paths: list[Path] = []
 
             def spawn(argv: list[str], **_: object) -> _FakeProcess:
-                snapshot = Path(argv[0])
+                self.assertEqual(argv[:3], [sys.executable, "-I", "-S"])
+                snapshot = Path(argv[4])
                 snapshot_paths.append(snapshot)
                 self.assertNotEqual(snapshot, executable)
                 self.assertEqual(snapshot.read_text(encoding="utf-8"), "placeholder")
@@ -473,6 +769,41 @@ class MeasurementSamplerTests(unittest.TestCase):
 
         self.assertTrue(process.killed)
 
+    @POSIX_SAMPLER_ONLY
+    def test_snapshot_cleanup_does_not_mask_the_primary_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = self._executable(Path(temporary))
+            sampler = LocalMeasurementSampler(executable)
+            real_snapshot_directory = tempfile.TemporaryDirectory()
+
+            class CleanupFailure:
+                name = real_snapshot_directory.name
+
+                @staticmethod
+                def cleanup() -> None:
+                    real_snapshot_directory.cleanup()
+                    raise OSError("cleanup failed")
+
+            with (
+                mock.patch(
+                    "local_inference_test_bench.measurement.tempfile.TemporaryDirectory",
+                    return_value=CleanupFailure(),
+                ),
+                mock.patch.object(
+                    subprocess,
+                    "Popen",
+                    side_effect=OSError("spawn failed"),
+                ),
+                self.assertRaisesRegex(MeasurementError, "could not run safely") as raised,
+            ):
+                sampler.sample(
+                    phase="pre",
+                    source_run_id=RUN_ID,
+                    model_ids=MODEL_IDS,
+                )
+
+        self.assertNotIn("removed safely", str(raised.exception))
+
     @unittest.skipUnless(os.name == "nt", "Windows-specific fail-closed behavior")
     def test_windows_single_command_sampler_requires_safe_process_containment(self) -> None:
         with self.assertRaisesRegex(MeasurementError, "POSIX process containment"):
@@ -484,6 +815,61 @@ class MeasurementSamplerTests(unittest.TestCase):
             root = Path(temporary)
             executable = root / "tree-sampler"
             pid_file = root / "descendant.pid"
+            marker = f"litb-timeout-descendant-{os.getpid()}-{time.monotonic_ns()}"
+            descendant_pid: int | None = None
+            executable.write_text(
+                "\n".join(
+                    (
+                        f"#!{sys.executable}",
+                        "import json, subprocess, sys, time",
+                        "from pathlib import Path",
+                        "request = json.load(sys.stdin)",
+                        "child = subprocess.Popen([sys.executable, '-c', "
+                        f"'import time; time.sleep(60)', {marker!r}])",
+                        f"Path({os.fspath(pid_file)!r}).write_text(str(child.pid), encoding='utf-8')",
+                        "json.dump({**request, 'sample': {"
+                        "'outcome': 'within_thresholds', 'categories': []}}, sys.stdout)",
+                        "sys.stdout.flush()",
+                        "time.sleep(60)",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            executable.chmod(0o700)
+
+            try:
+                with (
+                    mock.patch(
+                        "local_inference_test_bench.measurement._ADAPTER_TIMEOUT_SECONDS",
+                        1.0,
+                    ),
+                    mock.patch(
+                        "local_inference_test_bench.measurement._CLEANUP_TIMEOUT_SECONDS",
+                        0.5,
+                    ),
+                    self.assertRaisesRegex(MeasurementError, "timed out"),
+                ):
+                    LocalMeasurementSampler(executable).sample(
+                        phase="pre",
+                        source_run_id=RUN_ID,
+                        model_ids=MODEL_IDS,
+                    )
+
+                descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+                identity = _process_identity(descendant_pid)
+                _wait_for_original_process_to_disappear(descendant_pid, identity)
+            finally:
+                _cleanup_test_process(descendant_pid, marker)
+
+    @POSIX_SAMPLER_ONLY
+    def test_successful_adapter_reaps_a_background_descendant(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "tree-sampler"
+            pid_file = root / "descendant.pid"
+            marker = f"litb-success-descendant-{os.getpid()}-{time.monotonic_ns()}"
+            descendant_pid: int | None = None
             executable.write_text(
                 "\n".join(
                     (
@@ -492,11 +878,12 @@ class MeasurementSamplerTests(unittest.TestCase):
                         "from pathlib import Path",
                         "request = json.load(sys.stdin)",
                         "child = subprocess.Popen([sys.executable, '-c', "
-                        "'import time; time.sleep(60)'])",
+                        f"'import time; time.sleep(60)', {marker!r}], "
+                        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+                        "stderr=subprocess.DEVNULL)",
                         f"Path({os.fspath(pid_file)!r}).write_text(str(child.pid), encoding='utf-8')",
                         "json.dump({**request, 'sample': {"
                         "'outcome': 'within_thresholds', 'categories': []}}, sys.stdout)",
-                        "sys.stdout.flush()",
                     )
                 )
                 + "\n",
@@ -504,33 +891,21 @@ class MeasurementSamplerTests(unittest.TestCase):
             )
             executable.chmod(0o700)
 
-            with (
-                mock.patch(
-                    "local_inference_test_bench.measurement._ADAPTER_TIMEOUT_SECONDS",
-                    1.0,
-                ),
-                mock.patch(
-                    "local_inference_test_bench.measurement._CLEANUP_TIMEOUT_SECONDS",
-                    0.5,
-                ),
-                self.assertRaisesRegex(MeasurementError, "timed out"),
-            ):
-                LocalMeasurementSampler(executable).sample(
+            try:
+                sample = LocalMeasurementSampler(executable).sample(
                     phase="pre",
                     source_run_id=RUN_ID,
                     model_ids=MODEL_IDS,
                 )
-
-            descendant_pid = int(pid_file.read_text(encoding="utf-8"))
-            deadline = time.monotonic() + 2.0
-            while time.monotonic() < deadline:
-                try:
-                    os.kill(descendant_pid, 0)
-                except ProcessLookupError:
-                    break
-                time.sleep(0.02)
-            else:
-                self.fail("measurement sampler descendant remained resident")
+                self.assertEqual(
+                    sample,
+                    {"outcome": "within_thresholds", "categories": []},
+                )
+                descendant_pid = int(pid_file.read_text(encoding="utf-8"))
+                identity = _process_identity(descendant_pid)
+                _wait_for_original_process_to_disappear(descendant_pid, identity)
+            finally:
+                _cleanup_test_process(descendant_pid, marker)
 
     @POSIX_SAMPLER_ONLY
     def test_maximum_cardinality_fits_adapter_and_sidecar_bounds(self) -> None:
