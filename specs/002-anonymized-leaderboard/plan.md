@@ -63,6 +63,13 @@ the constitution already allows.
 - Use one record per model so entries remain easy to validate, deduplicate, rank, and review.
 - Compute the submission identifier from canonical minimized content. The identifier detects content
   changes and exact duplicates but is not proof that a benchmark was run.
+- Present every accepted entry as self-reported and unverified in the site chrome and leaderboard
+  header. Describe the identifier as content-integrity evidence only, never provenance or
+  attestation.
+- Treat `model.display_name`, `model.source`, and `model.precision` as reviewer-visible descriptors,
+  not arbitrary text: use 160, 240, and 80 ASCII-character limits and reject descriptor-grade UUID,
+  serial/inventory-label, network, URL, and email shapes plus explicit automated-reviewer and
+  instruction-injection shapes in both implementations. Do not change hardware descriptor behavior.
 - Rank semantic results first and exact-format results second. Equal scores share a rank. Hardware and
   runtime context make speed interpretable, but performance still does not change the quality rank.
 - Round retained aggregate performance values to reduce unnecessary precision. Do not retain source
@@ -133,3 +140,14 @@ network data, device identifier, endpoint, timestamp, contributor, or free-form 
 on common task outcomes. The browser does not receive a repository token and does not upload selected
 files. Deployment reads only accepted `main` content. These choices preserve all five constitutional
 principles.
+
+## Post-release hardening sequence
+
+Stage 1 tightens the three model descriptor labels and corrects public framing without changing what
+is measured or bumping the schema version. Python and browser validators remain parallel
+implementations and receive the same adversarial fixture corpus. Existing hardware descriptor
+acceptance is a regression boundary, not part of this change.
+
+The non-authoritative plausibility annotation and config-cell corroboration count remain later,
+explicitly pending work. They will surface caution and repetition without dropping a record or
+claiming that distinct content hashes prove independent operators.

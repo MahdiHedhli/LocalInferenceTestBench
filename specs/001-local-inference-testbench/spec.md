@@ -72,6 +72,10 @@ provenance, suite/settings identity, case outcomes, and validity notes but no ra
    mislabeled as context-window exhaustion.
 3. **Given** an invalid or disturbed run, **When** it is summarized, **Then** its validity is visible and
    it cannot be marked promotion-ready.
+4. **Given** a retained model display name, source label, or precision label containing
+   reviewer-directed instructions, non-ASCII homoglyphs, or descriptor-like private identifiers,
+   **When** that evidence is projected into a public leaderboard submission, **Then** public
+   validation fails before the value can enter the review surface.
 
 ---
 
@@ -101,6 +105,9 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - The declared context window is smaller than the requested full-profile target.
 - A custom local denylist is absent, empty, contains regex metacharacters, or is accidentally staged.
 - A generated artifact is force-added despite the ignore rules.
+- A model display name, source label, or precision label contains a URL, email address, network
+  value, UUID, serial/inventory label, reviewer mention, role-prefix instruction, bidi control, or
+  non-ASCII homoglyph.
 - Secret-scanning software is unavailable locally or a GitHub security setting cannot be enabled.
 
 ## Requirements
@@ -137,6 +144,15 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - **FR-017**: The repository MUST retain the license notice for copied Spec Kit materials.
 - **FR-018**: Tests MUST prove scoring, data minimization, endpoint safety, manifest validation, and
   identifier detection behavior.
+- **FR-019**: When retained model evidence is projected into a public leaderboard submission, its
+  `display_name`, `source`, and `precision` labels MUST be ASCII-only, bounded to 160, 240, and 80
+  characters respectively, and MUST reject the descriptor-grade UUID, serial/inventory-label,
+  network, URL, and email patterns plus explicit automated-reviewer or instruction-injection shapes.
+  This public-projection rule applies only to these three model labels and MUST NOT change local
+  manifest/run-record acceptance or hardware-descriptor behavior.
+- **FR-020**: Any public presentation of benchmark results MUST state that the measurements are
+  self-reported and unverified. A content digest may be described only as evidence of content
+  integrity; it MUST NOT be described as provenance, attestation, or proof that a run occurred.
 
 ### Key Entities
 
@@ -173,3 +189,6 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - Python 3.11 or newer is available; the reference implementation uses only the standard library.
 - Real run artifacts remain local by default; publication is a deliberate sanitized export workflow.
 - The first public release favors clear, auditable cases over a large benchmark corpus.
+- Image and video generation are outside this test bench because their evaluation generally requires
+  similarity models or human preference and a different runtime stack. A separate generation bench
+  may reuse this project's submission, privacy, and validity pipeline.

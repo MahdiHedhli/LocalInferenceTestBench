@@ -34,6 +34,9 @@ without a framework or third-party service.
    a link to the submission process.
 4. **Given** a string that contains HTML syntax, **When** a row is rendered, **Then** the browser
    treats it as text rather than markup.
+5. **Given** any accepted entry, **When** it is presented in the site chrome or leaderboard header,
+   **Then** the site says it is self-reported and unverified and explains that its hash establishes
+   content integrity rather than provenance or proof that the run occurred.
 
 ---
 
@@ -65,6 +68,9 @@ case fails without echoing sensitive values.
    **Then** validation and preview happen in the browser without uploading the file.
 5. **Given** a prepared record, **When** the visitor continues, **Then** the site directs them to a
    reviewed pull-request workflow and explains that their GitHub account remains visible there.
+6. **Given** a model display name, source label, or precision label containing reviewer-directed
+   instructions, non-ASCII homoglyphs, or descriptor-like identifiers, **When** export or browser
+   validation runs, **Then** the record is rejected before it can reach a public review surface.
 
 ---
 
@@ -88,7 +94,8 @@ dataset and that Pages deployment runs only from the default branch.
 3. **Given** accepted records on the default branch, **When** the Pages workflow runs, **Then** it
    builds the public dataset and deploys only the static site directory.
 4. **Given** a community result, **When** it appears on the site, **Then** the site calls it
-   self-reported, schema-validated, maintainer-reviewed, and not independently reproduced.
+   self-reported and unverified and does not imply that schema checks, repository review, or its
+   digest attest that a benchmark run occurred.
 
 ### Edge cases
 
@@ -99,6 +106,9 @@ dataset and that Pages deployment runs only from the default branch.
 - Usage data is absent, so throughput is unavailable.
 - A contributor renames a submission file or changes content without updating its digest.
 - A model name contains markup, control characters, a local identifier, or an unusually long value.
+- A model display name, source label, or precision label contains a URL, email address, network
+  value, UUID, serial/inventory label, reviewer mention, role-prefix instruction, bidi control, or
+  non-ASCII homoglyph.
 - A submission uses a supported schema but an unsupported suite or profile.
 - The dataset is empty, missing, malformed, or unavailable to the browser.
 - A visitor has JavaScript disabled or uses a narrow screen.
@@ -117,7 +127,9 @@ dataset and that Pages deployment runs only from the default branch.
   score, with dense ties.
 - **FR-005**: Latency and throughput MUST be displayed with their hardware, runtime, and any reported
   runtime-configuration context and MUST NOT affect quality rank.
-- **FR-006**: The site MUST identify records as self-reported and not independently reproduced.
+- **FR-006**: The site chrome and leaderboard header MUST identify every record as self-reported and
+  unverified. They MUST state that hashes establish content integrity, not provenance, attestation,
+  truthfulness, or proof that a benchmark run occurred.
 - **FR-007**: The site MUST render all record strings through text-only DOM operations.
 - **FR-008**: The site MUST provide a useful empty and load-error state.
 - **FR-009**: The command-line tool MUST export one minimized record for each selected eligible model
@@ -158,6 +170,14 @@ dataset and that Pages deployment runs only from the default branch.
   context-window tokens, concurrent requests, speculative-decoding state, and offload mode. Export
   MUST preserve it when supplied, MUST preserve legacy records without it, and MUST NOT infer a
   default. Known context-window tokens MUST not be smaller than the generation output budget.
+- **FR-026**: `model.display_name`, `model.source`, and `model.precision` MUST be ASCII-only, bounded
+  to 160, 240, and 80 characters respectively, and rejected when they match the descriptor-grade
+  UUID, serial/inventory-label, network, URL, or email rules or explicit automated-reviewer and
+  instruction-injection shapes. Python and browser validation MUST enforce this in lockstep. The
+  hardware descriptor's existing character and validation behavior MUST remain unchanged.
+- **FR-027**: Submission IDs MUST continue to prove canonical-content integrity and exact duplicate
+  identity only. No documentation, user interface, pull-request text, or automated review may call
+  the digest an attestation or evidence of benchmark provenance.
 
 ### Key entities
 
@@ -185,12 +205,16 @@ dataset and that Pages deployment runs only from the default branch.
   artifact upload, and deployment jobs successfully.
 - **SC-007**: The live site loads the empty or populated leaderboard and exposes a working submission
   path without sending the selected JSON to a remote service.
+- **SC-008**: Shared adversarial fixtures prove that Python and browser validators reject the same
+  overlong, descriptor-like, non-ASCII, bidi, homoglyph, and reviewer-injection-shaped model labels
+  while existing hardware descriptor fixtures remain unchanged.
 
 ## Assumptions
 
 - GitHub Pages remains a static host. It does not receive benchmark writes directly.
-- Community entries are honest self-reports. Schema validation and review do not prove that a model
-  produced the submitted measurements.
+- Community entries are self-reported and unverified. Schema validation, repository review, and
+  canonical hashes do not prove that a model produced the submitted measurements or that a run
+  occurred.
 - Hardware combinations and performance values can weakly characterize a private setup. Contributors
   review the minimized JSON and choose whether to publish those details.
 - The first leaderboard accepts only the current standard suite. Future suite versions require an

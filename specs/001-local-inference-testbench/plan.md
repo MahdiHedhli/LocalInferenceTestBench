@@ -82,6 +82,14 @@ unknown fields so raw-content additions require an explicit specification and go
   and local runtime selectors.
 - Use the same public-safety scanner in local hooks, the public-check wrapper, tests, and continuous
   integration. Secret-scanner unavailability is a failed gate, not a warning, for publication paths.
+- At the leaderboard-export boundary, treat `display_name`, `source`, and `precision` as compact
+  public descriptors rather than general text. Limit them to 160, 240, and 80 ASCII characters,
+  reuse descriptor-grade rejection for UUIDs, serial/inventory labels, network values, URLs, and
+  email addresses, and add explicit automated-reviewer/instruction-injection rejection. Keep local
+  manifest/run-record acceptance and hardware descriptor validation unchanged.
+- Frame every published result as self-reported and unverified. Canonical hashes establish that the
+  accepted content has not changed; they do not establish who produced it, that inference occurred,
+  or that the measurements are truthful.
 
 The tradeoffs and rejected alternatives are recorded in [research.md](research.md).
 
@@ -190,3 +198,17 @@ The data model, schemas, and quickstart preserve every pre-design gate:
   particular accelerator, model family, or runtime product.
 
 No complexity exception is required.
+
+## Post-release Stage 1 hardening
+
+The first adversarial-hardening increment changes no benchmark measurement and introduces no new
+schema version. It narrows the three model provenance labels at the public leaderboard boundary in
+both validation implementations, encodes portable ASCII and length limits in the current JSON
+contracts, adds behavioral parity and injection-shaped regression fixtures, and updates the static
+site and repository documentation with the
+integrity-versus-provenance boundary. Local manifest/run-record acceptance and existing hardware
+descriptor validation remain behaviorally unchanged.
+
+Image and video generation remain outside this implementation plan. Their similarity- or
+preference-based scoring and separate runtime stack belong in a distinct benchmark, although that
+project may reuse the submission, privacy, and validity pipeline defined here.

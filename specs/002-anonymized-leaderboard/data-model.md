@@ -79,7 +79,7 @@ Purpose: hold the smallest accepted evidence for one model artifact and one stan
 | hardware | object | Hardware portion of the validated public descriptor |
 | runtime | object | Runtime portion of the validated public descriptor |
 | runtime_configuration | object, optional | Closed configuration when the descriptor supplied it |
-| model | object | Public provenance with exactly one revision or digest |
+| model | object | Bounded public provenance with exactly one revision or digest |
 | settings | object | Bounded generation controls, with an optional closed reasoning-effort enum |
 | cases | list | The five standard cases in suite order |
 | metrics | object | Counts plus rounded mean latency and weighted throughput |
@@ -99,7 +99,21 @@ that would reveal which models were tested together.
 ### Value object: Public model provenance
 
 Contains `display_name`, `source`, exactly one of `revision` or `digest`, `precision`, and
-`declared_context_tokens`. It does not contain the source report's local `model_id`.
+`declared_context_tokens`. `display_name` is 1–160 ASCII characters, `source` is 1–240 ASCII
+characters, and `precision` is 1–80 ASCII characters. These three fields reject the same
+descriptor-grade UUID, serial/inventory-label, network, URL, and email shapes used to prevent
+private inventory from entering public descriptors, plus reviewer mentions, role prefixes, and
+imperative instruction-injection shapes. ASCII-only validation prevents bidi and homoglyph ambiguity
+in reviewer-visible model labels. `source` is a public registry/publisher/artifact-source label, not
+a URL. The object does not contain the source report's local `model_id`.
+
+These tighter rules apply only to the three model fields. The public environment descriptor keeps
+its existing character set and validation behavior.
+
+The portable JSON Schema records the field-specific ASCII and length boundaries. The Python and
+browser validators are authoritative for descriptor-grade and reviewer-pattern rejection that is
+not duplicated as a non-portable schema regular expression. Shared behavioral fixtures exercise the
+same corpus through both implementations.
 
 ### Value object: Public case result
 
@@ -118,6 +132,10 @@ spellings such as `1`, `1.0`, and negative zero therefore produce the same canon
 those fields. Integer-only fields still reject decimal spellings. One-decimal performance and memory
 precision is enforced by the Python validator rather than a fractional JSON Schema `multipleOf`,
 which is not portable across binary floating-point validators.
+
+The submission identifier establishes integrity of the canonical public content and identifies exact
+duplicates. It does not establish provenance, attest that a benchmark ran, verify who performed it,
+or validate the truth of self-reported measurements.
 
 ## Entity: Leaderboard dataset
 
@@ -149,3 +167,7 @@ inside a tie. Latency and throughput never affect rank.
 
 Accepted files are append-only. A correction creates a new candidate and uses normal review instead
 of silently replacing published evidence.
+
+Every public presentation labels the records self-reported and unverified. Repository validation can
+establish contract conformance, privacy-boundary compliance, and content integrity; none of those
+controls turns an anonymous report into attested benchmark provenance.
