@@ -191,6 +191,26 @@ from another compatible sampler remains valid for two-step `prepare-submission`;
 is deliberately nonquiescent and is never a clean-run template. The binding ID is validation-only
 and absent from public JSON.
 
+### Optional execution-failure issue draft
+
+Interactive `litb run` commands default to `--failure-report ask`. If a closed runtime, transport,
+or harness compatibility category prevents normal execution, the CLI may show a minimized draft.
+This path is not triggered by a bad score, refusal, reasoning-only output, context/output limit,
+measurement validity, configuration/safety/authentication/rate-limit problem, or publication error.
+
+Read the entire draft and disclosure. It contains only code-controlled versions and categories,
+coarse platform/hardware classes, and the runtime name/version/backend when the existing owner-only
+public descriptor validates. It omits model identity, content, exception text, logs, endpoints,
+credentials, paths, host inventory, IDs, and precise time.
+
+Opening the prefilled URL sends exactly the displayed fields to GitHub immediately and may place
+them in browser or network history. Type one ASCII `y` or `Y` only if that transmission is
+acceptable; surrounding ASCII whitespace is ignored, while words and Unicode lookalikes decline.
+The browser opens the fixed project issue composer; no issue becomes public until you review it and
+click GitHub Submit. Enter, EOF, Ctrl-C while the optional prompt is active, any other answer,
+`--failure-report none`, and non-interactive runs make no browser call. Browser failure never changes
+the original benchmark status.
+
 ## 7. Compare results responsibly
 
 - Compare semantic and envelope behavior using the same suite and generation settings.

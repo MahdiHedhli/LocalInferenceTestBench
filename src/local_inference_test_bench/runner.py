@@ -15,8 +15,36 @@ from .reporting import new_run_identity
 from .scoring import classify_termination, score_case
 
 
+_KNOWN_CLIENT_CATEGORIES = frozenset(
+    {
+        "authentication",
+        "context_window",
+        "http_error",
+        "invalid_json",
+        "network_error",
+        "protocol_error",
+        "rate_limited",
+        "request_rejected",
+        "response_too_large",
+        "server_error",
+        "timeout",
+    }
+)
+
+
 class RunnerError(RuntimeError):
     """A sanitized preflight or orchestration failure."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        diagnostic_category: str | None = None,
+        diagnostic_phase: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.diagnostic_category = diagnostic_category
+        self.diagnostic_phase = diagnostic_phase
 
 
 class CompatibleClient(Protocol):
@@ -230,7 +258,17 @@ class BenchmarkRunner:
         try:
             advertised = self.client.list_models()
         except ClientError as error:
-            raise RunnerError(f"runtime preflight failed ({error.category})") from error
+            category = (
+                error.category
+                if isinstance(error.category, str)
+                and error.category in _KNOWN_CLIENT_CATEGORIES
+                else "other"
+            )
+            raise RunnerError(
+                f"runtime preflight failed ({category})",
+                diagnostic_category=category,
+                diagnostic_phase="preflight",
+            ) from None
         if not advertised:
             return {model.id: "metadata_unavailable" for model in self.models}
         statuses: dict[str, str] = {}

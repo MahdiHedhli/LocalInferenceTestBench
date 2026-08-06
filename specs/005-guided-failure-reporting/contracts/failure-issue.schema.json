@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "failure-issue.schema.json",
+  "title": "Identifier-minimized benchmark execution failure draft",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_type",
+    "litb_version",
+    "command",
+    "profile",
+    "suite_version",
+    "phase",
+    "failure_category",
+    "os_family",
+    "python_series",
+    "architecture",
+    "hardware_class",
+    "runtime"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "report_type": { "const": "benchmark_execution_failure" },
+    "litb_version": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 32,
+      "pattern": "^[0-9]+[.][0-9]+[.][0-9]+(?:[-+][A-Za-z0-9.-]+)?$"
+    },
+    "command": { "const": "run" },
+    "profile": { "enum": ["smoke", "standard"] },
+    "suite_version": { "const": "1.0" },
+    "phase": { "enum": ["preflight", "case_execution", "runner_internal"] },
+    "failure_category": {
+      "enum": [
+        "timeout",
+        "network_error",
+        "server_error",
+        "http_error",
+        "request_rejected",
+        "invalid_json",
+        "protocol_error",
+        "response_too_large",
+        "internal_harness_error"
+      ]
+    },
+    "os_family": { "enum": ["macos", "linux", "windows", "other"] },
+    "python_series": {
+      "enum": ["python_3_11", "python_3_12", "python_3_13", "python_3_14", "other"]
+    },
+    "architecture": { "enum": ["arm64", "x86_64", "other"] },
+    "hardware_class": {
+      "enum": [
+        "cpu_only",
+        "shared_accelerator",
+        "discrete_accelerator",
+        "mixed_accelerator",
+        "unknown"
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "backend"],
+      "properties": {
+        "name": { "$ref": "#/$defs/runtimeText" },
+        "version": { "$ref": "#/$defs/runtimeText" },
+        "backend": { "$ref": "#/$defs/runtimeText" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "phase": { "const": "runner_internal" }
+        },
+        "required": ["phase"]
+      },
+      "then": {
+        "properties": {
+          "failure_category": { "const": "internal_harness_error" }
+        }
+      },
+      "else": {
+        "properties": {
+          "failure_category": {
+            "not": { "const": "internal_harness_error" }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "runtimeText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[ -~]+$",
+      "description": "Canonical validation additionally requires descriptor-grade public text; unknown is the fallback."
+    }
+  }
+}

@@ -279,6 +279,15 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
   fixed corroboration and performance-spread summaries, and compute representative-only Wilson rank
   bands plus caution-only plausibility. Anonymous repeats MUST NOT narrow quality intervals, and
   plausibility/performance MUST NOT gate, drop, verify, or rank a record.
+- **FR-037**: An interactive `litb run` MAY offer an identifier-minimized GitHub issue draft only for
+  a closed actionable execution or compatibility category. The complete draft and the fact that
+  opening its prefilled URL transmits it to GitHub MUST be disclosed before exact consent. The draft
+  MUST exclude model content and identity, exception text, logs, endpoints, credentials, paths,
+  inventory, run/submission IDs, and precise time; it MAY include coarse platform enums and the
+  runtime name/version/backend only from a validated public descriptor. Decline, EOF, non-TTY,
+  disabled, and ineligible paths MUST perform no browser call. The browser handoff MUST use the
+  fixed repository composer without a token, API mutation, shell, local persistence, or automatic
+  submission, and MUST never change the benchmark exit status.
 
 ### Key Entities
 
@@ -287,6 +296,8 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - **Run Record**: Aggregate-only results for one model/configuration under a declared validity state.
 - **Case Result**: Semantic, format, latency, usage, termination, and categorical routing outcomes.
 - **Publication Finding**: Redacted file, line, category, and remediation hint from the privacy gate.
+- **Failure Issue Draft**: Closed, in-memory categorical execution diagnostic shown before an
+  optional fixed-origin browser handoff.
 - **Experiment Note**: Optional specialized evaluation with prerequisites, risks, and exit criteria.
 
 ## Success Criteria
@@ -322,6 +333,9 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
   Linux descendants are adopted and reaped without post-reap PGID signaling, macOS Python 3.11 and
   3.12 observe exit without reaping, retained evidence is atomic and owner-only, and sampler failure
   preserves a completed private report while producing no candidate.
+- **SC-012**: Tests prove failure-issue detection never treats model quality as a harness failure,
+  every transmitted field exactly matches the previewed closed draft, and no browser call occurs
+  without an eligible interactive failure plus exact consent.
 
 ## Assumptions
 

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import traceback
 import unittest
 from unittest import mock
 
@@ -134,6 +135,50 @@ class StepClock:
 
 
 class RunnerTests(unittest.TestCase):
+    def test_preflight_client_error_retains_only_structured_diagnostic(self) -> None:
+        private_marker = "private-transport-detail"
+
+        class FailedPreflightClient(StubClient):
+            def list_models(self):
+                raise ClientError("timeout", private_marker)
+
+        runner = BenchmarkRunner(
+            FailedPreflightClient([]),
+            manifest(),
+            profile="smoke",
+        )
+
+        with self.assertRaises(RunnerError) as raised:
+            runner.preflight()
+
+        self.assertEqual(raised.exception.diagnostic_category, "timeout")
+        self.assertEqual(raised.exception.diagnostic_phase, "preflight")
+        self.assertNotIn(private_marker, str(raised.exception))
+        self.assertNotIn(
+            private_marker,
+            "".join(traceback.format_exception(raised.exception)),
+        )
+
+    def test_preflight_unknown_client_category_is_normalized_and_ineligible(self) -> None:
+        private_category = "private-category-from-adapter"
+
+        class FailedPreflightClient(StubClient):
+            def list_models(self):
+                raise ClientError(private_category, "private transport detail")
+
+        runner = BenchmarkRunner(
+            FailedPreflightClient([]),
+            manifest(),
+            profile="smoke",
+        )
+
+        with self.assertRaises(RunnerError) as raised:
+            runner.preflight()
+
+        self.assertEqual(raised.exception.diagnostic_category, "other")
+        self.assertEqual(raised.exception.diagnostic_phase, "preflight")
+        self.assertNotIn(private_category, str(raised.exception))
+
     def test_runtime_identifier_collection_never_resolves_fqdn(self) -> None:
         reporting_module._runtime_identifiers.cache_clear()
         self.addCleanup(reporting_module._runtime_identifiers.cache_clear)
