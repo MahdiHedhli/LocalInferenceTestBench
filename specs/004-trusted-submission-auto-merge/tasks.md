@@ -10,5 +10,6 @@
 - [x] T006 Add workflow contract tests for pwn-request, local-caller provenance, explicit secret
   mapping, race, and bypass boundaries.
 - [x] T007 Update contributor, submission, and security documentation.
-- [ ] T008 Complete the remaining hosted end-to-end validation of the direct reusable-workflow path,
-  review and merge the change, and confirm repository auto-merge remains configured.
+- [ ] T008 After this base-controlled workflow revision reaches `main`, complete the hosted
+  end-to-end validation of the direct reusable-workflow path on the existing benchmark submission,
+  and confirm repository auto-merge remains configured.

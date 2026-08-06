@@ -463,13 +463,15 @@ class RequestMarkerTests(unittest.TestCase):
             "body": "Codex unavailable; CodeRabbit rate limit reached; P1 text is advisory.",
             "user": {"id": 99, "login": "review-service[bot]", "type": "Bot"},
         }
-        validate_request_marker(
+        marker = validate_request_marker(
             [[advisory, request_comment()]],
             pull_request_number=42,
             marker_comment_id=8001,
             base_sha=BASE_SHA,
             head_sha=HEAD_SHA,
         )
+        self.assertEqual(marker.comment_id, 8001)
+        self.assertEqual(marker.head_sha, HEAD_SHA)
 
 
 class ReviewStateTests(unittest.TestCase):

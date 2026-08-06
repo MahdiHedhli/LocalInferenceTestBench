@@ -20,6 +20,13 @@ class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
         workflow = BOUNDARY_PATH.read_text(encoding="utf-8")
 
         self.assertIn("pull_request_target:", workflow)
+        self.assertIn(
+            "concurrency:\n"
+            "  group: trusted-benchmark-boundary-"
+            "${{ github.repository_id }}-${{ github.event.pull_request.number }}\n"
+            "  cancel-in-progress: false",
+            workflow,
+        )
         self.assertIn("change boundary passed: benchmark-only", workflow)
         self.assertIn('classification="benchmark-manual"', workflow)
         self.assertIn('^litb/submission-([0-9a-f]{64})$', workflow)
