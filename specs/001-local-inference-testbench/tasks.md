@@ -345,9 +345,9 @@ independent publication-gate test.
 
 ## Task Summary
 
-- Total tasks: 70
-- Completed: 69
-- Intentionally open: 1 (hosted deployment verification)
+- Total tasks: 78
+- Completed: 77
+- Intentionally open: 1 (hosted Stage 3 deployment verification)
 - Setup: 7
 - Foundation: 7
 - User Story 1: 11
@@ -356,6 +356,9 @@ independent publication-gate test.
 - User Story 4: 5
 - Polish and release gates: 8
 - Post-release Stage 1 adversarial hardening: 5
+- Post-release Stage 2 scale hardening: 6
+- Post-release Stage 3 public evidence schema: 5
+- Exact-bound single-command measurement integration: 3
 - Suggested MVP: Phases 1–3
 - Suggested public-release minimum: Phases 1–4
 
@@ -438,3 +441,22 @@ cases or adding capability views.
   categorical-validity, punctuation-boundary, and unchanged-monolith regressions
 - [ ] T075 Run the complete cross-platform, deterministic-build, browser-safety, privacy, history,
   secret, exact-boundary, and hosted Pages validation before merging Stage 3
+
+---
+
+## Phase 11: Exact-bound single-command measurement integration
+
+**Purpose**: Remove the run-ID rewrite race from scripted save/PR while retaining real pre/post
+categorical evidence and preserving the private report on optional sampler failure.
+
+- [x] T076 Add regression tests for validated preallocated run identity, pre/run/post ordering,
+  exact adapter binding, in-flight output bounds, executable safety, credential-free invocation,
+  approved-byte snapshot execution, POSIX process-tree cleanup, Windows fail-closed behavior,
+  atomic owner-only retention, and private-report preservation in `tests/test_runner.py`,
+  `tests/test_measurement.py`, and `tests/test_cli.py`
+- [x] T077 Implement the POSIX synchronous adapter bridge, approved-byte snapshot, bounded child
+  process tree, exact-bound evidence construction, atomic local retention, Windows two-step
+  fallback, and same-object export handoff in
+  `src/local_inference_test_bench/measurement.py`, `runner.py`, and `cli.py`
+- [x] T078 Document the single-command sampler and separate static-sidecar flow across the feature
+  specifications, CLI contract, README, and operator guidance

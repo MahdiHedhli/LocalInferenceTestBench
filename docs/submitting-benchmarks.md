@@ -27,6 +27,12 @@ Save and PR preparation require `.local/measurement-evidence.json` by default. A
 report alone does not establish clean measurement conditions. If the ignored owner-only categorical
 sidecar is absent or invalid, preparation stops while the private report remains saved.
 
+For a non-interactive single-command POSIX run, also provide an explicitly trusted sampler executable.
+The CLI invokes it immediately before the run and, after a successful pre sample, immediately after
+the complete run, then writes its exact-bound closed output to the evidence path. Without that
+integration, use the two-step `prepare-submission` path;
+the CLI will not race an external process or relabel a pre-existing sidecar after inference.
+
 For scripts or unattended runs, choose the action explicitly:
 
 ```sh
@@ -34,6 +40,7 @@ For scripts or unattended runs, choose the action explicitly:
 litb run <run-options> \
   --profile standard \
   --hardware .local/hardware.json \
+  --measurement-sampler .local/bin/measurement-sampler \
   --measurement-evidence .local/measurement-evidence.json \
   --submission save
 
@@ -41,6 +48,7 @@ litb run <run-options> \
 litb run <run-options> \
   --profile standard \
   --hardware .local/hardware.json \
+  --measurement-sampler .local/bin/measurement-sampler \
   --measurement-evidence .local/measurement-evidence.json \
   --submission pr \
   --submission-model <report-model-id> \
@@ -146,6 +154,59 @@ non-symlinked. Missing, mismatched, unsafe, or inconsistent evidence blocks cand
 is never uploaded. The top-level source binding is used only for local validation and is stripped
 with the report's run ID from every public candidate. The normative shape is
 [`measurement-evidence.schema.json`](../specs/002-anonymized-leaderboard/contracts/measurement-evidence.schema.json).
+
+### Single-command sampler adapter
+
+`--measurement-sampler` names one explicitly trusted local POSIX executable, not a shell command or
+an argument string. It must be at most 16 MiB, regular, non-symlinked, and not writable by the group
+or world. Its approved file identity and content are rechecked before each launch, and the CLI
+executes only a private non-writable snapshot of those approved bytes. The CLI
+invokes `pre` with a 30-second bound immediately before the complete benchmark run and invokes
+`post` immediately afterward only if `pre` succeeded. The adapter receives one compact JSON
+object on standard input:
+
+```json
+{
+  "model_ids": ["public-model-id"],
+  "phase": "pre",
+  "schema_version": "1.0",
+  "source_run_id": "<generated-run-id>"
+}
+```
+
+It must synchronously sample the current host conditions and return exactly this closed shape on
+standard output, echoing all binding fields unchanged:
+
+```json
+{
+  "model_ids": ["public-model-id"],
+  "phase": "pre",
+  "sample": {
+    "categories": [],
+    "outcome": "within_thresholds"
+  },
+  "schema_version": "1.0",
+  "source_run_id": "<generated-run-id>"
+}
+```
+
+The `post` call uses the same shape with `phase` set to `post`. The adapter must not cache an older
+sample. Only `within_thresholds` or `threshold_crossed` and the five closed category names are legal;
+there is no field for raw readings, device inventory, process names, paths, timestamps, or free text.
+The CLI derives the public validity and hard-threshold boolean from those two samples, creates one
+row per report model, validates the ordinary sidecar contract, and atomically writes it owner-only
+to `--measurement-evidence`. A model subset may then be selected with `--submission-model`.
+
+The adapter receives an allowlisted environment without credential variables. Its stderr is
+discarded and its stdout is read through a 256 KiB in-flight cap, so diagnostics must remain local.
+It runs in an isolated process group and its process tree receives bounded cleanup on every exit.
+Timeout, nonzero exit, malformed/duplicate JSON, extra fields, mismatched bindings, file replacement,
+or incomplete samples fail closed after the private run report is saved. The owner-only sidecar is
+bounded at 2 MiB so every valid 1–1000-row evidence document remains representable.
+
+The single-command sampler fails closed on Windows until equivalent process-tree containment is
+available. Windows users can run the benchmark privately, create an exact-bound categorical sidecar
+with a compatible local collector, and use the separate `prepare-submission` command.
 
 ## Manual path: prepare the minimized record
 

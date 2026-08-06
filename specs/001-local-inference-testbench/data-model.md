@@ -325,6 +325,23 @@ preparation rather than causing `clean` to be synthesized. The run binding never
 candidate. No raw pressure, temperature, load, swap, memory, process, host, or inventory value is a
 legal sidecar field.
 
+## Value object: Local sampler exchange
+
+The optional POSIX single-command integration preallocates the Run Record's UUIDv4 `run_id` and UTC
+second-resolution `created_at` before endpoint access. Its `pre` and `post` requests contain exactly
+the sampler protocol version, source run ID, phase, and ordered public model IDs. A response echoes
+those fields and adds one exact-key categorical sample with `outcome` and `categories`.
+
+After a successful `pre`, the calls synchronously bracket the complete selected model run. Their samples are copied into one
+sidecar row per report model, while measurement validity and `hard_threshold_crossed` are derived
+from the closed category sets. The sidecar validator remains authoritative and no raw value or
+missing-sample default is introduced. The bound evidence is atomically retained locally and the same
+object is used for immediate preparation, so there is no mutable-file handoff between collection and
+export.
+The selected executable is capped at 16 MiB and only a private non-writable snapshot of its approved
+bytes executes. Windows retains the static exact-bound sidecar path until equivalent process-tree
+containment exists.
+
 ## Value object: Public measurement context
 
 A schema `1.1` public submission carries the sidecar's `validity` and closed

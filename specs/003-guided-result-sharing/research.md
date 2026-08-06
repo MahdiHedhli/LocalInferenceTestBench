@@ -78,6 +78,27 @@ raw host instrumentation from expanding the retained run record or public candid
 run evidence; accept an unbounded model list; collect general machine inventory in the core runner;
 publish the run binding; or publish raw pressure, thermal, load, swap, memory, or process values.
 
+## Post-review decision: integrate an exact-bound synchronous sampler
+
+**Decision**: Make non-interactive POSIX run-and-export use an explicitly selected local adapter. Allocate
+the ordinary run identity first, send it with the phase and ordered public model IDs to a synchronous
+`pre` invocation, run the benchmark with that identity, then perform the matching `post` invocation
+when `pre` succeeded.
+Require closed categorical responses to echo every binding field. Build and atomically retain the
+ordinary sidecar only from those two measured samples, and reuse that in-memory object for export.
+Cap the source at 16 MiB, execute a private non-writable snapshot of approved bytes, and keep Windows
+on the two-step exact-bound sidecar flow until equivalent process-tree containment exists.
+
+**Rationale**: A random run ID created only after inference cannot appear in a pre-existing sidecar,
+so the former documented one-command flow required an external rewrite race. Merely replacing the ID
+afterward would make stale measurements look bound. Supplying the ID to the collector before both
+samples makes the flow usable without treating binding as provenance or inventing host conditions.
+
+**Rejected**: Rewrite an arbitrary sidecar after the run; choose the report ID from a fully formed
+pre-existing sidecar; accept a free-form validity flag; invoke shell fragments; inherit credential
+variables; capture unbounded output; or let sampler failure prevent retention of an otherwise
+completed private benchmark report.
+
 ## Stage 3 decision: regenerate new candidates without rewriting legacy evidence
 
 **Decision**: Newly prepared candidates use public schema `1.1`. Accepted schema `1.0` repository

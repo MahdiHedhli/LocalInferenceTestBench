@@ -35,6 +35,7 @@ litb run \
   --endpoint http://127.0.0.1:1234/v1 \
   --profile standard \
   --hardware .local/hardware.json \
+  --measurement-sampler .local/bin/measurement-sampler \
   --measurement-evidence .local/measurement-evidence.json \
   --submission save
 ```
@@ -51,9 +52,16 @@ litb run \
   --model <one-public-manifest-id> \
   --profile standard \
   --hardware .local/hardware.json \
+  --measurement-sampler .local/bin/measurement-sampler \
   --measurement-evidence .local/measurement-evidence.json \
   --submission pr
 ```
+
+The sampler is one explicitly trusted POSIX regular non-symlink executable of at most 16 MiB that
+produces synchronous closed categorical pre/post samples. It must not be group- or world-writable;
+only a private non-writable snapshot of its approved bytes executes. These single-command
+run-and-export examples require it. Windows and static sidecar flows use the separate
+`prepare-submission` command.
 
 Read the complete JSON and disclosure, then type `PUBLISH`. In a non-interactive environment, add
 `--submission-model <report-model-id> --confirm-public`. A successful command prints the PR URL. A

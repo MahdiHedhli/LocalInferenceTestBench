@@ -56,6 +56,25 @@ process names, inventory, or free text. It must be regular, ignored, owner-only,
 Missing, stale-run, oversized, or mismatched evidence prevents a candidate from being created. The
 run binding stays local and is absent from both the saved candidate and network payload.
 
+## Local sampler exchange
+
+For POSIX single-command run-and-export, the CLI preallocates the same UUIDv4/UTC identity later retained
+by the Run Record. It invokes one explicitly selected adapter for `pre`, runs the complete selected
+model set, then invokes it for `post` only when `pre` succeeded. Each request contains exactly `schema_version`,
+`source_run_id`, `phase`, and the ordered `model_ids`. Each response echoes those four fields and adds
+exactly one `sample` with `outcome` and canonically ordered `categories`.
+
+The two samples describe the envelope around the complete run and are repeated into one evidence row
+per report model. Public validity and `hard_threshold_crossed` are deterministic derivations from
+those categories, not additional measurements. No missing sample is defaulted. The validated
+sidecar is atomically retained at the ignored owner-only evidence path and the same in-memory object
+enters candidate preparation, eliminating a file-reload race.
+
+The exchange has no raw values, free text, process names, paths, inventory, or extra timestamps. The
+adapter is capped at 16 MiB and only a private non-writable snapshot of approved bytes executes.
+Windows uses the two-step exact-bound sidecar path. The process boundary is constrained by the CLI
+contract.
+
 New candidate bytes use public schema `1.1`. The source report's UTC creation time is reduced to
 `YYYY-MM`; exact event time remains private. Accepted repository schema `1.0` files stay unchanged,
 but a newly proposed or previously saved `1.0` candidate is not publishable through this lane and

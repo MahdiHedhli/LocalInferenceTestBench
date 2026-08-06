@@ -9,13 +9,19 @@ import sys
 from typing import Sequence
 
 from .client import ClientError, OpenAICompatibleClient
+from .measurement import (
+    LocalMeasurementSampler,
+    MeasurementError,
+    build_measurement_evidence,
+    write_measurement_evidence,
+)
 from .models import ManifestError, load_manifest
 from .publishing import (
     PublicationError,
     publication_preflight,
     publish_submission,
 )
-from .reporting import ReportError, write_report
+from .reporting import ReportError, new_run_identity, write_report
 from .runner import BenchmarkRunner, RunnerError
 from .safety import SafetyError, load_credential
 from .suites import resolve_public_suite
@@ -99,6 +105,14 @@ def build_parser() -> argparse.ArgumentParser:
                 help=(
                     "owner-only ignored categorical quiescence evidence "
                     "(default: .local/measurement-evidence.json)"
+                ),
+            )
+            command.add_argument(
+                "--measurement-sampler",
+                type=Path,
+                help=(
+                    "trusted POSIX executable adapter (maximum 16 MiB) that synchronously "
+                    "returns closed pre/post categorical evidence for this run"
                 ),
             )
             command.add_argument(
@@ -264,10 +278,12 @@ def _save_post_run_submissions(
     *,
     action: str,
     interactive: bool,
+    measurement_evidence: dict | None = None,
 ) -> int:
     hardware_path = _prompt_hardware_path(args.hardware) if interactive else args.hardware
     descriptor = load_public_environment_file(hardware_path)
-    measurement_evidence = load_measurement_evidence_file(args.measurement_evidence)
+    if measurement_evidence is None:
+        measurement_evidence = load_measurement_evidence_file(args.measurement_evidence)
     selected_models = (args.submission_model,) if args.submission_model else None
     submissions = prepare_submissions(
         report,
@@ -358,6 +374,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 interactive=_interactive_terminal(),
                 confirm_public=args.confirm_public,
             )
+        sampler_requested = (
+            args.command == "run" and args.measurement_sampler is not None
+        )
+        sampler = None
+        measurement_error: MeasurementError | None = None
+        run_identity = new_run_identity() if sampler_requested else None
+        if sampler_requested:
+            try:
+                sampler = LocalMeasurementSampler(args.measurement_sampler)
+            except MeasurementError as error:
+                measurement_error = error
         runner = _runner_from_args(args)
         if args.command == "check":
             statuses = runner.preflight()
@@ -368,7 +395,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{unavailable} metadata unavailable"
             )
             return 0
-        report = runner.run()
+        sampler_model_ids = (
+            tuple(model.id for model in runner.models) if sampler is not None else ()
+        )
+        pre_sample = None
+        post_sample = None
+        if sampler is not None and run_identity is not None:
+            try:
+                pre_sample = sampler.sample(
+                    phase="pre",
+                    source_run_id=run_identity[0],
+                    model_ids=sampler_model_ids,
+                )
+            except MeasurementError as error:
+                measurement_error = error
+        try:
+            report = (
+                runner.run(run_identity=run_identity)
+                if run_identity is not None
+                else runner.run()
+            )
+        finally:
+            if sampler is not None and run_identity is not None and pre_sample is not None:
+                try:
+                    post_sample = sampler.sample(
+                        phase="post",
+                        source_run_id=run_identity[0],
+                        model_ids=sampler_model_ids,
+                    )
+                except MeasurementError as error:
+                    measurement_error = error
         path = write_report(report, args.artifacts_dir)
         print(f"run complete: {path.name}")
         run_status = 0 if report["validity"] != "invalid" else 1
@@ -385,11 +441,40 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise SubmissionError(
                 "only a fully valid registered public-suite run can produce a leaderboard submission"
             )
+        if not interactive and not sampler_requested:
+            raise MeasurementError(
+                "non-interactive run submission requires --measurement-sampler; "
+                "private report retained"
+            )
+        sampled_evidence = None
+        if sampler_requested:
+            if measurement_error is not None or pre_sample is None or post_sample is None:
+                raise MeasurementError(
+                    "measurement sampler did not produce complete evidence; private report retained"
+                )
+            report_model_ids = tuple(model["model_id"] for model in report["models"])
+            if (
+                run_identity is None
+                or report["run_id"] != run_identity[0]
+                or report_model_ids != sampler_model_ids
+            ):
+                raise MeasurementError(
+                    "measurement sampler binding did not match the completed run; "
+                    "private report retained"
+                )
+            sampled_evidence = build_measurement_evidence(
+                source_run_id=report["run_id"],
+                model_ids=report_model_ids,
+                pre=pre_sample,
+                post=post_sample,
+            )
+            write_measurement_evidence(sampled_evidence, args.measurement_evidence)
         return _save_post_run_submissions(
             report,
             args,
             action=action,
             interactive=interactive,
+            measurement_evidence=sampled_evidence,
         )
     except (ClientError, RunnerError, ReportError) as error:
         print(f"run error: {error}", file=sys.stderr)

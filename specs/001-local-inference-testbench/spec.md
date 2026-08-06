@@ -231,6 +231,20 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - **FR-033**: The public site MUST render `measurement_period` as an “as of” month and support month
   filtering and recency sorting. On a paginated board those controls, like other client-side
   controls, MUST be labeled as applying to loaded rows until every shard is present.
+- **FR-034**: Non-interactive single-command run-and-export on POSIX MUST use an explicitly selected local
+  measurement-sampler executable. The runner MUST accept only a validated preallocated UUIDv4/UTC
+  identity, and the CLI MUST pass that identity plus the ordered public model IDs to synchronous
+  closed `pre` and `post` adapter calls around the complete run, with `post` required only after a
+  successful `pre` sample. Responses MUST echo the exact
+  binding and contain only the existing categorical sample. Invocation MUST use no shell, an
+  allowlisted credential-free environment, discarded stderr, a timeout, and an in-flight stdout
+  cap, isolated execution, and bounded process-tree cleanup. The executable MUST be at most 16 MiB,
+  regular, non-symlinked, executable, not group/world-writable, and identity/content rechecked at
+  launch. Only a private non-writable snapshot of the approved bytes MAY execute. Windows MUST fail
+  this option closed and retain the two-step exact-bound sidecar path. Failure MUST leave a completed
+  private report intact while blocking export; missing samples
+  and clean conditions MUST never be synthesized. Static exact-bound sidecars remain supported by
+  the separate two-step preparation command.
 
 ### Key Entities
 
@@ -268,6 +282,10 @@ experimental section with prerequisites, risks, and a baseline exclusion note.
 - **SC-010**: Tests prove stale source-run evidence and a model-evidence list outside 1–1000 are
   rejected, the source run ID is absent from public bytes, and every browser-fetched leaderboard
   transport rejects invalid UTF-8, a byte-order mark, and duplicate JSON member names.
+- **SC-011**: Tests prove single-command measurement ordering is pre → run → post, adapter responses
+  are exact-bound and byte-bounded during execution, malformed identities fail before preflight,
+  credential values do not cross the process boundary, retained evidence is atomic and owner-only,
+  and sampler failure preserves the private report while producing no candidate.
 
 ## Assumptions
 

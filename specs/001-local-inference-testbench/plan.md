@@ -291,3 +291,24 @@ precision, runtime name/version/backend, runtime configuration, and settings. A 
 graduation-policy value fixes the future threshold at 25 entries across five model families. Wilson
 rank bands, config-cell collapse, corroboration, and plausibility remain the following implementation
 stage on top of these seams.
+
+## Exact-bound single-command measurement integration
+
+On POSIX, non-interactive run-and-export preallocates the same UUIDv4/UTC identity later written into the
+ordinary Run Record. One explicitly selected local executable receives a closed request immediately
+before the complete run and, when that pre sample succeeds, another immediately afterward. It must
+echo the schema version, run ID,
+phase, and ordered public model IDs and return only one closed categorical sample. The CLI derives
+only the contract-defined validity and hard-threshold boolean, validates one row per report model,
+atomically retains the ignored owner-only sidecar, and passes that same in-memory object into public
+preparation.
+
+The adapter is not a shell extension or a source of raw telemetry for the report. Its size is capped
+at 16 MiB; its file mode, identity, and content are checked at launch; and only a private non-writable
+snapshot of approved bytes executes. Inherited environment keys are allowlisted without
+credentials, stderr is discarded, execution is timed, stdout is capped while the child is running,
+and its isolated process tree receives bounded cleanup. Sampling failure is
+remembered while inference completes so the private report is still persisted; candidate creation
+then fails closed. A static exact-bound sidecar remains a valid input to the separate two-step
+`prepare-submission` flow.
+Windows uses that two-step flow until equivalent process-tree containment is available.

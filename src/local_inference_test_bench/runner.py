@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import statistics
 import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
+import uuid
 
 from .client import ClientError, Completion, OpenAICompatibleClient, Usage
 from .models import Manifest, ModelSpec
@@ -178,6 +179,29 @@ PROFILE_CASES: dict[str, tuple[BaselineCase, ...]] = {
 }
 
 
+def _validate_run_identity(value: tuple[str, str]) -> tuple[str, str]:
+    if not isinstance(value, tuple) or len(value) != 2:
+        raise RunnerError("preallocated run identity is invalid")
+    run_id, created_at = value
+    if not isinstance(run_id, str) or not isinstance(created_at, str):
+        raise RunnerError("preallocated run identity is invalid")
+    try:
+        parsed_id = uuid.UUID(run_id)
+        parsed_time = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise RunnerError("preallocated run identity is invalid") from error
+    canonical_time = parsed_time.astimezone(timezone.utc).isoformat(timespec="seconds")
+    if (
+        parsed_id.version != 4
+        or str(parsed_id) != run_id
+        or not created_at.endswith("Z")
+        or parsed_time.utcoffset() != timezone.utc.utcoffset(None)
+        or canonical_time.replace("+00:00", "Z") != created_at
+    ):
+        raise RunnerError("preallocated run identity is invalid")
+    return run_id, created_at
+
+
 class BenchmarkRunner:
     """Run baseline cases sequentially and minimize each response immediately."""
 
@@ -216,10 +240,17 @@ class BenchmarkRunner:
             statuses[model.id] = "verified"
         return statuses
 
-    def run(self) -> dict[str, Any]:
+    def run(
+        self,
+        *,
+        run_identity: tuple[str, str] | None = None,
+    ) -> dict[str, Any]:
+        if run_identity is None:
+            now_value = self._now() if self._now is not None else None
+            run_id, created_at = new_run_identity(now_value)
+        else:
+            run_id, created_at = _validate_run_identity(run_identity)
         preflight = self.preflight()
-        now_value = self._now() if self._now is not None else None
-        run_id, created_at = new_run_identity(now_value)
         model_reports = [self._run_model(model, preflight[model.id]) for model in self.models]
         states = {model["validity"] for model in model_reports}
         if "invalid" in states:

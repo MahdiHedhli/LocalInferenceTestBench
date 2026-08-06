@@ -151,14 +151,27 @@ generation settings, reasoning mode, concurrency, speculation, or offload policy
 change describes a different candidate result.
 
 Before public schema `1.1` preparation, obtain categorical pre/post measurement evidence from a
-compatible local sampler or adapter. Store it as `.local/measurement-evidence.json`, keep it ignored
-and owner-only, and set its top-level `source_run_id` to the source report's exact `run_id`. The file
-contains 1–1000 unique model rows with threshold outcomes and the closed categories for memory
-pressure, thermal state, sustained load, swap, and resident models. Raw readings, process names,
-inventory, paths, additional timestamps, and free text stay local. A missing, stale-run, oversized,
-or unsafe sidecar blocks export without invalidating the private report. The tracked example is
-deliberately `nonquiescent`; replace its run binding and row with actual sampler output rather than
-treating it as a clean-run template. The binding ID is validation-only and is absent from public JSON.
+compatible local sampler or adapter. On POSIX, non-interactive single-command save/PR uses
+`--measurement-sampler <executable>`. The CLI allocates the run ID before endpoint access, invokes
+the adapter synchronously before the run and, when that pre sample succeeds, after the complete run,
+verifies the echoed run/model/phase
+binding, and atomically retains the closed sidecar at `--measurement-evidence`. The executable must
+be at most 16 MiB, regular, non-symlinked, and not group- or world-writable. Its approved bytes are
+copied into a private non-writable snapshot for execution while the source identity/content are
+rechecked for every launch. Adapter stdout is bounded strict JSON; stderr and inherited
+credentials are not captured or forwarded, and the isolated process tree receives bounded cleanup.
+Windows uses the separate exact-bound sidecar plus `prepare-submission` until equivalent safe
+process-tree containment is available.
+
+The retained file is ignored and owner-only, carries the exact report `run_id`, and contains one
+unique row for every exported model with only threshold outcomes and the closed categories for
+memory pressure, thermal state, sustained load, swap, and resident models. Use `--submission-model`
+or the two-step command's `--model` to export fewer rows. Raw readings, process names, inventory,
+paths, additional timestamps, and free text stay local. A missing, stale-run, oversized, unsafe, or
+incomplete sampler result blocks export without invalidating the private report. A static sidecar
+from another compatible sampler remains valid for two-step `prepare-submission`; the tracked example
+is deliberately nonquiescent and is never a clean-run template. The binding ID is validation-only
+and absent from public JSON.
 
 ## 7. Compare results responsibly
 

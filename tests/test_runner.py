@@ -29,7 +29,7 @@ from local_inference_test_bench.reporting import (  # noqa: E402
     validate_report,
     write_report,
 )
-from local_inference_test_bench.runner import BenchmarkRunner  # noqa: E402
+from local_inference_test_bench.runner import BenchmarkRunner, RunnerError  # noqa: E402
 from local_inference_test_bench.scoring import (  # noqa: E402
     BOUNDARY_EXPECTED,
     DEFENSIVE_EXPECTED,
@@ -363,6 +363,47 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn("runtime-selector-under-test", serialized)
         self.assertNotIn("response_sha256", serialized)
         self.assertNotIn("runtime_identity_sha256", serialized)
+
+    def test_preallocated_run_identity_is_preserved_for_sampler_binding(self) -> None:
+        identity = (
+            "-".join(("11111111", "2222", "4333", "8444", "555555555555")),
+            "2026-08-06T12:00:00Z",
+        )
+        report = BenchmarkRunner(
+            StubClient(passing_completions()[:3]),
+            manifest(),
+            profile="smoke",
+            clock=StepClock(),
+        ).run(run_identity=identity)
+
+        validate_report(report)
+        self.assertEqual((report["run_id"], report["created_at"]), identity)
+
+    def test_malformed_preallocated_identity_fails_before_preflight(self) -> None:
+        runner = BenchmarkRunner(
+            StubClient(passing_completions()[:3]),
+            manifest(),
+            profile="smoke",
+        )
+        invalid_identities = (
+            ("not-a-uuid", "2026-08-06T12:00:00Z"),
+            (
+                "-".join(("11111111", "2222", "3333", "8444", "555555555555")),
+                "2026-08-06T12:00:00Z",
+            ),
+            (
+                "-".join(("11111111", "2222", "4333", "8444", "555555555555")),
+                "2026-08-06T08:00:00-04:00",
+            ),
+        )
+        with mock.patch.object(runner, "preflight") as preflight:
+            for identity in invalid_identities:
+                with self.subTest(identity=identity), self.assertRaisesRegex(
+                    RunnerError, "preallocated run identity"
+                ):
+                    runner.run(run_identity=identity)
+
+        preflight.assert_not_called()
 
     def test_not_applicable_route_and_termination_are_reserved_for_that_outcome(self) -> None:
         report = BenchmarkRunner(

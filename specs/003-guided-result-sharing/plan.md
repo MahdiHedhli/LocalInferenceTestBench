@@ -12,7 +12,8 @@ reviewed pull request. Keep the standard-library runner and existing JSON contra
 
 **Language/Version**: Python 3.11 or newer
 
-**Dependencies**: Python standard library; optional GitHub CLI and Gitleaks for public PR publication
+**Dependencies**: Python standard library; an operator-supplied local categorical sampler for
+single-command export; optional GitHub CLI and Gitleaks for public PR publication
 
 **Storage**: Existing ignored reports, public hardware descriptors, categorical measurement-evidence
 sidecars, and candidate directory
@@ -21,7 +22,8 @@ sidecars, and candidate directory
 deterministic builder checks, privacy scanner, Gitleaks, and hosted matrix CI
 
 **Constraints**: No direct `main` write, token handling, shell interpolation, current-checkout
-mutation, raw report upload, arbitrary repository target, or weakening of the existing contract
+mutation, raw report upload, arbitrary repository target, unbounded adapter output, inferred clean
+state, or weakening of the existing contract
 
 ## Constitution check
 
@@ -48,6 +50,11 @@ mutation, raw report upload, arbitrary repository target, or weakening of the ex
    only after local validation and confirmation.
 7. Add a CI change-boundary validator that recognizes a benchmark-data PR and rejects every path or
    operation outside the two-file append-only shape.
+8. For single-command non-interactive sharing, preallocate the ordinary UUIDv4/UTC run identity and
+   invoke one explicitly selected adapter synchronously before the run and, after a successful pre
+   sample, after the complete run. Require
+   exact run/model/phase echo, accept only the existing closed categorical sample, retain the bound
+   sidecar atomically, and pass the same in-memory evidence to preparation.
 
 ## Stage 3 schema `1.1` coordination
 
@@ -65,16 +72,27 @@ is not rewritten, but an open or saved `1.0` candidate must be regenerated befor
 fixed repository target, isolated clone, literal confirmation, two-file diff, deterministic digest,
 and all privacy/secret gates remain unchanged.
 
+The adapter bridge is POSIX-local-only and standard-library-only. It caps the selected executable at
+16 MiB, executes only a private non-writable snapshot of approved bytes without a shell, rejects
+group/world-writable sources, rechecks source identity/content at launch, strips credential
+environment keys, discards stderr, caps stdout while
+the child runs, and applies bounded cleanup to the isolated process tree. A sampler failure is remembered while
+the benchmark continues; the private report is written before export fails. Static exact-bound
+sidecars remain supported by the separate two-step `prepare-submission` command.
+Windows fails the single-command option closed and uses that two-step path.
+
 ## Project structure
 
     src/local_inference_test_bench/
     |-- cli.py
+    |-- measurement.py
     |-- publishing.py
     `-- submissions.py
     scripts/
     `-- validate_benchmark_change.py
     tests/
     |-- test_cli.py
+    |-- test_measurement.py
     |-- test_publishing.py
     `-- test_benchmark_change.py
     specs/003-guided-result-sharing/

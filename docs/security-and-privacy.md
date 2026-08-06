@@ -69,6 +69,20 @@ determinism. It must not contain raw memory, thermal, load, swap, process, path,
 timestamp, or free-text values. Missing, stale-run, oversized, or inconsistent evidence fails closed;
 the exporter never maps execution-valid to clean.
 
+For non-interactive `litb run --submission save|pr` on POSIX, evidence is collected through an
+explicitly selected `--measurement-sampler` executable of at most 16 MiB. The CLI creates the private run identity before
+endpoint access and invokes the adapter immediately before the run, then immediately after the
+complete run only when the pre sample succeeded. Each response must be strict, closed categorical
+JSON and echo the exact run ID, phase, and
+ordered public model IDs. The adapter runs without a shell, credential-bearing environment keys, or
+captured stderr; stdout is bounded while it executes. The executable must be a regular non-symlink
+and must not be group- or world-writable; its identity and content are rechecked at launch, and only
+a private non-writable snapshot of the approved bytes is executed. The isolated adapter process tree
+is torn down through bounded cleanup. Windows fails this single-command option closed and retains the
+two-step exact-bound sidecar path. A failure still leaves the
+private report but blocks candidate creation. The CLI never fills a missing sample or derives clean
+from run validity.
+
 ## Leaderboard submission boundary
 
 The leaderboard exporter accepts only a fully execution-valid report from the public suite registry.
@@ -112,7 +126,8 @@ Before deliberately publishing a result:
 7. use the base-controlled exact-head review lane, with maintainer review when automation reports a
    finding or cannot establish every gate.
 
-The guided `litb run --submission pr` path automates steps 3 through 6 without weakening them. Hosted
+The guided `litb run --measurement-sampler <executable> --submission pr` path obtains real bound
+pre/post evidence and automates steps 3 through 6 without weakening them. Hosted
 automation performs step 7 only for an exact benchmark-only change; every other change stays manual.
 The `litb publish-submission --candidate <path>` retry applies the same gates to an existing
 canonical, owner-only, ignored minimized file, so a failed public step does not require another

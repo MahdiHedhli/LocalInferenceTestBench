@@ -67,14 +67,23 @@ Use `--profile standard` after smoke passes. Run artifacts stay ignored under `a
 restricted to aggregate-safe fields.
 
 Public schema `1.1` export also requires categorical measurement-condition evidence produced by a
-compatible local sampler or adapter. Keep that JSON ignored and owner-only at
-`.local/measurement-evidence.json`. A valid benchmark report proves the execution and scoring path
+compatible local sampler or adapter. A valid benchmark report proves the execution and scoring path
 worked; it does not prove the host was quiescent, so the exporter never invents a clean measurement
-state when the sidecar is absent. Start from `config/measurement-evidence.example.json`, replace its
-`source_run_id` with the source report's exact `run_id`, replace its example row with the sampler's
-categorical result for the report model ID, and restrict the local copy to owner access. The tracked
-example is deliberately nonquiescent so an unchanged copy cannot accidentally claim clean
-conditions. The private binding ID is checked locally and omitted from every public candidate.
+state when evidence is absent. On POSIX, a single-command run-and-export flow can pass an explicitly
+trusted executable of at most 16 MiB with `--measurement-sampler`. The CLI allocates the private run
+ID before endpoint access,
+collects one synchronous categorical sample immediately before the run and, after a successful pre
+sample, one immediately after the complete run, requires
+the adapter to echo the exact run/model/phase binding, executes only a private approved-byte snapshot,
+then retains the closed result owner-only at
+`.local/measurement-evidence.json`. Raw readings and free text are never accepted.
+
+For two-step preparation, a compatible sampler may instead produce the ignored owner-only sidecar
+directly. Its `source_run_id` must equal the report's exact `run_id`, and it must contain one unique
+evidence row for every exported model. Select a subset with `--submission-model` during a run or
+`--model` during `prepare-submission`; otherwise every report model needs a row. The tracked example
+is deliberately nonquiescent so an unchanged copy cannot accidentally claim clean conditions. The
+private binding ID is checked locally and omitted from every public candidate.
 
 At the end of a valid interactive standard run, the bench now offers three choices: keep the report
 private, save identifier-minimized JSON, or open a reviewed public pull request. Enter keeps the
@@ -88,11 +97,17 @@ litb run \
   --endpoint http://127.0.0.1:1234/v1 \
   --profile standard \
   --hardware .local/hardware.json \
+  --measurement-sampler .local/bin/measurement-sampler \
   --measurement-evidence .local/measurement-evidence.json \
   --submission save
 ```
 
-To automate the public contribution path, use `--submission pr`. The tool saves and displays the
+Non-interactive `run --submission save` and `run --submission pr` require the sampler option; an
+already-produced static sidecar belongs to the two-step `prepare-submission` path. The adapter must
+be a regular non-symlink executable and must not be group- or world-writable. This exact process-tree
+containment is currently POSIX-only. Windows users retain the two-step `prepare-submission` path.
+
+To automate the public contribution path, replace `save` with `pr`. The tool saves and displays the
 complete minimized record, runs the privacy and secret gates in an isolated clone, then creates a
 feature branch and pull request through an authenticated GitHub CLI. It never pushes directly to
 `main`. Non-interactive publication also requires `--confirm-public`.
@@ -149,9 +164,10 @@ litb prepare-submission \
 Review the generated file before sharing it. The complete process is in
 [submitting a benchmark](docs/submitting-benchmarks.md).
 
-The same preparation and review happen automatically after `litb run --profile standard` when you
-choose the save or public-PR option. “Identifier-minimized” is deliberate: exact hardware,
-performance, the public pull request, and its GitHub account can still link a result to its source.
+With `--measurement-sampler`, the same preparation and review happen automatically after
+`litb run --profile standard` when you choose the save or public-PR option. “Identifier-minimized”
+is deliberate: exact hardware, performance, the public pull request, and its GitHub account can
+still link a result to its source.
 
 ## Method at a glance
 

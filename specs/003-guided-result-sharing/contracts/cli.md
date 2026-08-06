@@ -6,6 +6,8 @@
 |----------|----------------|----------|
 | `--submission` | `ask` | `ask`, `none`, `save`, or `pr` |
 | `--hardware` | `.local/hardware.json` | Existing closed, ignored, owner-only descriptor |
+| `--measurement-evidence` | `.local/measurement-evidence.json` | Existing exact-bound sidecar for interactive/two-step use, or atomic owner-only output from the sampler integration |
+| `--measurement-sampler` | unset | Explicit trusted POSIX executable for synchronous, exact-bound pre/post categorical sampling; required for non-interactive run-and-save/PR |
 | `--submission-model` | unset | Optional single source report model ID |
 | `--submission-dir` | `.local/leaderboard-submissions` | Ignored owner-only candidate directory |
 | `--confirm-public` | false | Required with non-interactive `pr` |
@@ -25,6 +27,19 @@ GitHub action.
 
 `save` and `pr` accept only an overall `valid` report from the complete `standard` profile. `ask`
 offers choices only when both stdin and stdout are interactive and the same eligibility holds.
+Non-interactive `run --submission save|pr` additionally requires `--measurement-sampler`; an
+already-produced static sidecar is consumed by the separate `prepare-submission` command.
+
+The sampler argument is one POSIX executable path of at most 16 MiB, never shell syntax. Windows
+fails this option closed and retains the two-step exact-bound sidecar path. The CLI creates a UUIDv4/UTC run
+identity before endpoint access, invokes the executable for `pre` and, only after a successful pre
+sample and completed run, once for `post`, and sends
+strict JSON containing only schema version, source run ID, phase, and ordered public model IDs. Each
+response must echo those fields and contain only a closed categorical sample. The adapter has a
+30-second timeout and a 256 KiB in-flight stdout cap; stderr is discarded and credential environment
+keys are absent. Its approved file identity is rechecked at launch, only a private non-writable
+snapshot of approved bytes executes, and its isolated process tree
+receives bounded cleanup. Any failure blocks export after preserving the private report.
 
 ## Exit status
 

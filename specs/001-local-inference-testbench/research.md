@@ -250,3 +250,22 @@ values would expand the fingerprinting boundary.
 **Rejected**: Synthesize clean; add raw host telemetry to the Run Record; accept a free-form operator
 assertion; accept unbound or stale-run evidence; allow an unbounded model list; publish the run
 binding; or discard non-clean evidence.
+
+## Post-review decision: preallocate identity for a synchronous local sampler
+
+**Decision**: For non-interactive POSIX single-command export, create and validate the ordinary UUIDv4/UTC
+run identity before endpoint access. Invoke one explicitly selected adapter synchronously for a
+closed pre sample, execute the complete benchmark with that identity, then, when pre succeeded,
+invoke it for the closed post sample. Require exact run/model/phase echo, derive only the existing
+categorical fields, and
+atomically retain the resulting ordinary sidecar before passing the same object to preparation.
+Cap the selected executable at 16 MiB, execute only a private non-writable snapshot of the approved
+bytes, and fail the single-command option closed on Windows while retaining two-step preparation.
+
+**Rationale**: A sidecar cannot honestly contain a fresh unpredictable run ID and real post-run
+conditions before the run occurs. Providing the identity to a bounded collector before both samples
+eliminates the rewrite race without turning digest integrity or source binding into attestation.
+
+**Rejected**: Replace an arbitrary sidecar's ID after inference; derive report identity from
+pre-existing results; accept missing samples; inherit credentials; execute shell fragments; capture
+unbounded output; or suppress an otherwise complete private report when the optional sampler fails.

@@ -241,6 +241,11 @@ These scenarios should fail safely and are covered by automated tests:
     measurement-evidence sidecar, with a `source_run_id` different from the report's `run_id`, or
     with more than 1000 model rows. Preparation exits nonzero rather than reusing stale evidence,
     accepting unbounded input, or inferring clean conditions from a valid execution report.
+11. Request a non-interactive single-command save or PR without `--measurement-sampler`, or use an
+    adapter that is linked, permission-broad, slow, oversized, malformed, raw-valued, or returns a
+    different run/model/phase binding. The aggregate report remains private and export exits nonzero.
+    The single-command adapter is POSIX-only; Windows uses the exact-bound sidecar with
+    `prepare-submission`.
 
 ## Experiments are not part of this quickstart
 

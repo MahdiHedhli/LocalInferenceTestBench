@@ -155,6 +155,20 @@ generated leaderboard, fixed digest metadata, and fixed repository routing.
 - **FR-020**: Newly prepared and published candidates MUST use public schema `1.1`. A saved schema
   `1.0` candidate MAY remain local historical evidence but MUST be regenerated from its source report
   and measurement evidence before entering a new benchmark pull request.
+- **FR-021**: On POSIX, non-interactive `run --submission save` and `run --submission pr` MUST require an
+  explicitly selected local measurement-sampler executable. The CLI MUST allocate and validate the
+  run identity before endpoint access, invoke the adapter synchronously immediately before the run
+  and, when the pre sample succeeds, immediately after the complete run, and require each closed
+  categorical response to echo the exact run ID, phase,
+  and ordered public model IDs. Invocation MUST use no shell, a credential-free allowlisted
+  environment, discarded stderr, a bounded timeout, an in-flight stdout byte cap, isolated process
+  execution, and bounded process-tree cleanup. The adapter file MUST be at most 16 MiB, regular,
+  non-symlinked, executable, not group/world-writable, and identity/content rechecked at launch.
+  Only a private non-writable snapshot of approved bytes MAY execute. Windows MUST fail this option
+  closed and retain two-step exact-bound preparation. Missing,
+  stale, malformed, oversized, timed-out, nonzero, or incomplete output MUST preserve the private
+  report and block export. The CLI MUST NOT synthesize a missing sample or replace the binding on
+  evidence that was not collected through this invocation.
 
 ### Key entities
 
@@ -180,6 +194,10 @@ generated leaderboard, fixed digest metadata, and fixed repository routing.
 - **SC-007**: Tests prove missing, unsafe, raw-valued, stale-run, oversized, mismatched, and
   inconsistent measurement sidecars issue zero GitHub mutations, omit the private binding from
   public bytes, and leave the private run report intact.
+- **SC-008**: A non-interactive standard run can save or prepare a PR in one command through an
+  explicitly selected sampler, with tests proving pre → run → post ordering, exact binding, bounded
+  capture, credential-free invocation, atomic owner-only evidence retention, and private-report
+  preservation on every sampler failure.
 
 ## Assumptions
 

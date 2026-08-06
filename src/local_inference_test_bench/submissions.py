@@ -111,6 +111,7 @@ _SCANNER_SUPPRESSION_MARKER = re.compile(
     r"(?i)\b" + "git" + r"leaks\s*:\s*allow\b"
 )
 _MAX_SUBMISSION_BYTES = 256 * 1024
+MAX_MEASUREMENT_EVIDENCE_BYTES = 2 * 1024 * 1024
 # This is a per-file publication limit. The accepted corpus itself is unbounded;
 # the static transport paginates it into independently bounded shard files.
 _MAX_DATA_FILE_BYTES = 2 * 1024 * 1024
@@ -453,6 +454,16 @@ def _validate_measurement_sample(value: Any, path: str) -> Mapping[str, Any]:
     if (outcome == "threshold_crossed") != bool(categories):
         raise SubmissionError(f"{path}.outcome does not match its threshold categories")
     return sample
+
+
+def validate_measurement_sample(value: Any) -> dict[str, Any]:
+    """Validate and copy one closed categorical sampler result."""
+
+    sample = _validate_measurement_sample(value, "measurement_sample")
+    return {
+        "outcome": sample["outcome"],
+        "categories": list(sample["categories"]),
+    }
 
 
 def _derived_public_validity(
@@ -1205,7 +1216,10 @@ def load_measurement_evidence_file(path: str | Path) -> dict[str, Any]:
         raise SubmissionError(
             "measurement evidence must be regular, owner-only, and Git-ignored"
         ) from error
-    evidence = load_json_object(approved_path)
+    evidence = load_json_object(
+        approved_path,
+        maximum_bytes=MAX_MEASUREMENT_EVIDENCE_BYTES,
+    )
     validate_measurement_evidence(evidence)
     return evidence
 
