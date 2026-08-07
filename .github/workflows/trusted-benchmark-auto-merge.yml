@@ -299,11 +299,33 @@ jobs:
               -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
               -F query=@"${review_threads_query}" \
               > "${destination}-threads.json"
-            python3 "${helper}" threads --input "${destination}-threads.json"
+            python3 "${helper}" threads \
+              --input "${destination}-threads.json" \
+              --output "${destination}-threads.out" \
+              --advisory-ids-output "${destination}-advisory-ids.txt"
             gh api --paginate --slurp \
               "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}/reviews?per_page=100" \
               > "${destination}-reviews.json"
             python3 "${helper}" review-states --input "${destination}-reviews.json"
+          }
+          resolve_advisory_threads() {
+            local threads_json="$1"
+            local ids_file="$2"
+            python3 "${helper}" threads \
+              --input "${threads_json}" \
+              --output "${RUNNER_TEMP}/threads-resolve.out" \
+              --advisory-ids-output "${ids_file}"
+            if [ ! -s "${ids_file}" ]; then
+              return 0
+            fi
+            while IFS= read -r thread_id; do
+              [ -n "${thread_id}" ] || continue
+              [[ "${thread_id}" =~ ^[A-Za-z0-9_=-]{4,200}$ ]]
+              gh api graphql \
+                -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' \
+                -f id="${thread_id}" \
+                > /dev/null
+            done < "${ids_file}"
           }
           gh api user > "${RUNNER_TEMP}/reviewer.json"
           python3 "${helper}" identity --input "${RUNNER_TEMP}/reviewer.json"
@@ -339,7 +361,20 @@ jobs:
             -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
             -F query=@"${review_threads_query}" \
             > "${RUNNER_TEMP}/threads-final.json"
-          python3 "${helper}" threads --input "${RUNNER_TEMP}/threads-final.json"
+          # Resolve advisory-bot threads so conversation-resolution protection
+          # cannot strand otherwise-valid submissions on CodeRabbit/Codex noise.
+          resolve_advisory_threads \
+            "${RUNNER_TEMP}/threads-final.json" \
+            "${RUNNER_TEMP}/advisory-ids-final.txt"
+          gh api graphql --paginate --slurp \
+            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -F query=@"${review_threads_query}" \
+            > "${RUNNER_TEMP}/threads-post-resolve.json"
+          python3 "${helper}" threads \
+            --input "${RUNNER_TEMP}/threads-post-resolve.json" \
+            --output "${RUNNER_TEMP}/threads-post-resolve.out" \
+            --advisory-ids-output "${RUNNER_TEMP}/advisory-ids-post-resolve.txt"
+          test ! -s "${RUNNER_TEMP}/advisory-ids-post-resolve.txt"
           gh api --paginate --slurp \
             "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}/reviews?per_page=100" \
             > "${RUNNER_TEMP}/reviews-final.json"

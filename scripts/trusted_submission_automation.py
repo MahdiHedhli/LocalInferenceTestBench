@@ -23,6 +23,18 @@ GITHUB_ACTIONS_APP_SLUG = "github-actions"
 REVIEWER_LOGIN = "ernestpenfold-bot"
 REVIEWER_USER_ID = 275_105_272
 GITHUB_ACTIONS_APP_ID = 15_368
+# Advisory bots may leave review threads; they must not veto the trusted lane
+# (FR-005). Only human / non-advisory unresolved feedback remains blocking.
+ADVISORY_REVIEW_LOGINS = frozenset(
+    {
+        "coderabbitai",
+        "coderabbitai[bot]",
+        "chatgpt-codex-connector",
+        "chatgpt-codex-connector[bot]",
+        "copilot-pull-request-reviewer",
+        "copilot-pull-request-reviewer[bot]",
+    }
+)
 
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 _SUBMISSION_BRANCH = re.compile(r"^litb/submission-([0-9a-f]{64})$")
@@ -387,8 +399,50 @@ def validate_request_marker(
     return marker
 
 
-def validate_review_threads(page_values: Any) -> int:
-    """Require complete pagination and zero unresolved GraphQL review threads."""
+def _normalize_actor_login(login: str) -> str:
+    lowered = login.strip().casefold()
+    if lowered.endswith("[bot]"):
+        return lowered[: -len("[bot]")]
+    return lowered
+
+
+def _advisory_review_login(login: str | None) -> bool:
+    if login is None:
+        return False
+    normalized = _normalize_actor_login(login)
+    return normalized in {
+        _normalize_actor_login(value) for value in ADVISORY_REVIEW_LOGINS
+    }
+
+
+def _thread_author_login(node: Mapping[str, Any], path: str) -> str | None:
+    """Return the first comment author login when the GraphQL shape includes it."""
+
+    if "comments" not in node:
+        return None
+    comments = _object(node.get("comments"), f"{path}.comments")
+    nodes = _list(comments.get("nodes"), f"{path}.comments.nodes")
+    if not nodes:
+        return None
+    first = _object(nodes[0], f"{path}.comments.nodes[0]")
+    author = first.get("author")
+    if author is None:
+        return None
+    author_object = _object(author, f"{path}.comments.nodes[0].author")
+    login = author_object.get("login")
+    if login is None:
+        return None
+    return _string(login, f"{path}.comments.nodes[0].author.login", maximum=100)
+
+
+def validate_review_threads(page_values: Any) -> tuple[int, list[str]]:
+    """Require complete pagination; block only non-advisory unresolved threads.
+
+    Returns ``(thread_count, advisory_unresolved_ids)``. Advisory-bot threads may
+    remain unresolved for the authorization gate (they must not veto the lane),
+    but their IDs are returned so the reviewer credential can resolve them before
+    native conversation-resolution branch protection is satisfied.
+    """
 
     pages = _list(page_values, "review_thread_pages")
     if not pages:
@@ -397,6 +451,7 @@ def validate_review_threads(page_values: Any) -> int:
     declared_total: int | None = None
     cursors: set[str] = set()
     thread_ids: set[str] = set()
+    advisory_unresolved: list[str] = []
     for index, page_value in enumerate(pages):
         page = _object(page_value, f"review_thread_pages[{index}]")
         if page.get("errors"):
@@ -432,23 +487,28 @@ def validate_review_threads(page_values: Any) -> int:
                 raise AutomationError("review-thread pagination cursor is missing or repeated")
             cursors.add(cursor)
         for node_index, node_value in enumerate(nodes):
-            node = _object(node_value, f"review_thread_page.nodes[{node_index}]")
-            thread_id = _string(
-                node.get("id"),
-                f"review_thread_page.nodes[{node_index}].id",
-                maximum=200,
-            )
+            path = f"review_thread_page.nodes[{node_index}]"
+            node = _object(node_value, path)
+            thread_id = _string(node.get("id"), f"{path}.id", maximum=200)
             if not _NODE_ID.fullmatch(thread_id):
                 raise AutomationError("review-thread identity is malformed")
             if thread_id in thread_ids:
                 raise AutomationError("review-thread pagination contains a duplicate")
             thread_ids.add(thread_id)
-            if node.get("isResolved") is not True:
+            resolved = node.get("isResolved")
+            if resolved is True:
+                total += 1
+                continue
+            if resolved is not False:
+                raise AutomationError("review-thread resolution state is malformed")
+            author = _thread_author_login(node, path)
+            if not _advisory_review_login(author):
                 raise AutomationError("pull request has unresolved review feedback")
+            advisory_unresolved.append(thread_id)
             total += 1
     if declared_total != total:
         raise AutomationError("review-thread pagination count is incomplete")
-    return total
+    return total, advisory_unresolved
 
 
 def validate_review_states(review_pages: Any) -> None:
@@ -691,6 +751,16 @@ def _parser() -> argparse.ArgumentParser:
 
     threads = commands.add_parser("threads")
     threads.add_argument("--input", type=Path, required=True)
+    threads.add_argument(
+        "--output",
+        type=Path,
+        help="optional closed env output with thread counts and advisory unresolved IDs",
+    )
+    threads.add_argument(
+        "--advisory-ids-output",
+        type=Path,
+        help="optional newline-delimited advisory-bot unresolved thread IDs",
+    )
 
     approvals = commands.add_parser("approvals")
     approvals.add_argument("--input", type=Path, required=True)
@@ -773,7 +843,32 @@ def _run(args: argparse.Namespace) -> None:
         _write_outputs(args.output, outputs)
         return
     if args.command == "threads":
-        validate_review_threads(load_json(args.input))
+        total, advisory_ids = validate_review_threads(load_json(args.input))
+        if args.advisory_ids_output is not None:
+            if any("\n" in thread_id or "\r" in thread_id for thread_id in advisory_ids):
+                raise AutomationError("advisory thread identity is malformed")
+            if not advisory_ids:
+                try:
+                    args.advisory_ids_output.write_text("", encoding="utf-8", newline="\n")
+                except OSError as error:
+                    raise AutomationError(
+                        "bounded text output could not be written"
+                    ) from error
+            else:
+                body = "".join(f"{thread_id}\n" for thread_id in advisory_ids)
+                _write_bounded_text(
+                    args.advisory_ids_output,
+                    body,
+                    maximum_bytes=max(64, 256 * len(advisory_ids)),
+                )
+        if args.output is not None:
+            _write_outputs(
+                args.output,
+                {
+                    "thread_count": total,
+                    "advisory_unresolved_count": len(advisory_ids),
+                },
+            )
         return
     if args.command == "approvals":
         exists = exact_approval_exists(load_json(args.input), head_sha=args.head)

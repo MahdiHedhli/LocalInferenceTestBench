@@ -490,7 +490,7 @@ class ReviewStateTests(unittest.TestCase):
                 }
             }
         }
-        self.assertEqual(validate_review_threads([empty_page]), 0)
+        self.assertEqual(validate_review_threads([empty_page]), (0, []))
 
         first_page = copy.deepcopy(empty_page)
         first_page["data"]["repository"]["pullRequest"]["reviewThreads"] = {
@@ -504,7 +504,7 @@ class ReviewStateTests(unittest.TestCase):
             "totalCount": 2,
             "pageInfo": {"hasNextPage": False, "endCursor": "cursor-2"},
         }
-        self.assertEqual(validate_review_threads([first_page, second_page]), 2)
+        self.assertEqual(validate_review_threads([first_page, second_page]), (2, []))
 
         duplicate = copy.deepcopy(second_page)
         duplicate["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"] = [
@@ -522,6 +522,42 @@ class ReviewStateTests(unittest.TestCase):
         ] = 1
         with self.assertRaisesRegex(AutomationError, "unresolved"):
             validate_review_threads([unresolved])
+
+        human_unresolved = copy.deepcopy(empty_page)
+        human_unresolved["data"]["repository"]["pullRequest"]["reviewThreads"] = {
+            "nodes": [
+                {
+                    "id": "THREAD_HUMAN",
+                    "isResolved": False,
+                    "comments": {
+                        "nodes": [{"author": {"login": "benchmark-contributor"}}]
+                    },
+                }
+            ],
+            "totalCount": 1,
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+        }
+        with self.assertRaisesRegex(AutomationError, "unresolved"):
+            validate_review_threads([human_unresolved])
+
+        advisory_unresolved = copy.deepcopy(empty_page)
+        advisory_unresolved["data"]["repository"]["pullRequest"]["reviewThreads"] = {
+            "nodes": [
+                {
+                    "id": "THREAD_ADVISORY",
+                    "isResolved": False,
+                    "comments": {
+                        "nodes": [{"author": {"login": "coderabbitai[bot]"}}]
+                    },
+                }
+            ],
+            "totalCount": 1,
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+        }
+        self.assertEqual(
+            validate_review_threads([advisory_unresolved]),
+            (1, ["THREAD_ADVISORY"]),
+        )
 
         truncated = copy.deepcopy(empty_page)
         truncated["data"]["repository"]["pullRequest"]["reviewThreads"]["pageInfo"] = {

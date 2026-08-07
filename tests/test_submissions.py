@@ -1095,14 +1095,19 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(entry["validity"], "legacy_unreported")
         self.assertIsNone(entry["metrics"]["latency_ms_mean"])
 
-    def test_all_legacy_leaderboard_transport_remains_byte_identical(self) -> None:
+    def test_committed_leaderboard_matches_deterministic_rebuild(self) -> None:
+        """The Pages payload must equal a fresh rebuild of accepted submissions.
+
+        Accept both legacy-only schema 1.0 boards and mixed/current schema 1.1
+        boards so the first schema-1.1 publication is not blocked by a frozen
+        legacy digest, while still forbidding drift between committed bytes and
+        the deterministic builder.
+        """
+
         repository = Path(__file__).resolve().parents[1]
         committed = repository / "site" / "data" / "leaderboard.json"
-        expected_digest = "0d7dbe67be25d3bd425344181a5901a18dd64da4c1a1064b1e04ead11276af43"
-
-        self.assertEqual(hashlib.sha256(committed.read_bytes()).hexdigest(), expected_digest)
         rebuilt = build_leaderboard(repository / "site" / "data" / "submissions")
-        self.assertEqual(rebuilt["schema_version"], "1.0")
+        self.assertIn(rebuilt["schema_version"], {"1.0", "1.1"})
         self.assertEqual(
             submissions_module.render_leaderboard_bytes(rebuilt),
             committed.read_bytes(),
