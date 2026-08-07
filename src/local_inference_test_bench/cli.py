@@ -10,6 +10,12 @@ from typing import Sequence
 import webbrowser
 
 from .client import ClientError, OpenAICompatibleClient
+from .discovery import (
+    DiscoveryError,
+    discover_local_models,
+    inventory_report,
+    select_campaign_cohort,
+)
 from .failure_reporting import (
     ELIGIBLE_FAILURE_CATEGORIES,
     FailureSignal,
@@ -200,6 +206,59 @@ def build_parser() -> argparse.ArgumentParser:
         "--confirm-public",
         action="store_true",
         help="confirm public GitHub account, branch, and pull-request disclosure",
+    )
+    models_cmd = subparsers.add_parser(
+        "models",
+        help="discover locally installed models from supported runtimes",
+    )
+    models_cmd.add_argument(
+        "--json",
+        action="store_true",
+        help="emit a public-safe inventory JSON object",
+    )
+    models_cmd.add_argument(
+        "--eligible-only",
+        action="store_true",
+        help="show only models that pass the suite eligibility gate",
+    )
+    campaign = subparsers.add_parser(
+        "campaign",
+        help="campaign helpers for discovery and metadata-only selection",
+    )
+    campaign_sub = campaign.add_subparsers(dest="campaign_command", required=True)
+    discover_cmd = campaign_sub.add_parser(
+        "discover",
+        help="discover and classify the local model inventory",
+    )
+    discover_cmd.add_argument(
+        "--json",
+        action="store_true",
+        help="emit a public-safe inventory JSON object",
+    )
+    select_cmd = campaign_sub.add_parser(
+        "select",
+        help="select a metadata-only campaign cohort from the local inventory",
+    )
+    select_cmd.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="maximum selected models (default: 5)",
+    )
+    select_cmd.add_argument(
+        "--json",
+        action="store_true",
+        help="emit selected and fallback candidates as JSON",
+    )
+    select_cmd.add_argument(
+        "--represented-source",
+        dest="represented_sources",
+        action="append",
+        default=[],
+        help=(
+            "model source already present on the public leaderboard; "
+            "repeatable; used only for cross-host/novelty metadata flags"
+        ),
     )
     return parser
 
@@ -496,6 +555,40 @@ def _publish_public_submission(
     return 0
 
 
+def _print_inventory_table(models: Sequence[object], *, eligible_only: bool) -> None:
+    rows = []
+    for model in models:
+        eligibility = getattr(model, "eligibility", "")
+        if eligible_only and eligibility != "eligible":
+            continue
+        rows.append(model)
+    if not rows:
+        print("no models matched")
+        return
+    print(
+        f"{'ID':<36} {'Elig':<10} {'Scale':<10} {'Precision':<16} "
+        f"{'Backend':<18} {'Reason'}"
+    )
+    for model in rows:
+        total = getattr(model, "parameter_scale_total_billions", None)
+        active = getattr(model, "parameter_scale_active_billions", None)
+        if total is None:
+            scale = "-"
+        elif active is not None:
+            scale = f"{total:g}B-A{active:g}B"
+        else:
+            scale = f"{total:g}B"
+        reason = getattr(model, "exclusion_reason", None) or "ok"
+        print(
+            f"{getattr(model, 'runtime_local_id', '')[:36]:<36} "
+            f"{getattr(model, 'eligibility', ''):<10} "
+            f"{scale:<10} "
+            f"{str(getattr(model, 'precision', None) or '-'):<16} "
+            f"{str(getattr(model, 'backend', None) or '-'):<18} "
+            f"{reason}"
+        )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -518,6 +611,73 @@ def main(argv: Sequence[str] | None = None) -> int:
                 interactive=_interactive_terminal(),
                 confirm_public=args.confirm_public,
             )
+        if args.command == "models":
+            models = discover_local_models()
+            report = inventory_report(models)
+            if args.json:
+                print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=True))
+            else:
+                print(
+                    f"discovered={report['discovered_count']} "
+                    f"eligible={report['eligible_count']} "
+                    f"excluded={report['excluded_count']}"
+                )
+                _print_inventory_table(models, eligible_only=args.eligible_only)
+            return 0
+        if args.command == "campaign":
+            models = discover_local_models()
+            if args.campaign_command == "discover":
+                report = inventory_report(models)
+                if args.json:
+                    print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=True))
+                else:
+                    print(
+                        f"discovered={report['discovered_count']} "
+                        f"eligible={report['eligible_count']} "
+                        f"excluded={report['excluded_count']} "
+                        f"duplicate_groups={report['duplicate_group_count']}"
+                    )
+                    _print_inventory_table(models, eligible_only=False)
+                return 0
+            if args.campaign_command == "select":
+                represented = {
+                    value.strip().lower()
+                    for value in args.represented_sources
+                    if isinstance(value, str) and value.strip()
+                }
+                selected, fallback = select_campaign_cohort(
+                    models,
+                    limit=args.limit,
+                    represented_sources=represented,
+                )
+                report = inventory_report(
+                    models,
+                    selected=selected,
+                    fallback=fallback,
+                )
+                if args.json:
+                    print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=True))
+                else:
+                    print(
+                        f"selected={len(selected)}/{args.limit} "
+                        f"eligible={report['eligible_count']} "
+                        f"policy={report['selection_policy_version']}"
+                    )
+                    for index, candidate in enumerate(selected, start=1):
+                        model = candidate.model
+                        print(
+                            f"{index}. {model.runtime_local_id} "
+                            f"score={candidate.utility_score:g} "
+                            f"({candidate.selection_reason})"
+                        )
+                    if fallback:
+                        print("fallback:")
+                        for index, candidate in enumerate(fallback, start=1):
+                            print(
+                                f"  {index}. {candidate.model.runtime_local_id} "
+                                f"score={candidate.utility_score:g}"
+                            )
+                return 0
         sampler_requested = (
             args.command == "run" and args.measurement_sampler is not None
         )
@@ -660,6 +820,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except PublicationError as error:
         print(f"publication error: {error}", file=sys.stderr)
         return 3
+    except DiscoveryError as error:
+        print(f"discovery error: {error}", file=sys.stderr)
+        return 2
     except (ManifestError, SafetyError, ValueError) as error:
         print(f"configuration error: {error}", file=sys.stderr)
         return 2

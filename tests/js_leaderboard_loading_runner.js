@@ -14,6 +14,77 @@ if (!appSource || !leaderboardSource) {
   } = require(path.resolve(appSource));
   const leaderboard = JSON.parse(fs.readFileSync(leaderboardSource, "utf8"));
 
+  function syntheticLegacyEntries() {
+    // Structural shard tests must not depend on the live board's Wilson-band
+    // layout (schema 1.1 can legitimately collapse every entry into rank 1).
+    // Use a closed legacy-shaped fixture with a same-rank prefix and a later rank.
+    const metrics = (semantic, exact) => ({
+      case_count: 5,
+      scored_case_count: 5,
+      semantic_pass_count: semantic,
+      exact_format_pass_count: exact,
+      semantic_score_percent: semantic * 20,
+      exact_format_score_percent: exact * 20,
+      usage_coverage_cases: 5,
+      completion_tokens_per_second: 10.0,
+      latency_ms_mean: 1000.0,
+    });
+    const base = {
+      profile: "standard",
+      suite_version: "1.0",
+      hardware: {
+        cpu: { model: "Synthetic CPU", logical_cores: 4 },
+        memory: { system_gb: 16.0, architecture: "unknown" },
+        accelerators: [],
+        execution_mode: "unknown",
+      },
+      runtime: { name: "Synthetic Runtime", version: "1.0.0", backend: "test" },
+      model: {
+        display_name: "Synthetic Model",
+        source: "synthetic/model",
+        precision: "test",
+        declared_context_tokens: 4096,
+        revision: "synthetic-revision",
+      },
+      settings: {
+        temperature: 0.0,
+        top_p: 1.0,
+        max_output_tokens: 256,
+        seed: 0,
+      },
+    };
+    return [
+      {
+        ...base,
+        rank: 1,
+        submission_id:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        metrics: metrics(5, 5),
+      },
+      {
+        ...base,
+        rank: 1,
+        submission_id:
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        metrics: metrics(5, 5),
+      },
+      {
+        ...base,
+        rank: 2,
+        submission_id:
+          "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        metrics: metrics(4, 4),
+      },
+      {
+        ...base,
+        rank: 2,
+        submission_id:
+          "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        metrics: metrics(4, 4),
+      },
+    ];
+  }
+
   async function timeoutIsBounded() {
     const originalFetch = global.fetch;
     let capturedOptions = null;
@@ -61,10 +132,10 @@ if (!appSource || !leaderboardSource) {
   }
 
   async function main() {
-    if (!Array.isArray(leaderboard.entries) || leaderboard.entries.length < 4) {
-      throw new Error("The loading fixture requires at least four ranked entries.");
+    if (!Array.isArray(leaderboard.entries) || leaderboard.entries.length < 1) {
+      throw new Error("The loading fixture requires a non-empty committed leaderboard.");
     }
-    const entries = leaderboard.entries;
+    const entries = syntheticLegacyEntries();
     const split = entries.findIndex((entry) => entry.rank > entries[0].rank);
     if (split < 2) {
       throw new Error("The loading fixture requires a same-rank boundary and a later rank.");
@@ -127,7 +198,7 @@ if (!appSource || !leaderboardSource) {
       incremental_segments:
         firstSegmentAccepted &&
         secondSegmentAccepted &&
-        incremental.entryCount === leaderboard.entry_count,
+        incremental.entryCount === entries.length,
       reversed_canonical_boundary_rejected: reversedBoundaryRejected,
       wrong_rank_boundary_rejected: !validateAndTrackShardRanking(
         wrongRankBoundary,

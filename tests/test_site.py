@@ -508,7 +508,7 @@ class SiteSafetyTests(unittest.TestCase):
     def test_committed_transport_accepts_only_a_closed_monolith_or_index(self) -> None:
         payload = json.loads((SITE_ROOT / "data" / "leaderboard.json").read_text(encoding="utf-8"))
 
-        self.assertEqual(payload["schema_version"], "1.0")
+        self.assertIn(payload["schema_version"], {"1.0", "1.1"})
         if "entries" in payload:
             self.assertEqual(set(payload), {"schema_version", "entry_count", "entries"})
             self.assertEqual(payload["entry_count"], len(payload["entries"]))
