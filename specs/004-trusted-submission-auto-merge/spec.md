@@ -94,15 +94,18 @@ authorization signal.
   automated lane.
 - **FR-005**: Codex and CodeRabbit MAY be requested for best-effort advisory review, but automation
   MUST NOT wait for either service and a clean, absent, skipped, rate-limited, or connector-error
-  response MUST NOT authorize or veto the lane. A timely review thread or changes request visible to
-  the final revalidation still fails closed.
+  response MUST NOT authorize or veto the lane. Unresolved threads authored only by known advisory
+  bots MUST NOT veto authorization; the reviewer credential MAY resolve those threads so native
+  conversation-resolution protection can complete. A timely human review thread or any
+  changes-requested review still fails closed.
 - **FR-006**: Before the reviewer credential is used, trusted code MUST re-fetch and verify repository
   ID `1324333809`, PR number, state, draft status, mergeability, main base, exact head, submission
   branch digest, author, exact diff, safe file modes, canonical content, exact live marker ID/body/
   actor/App/timestamps/full-SHA binding, active review state, the publicly observable app-bound
   required checks, a native review decision
   consistent with either a fresh authorization or a validated partial-run retry, complete
-  pagination, and zero unresolved threads. The live default-branch tip MUST still equal the
+  pagination, and zero non-advisory unresolved threads (advisory-bot threads may be resolved by the
+  reviewer credential before mutation). The live default-branch tip MUST still equal the
   authorized base SHA immediately before each possible credentialed mutation.
 - **FR-007**: The caller MUST map repository secret `ERNEST_REVIEW_TOKEN` explicitly to the local
   reusable workflow's `reviewer_token`; `secrets: inherit` is forbidden. The credential MUST be

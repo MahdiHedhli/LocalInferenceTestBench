@@ -10,6 +10,13 @@ query ReviewThreads(
         nodes {
           id
           isResolved
+          comments(first: 1) {
+            nodes {
+              author {
+                login
+              }
+            }
+          }
         }
         totalCount
         pageInfo {
