@@ -241,7 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     select_cmd.add_argument(
         "--limit",
-        type=int,
+        type=_positive_int,
         default=5,
         help="maximum selected models (default: 5)",
     )
@@ -553,6 +553,16 @@ def _publish_public_submission(
     else:
         print(f"pull request opened: {result.url}")
     return 0
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a positive integer") from error
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def _print_inventory_table(models: Sequence[object], *, eligible_only: bool) -> None:

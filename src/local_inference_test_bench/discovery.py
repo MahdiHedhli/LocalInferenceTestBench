@@ -18,14 +18,6 @@ from typing import Any, Mapping, Sequence
 SELECTION_POLICY_VERSION = "1.0"
 DISCOVERY_SCHEMA_VERSION = "1.0"
 
-_PARAM_RE = re.compile(
-    r"(?ix)"
-    r"(?:(?P<total>\d+(?:\.\d+)?)\s*[Bb])"
-    r"|(?:(?P<moe_total>\d+(?:\.\d+)?)\s*[Bb]?\s*[-x×]\s*"
-    r"(?P<moe_active>\d+(?:\.\d+)?)\s*[Bb])"
-    r"|(?:(?P<a_total>\d+(?:\.\d+)?)\s*[Bb]-A(?P<a_active>\d+(?:\.\d+)?)[Bb])"
-)
-
 
 class DiscoveryError(RuntimeError):
     """Raised when local model inventory cannot be collected safely."""
@@ -266,10 +258,10 @@ def _classify_lms_entry(entry: Mapping[str, Any]) -> DiscoveredModel:
         exclusion = "remote_device_not_local_install"
     elif embedding:
         exclusion = "embedding_only"
+    elif model_type not in {"llm", "vlm", "embedding"}:
+        exclusion = "unsupported_model_type"
     elif not generative:
         exclusion = "non_generative"
-    elif model_type not in {"llm", "vlm"}:
-        exclusion = "unsupported_model_type"
     elif declared_context is not None and declared_context < 2048:
         exclusion = "context_below_suite_floor"
         notes.append("declared context under 2048 tokens")
@@ -350,10 +342,11 @@ def discover_lm_studio_models(
 def discover_local_models() -> list[DiscoveredModel]:
     """Discover models from LITB-supported local runtimes currently present."""
 
-    models: list[DiscoveredModel] = []
-    if shutil.which("lms"):
-        models.extend(discover_lm_studio_models())
-    return models
+    if not shutil.which("lms"):
+        raise DiscoveryError(
+            "no supported local runtime inventory CLI found (expected LM Studio lms)"
+        )
+    return discover_lm_studio_models()
 
 
 def group_equivalents(models: Sequence[DiscoveredModel]) -> dict[str, list[DiscoveredModel]]:
@@ -441,6 +434,9 @@ def score_candidate(
         recency = 2.0
 
     source_key = (model.source or model.runtime_local_id).lower()
+    # cross_host_value and novelty_value are complementary labels that both
+    # contribute 2 points: a represented source gets cross-host value, an
+    # unrepresented source gets novelty. They intentionally do not stack.
     cross_host = 2.0 if source_key in represented_sources else 0.0
     novelty = 0.0 if source_key in represented_sources else 2.0
 
@@ -510,7 +506,6 @@ def select_campaign_cohort(
 
     remaining = list(best_by_identity.values())
     selected: list[ScoredCandidate] = []
-    ranked_all: list[ScoredCandidate] = []
 
     def sort_key(scored: ScoredCandidate) -> tuple:
         total = scored.model.parameter_scale_total_billions or 0.0
@@ -539,7 +534,7 @@ def select_campaign_cohort(
         remaining = [
             model
             for model in remaining
-            if model.runtime_local_id != pick.model.runtime_local_id
+            if model.normalized_identity != pick.model.normalized_identity
         ]
 
     # Fallback order: rescore remaining against the frozen selected cohort.
@@ -557,7 +552,6 @@ def select_campaign_cohort(
         ],
         key=sort_key,
     )
-    ranked_all = list(selected) + list(fallback)
     return selected, fallback
 
 
@@ -616,6 +610,7 @@ def inventory_report(
             "notes": [
                 "Scores use metadata only; benchmark results never feed selection.",
                 "Historical leaderboard sources may only contribute cross_host/novelty flags.",
+                "cross_host_value and novelty_value are complementary 0-or-2 signals that do not stack.",
             ],
         },
     }

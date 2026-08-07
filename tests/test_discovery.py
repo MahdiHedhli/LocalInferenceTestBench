@@ -17,6 +17,9 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(parse_parameter_scale("12B"), (12.0, None, "dense"))
         self.assertEqual(parse_parameter_scale("30B-A3B"), (30.0, 3.0, "moe"))
         self.assertEqual(parse_parameter_scale("256x8.4B"), (256.0, 8.4, "moe"))
+        self.assertEqual(parse_parameter_scale(None), (None, None, None))
+        self.assertEqual(parse_parameter_scale("   "), (None, None, None))
+        self.assertEqual(parse_parameter_scale("large"), (None, None, None))
 
     def test_excludes_embedding_and_remote(self) -> None:
         embedding = _classify_lms_entry(
@@ -113,10 +116,16 @@ class DiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(len(first), 3)
         self.assertEqual(SELECTION_POLICY_VERSION, "1.0")
-        # Larger tool-capable models outrank a small no-tool model.
-        self.assertNotEqual(first[-1].model.runtime_local_id, first[0].model.runtime_local_id)
-        ids = {item.model.runtime_local_id for item in first}
-        self.assertIn("bitnet-b1.58-2b-4t", ids)
+        # Tool-capable mid/large models outrank the small no-tool model under the
+        # frozen formula; exact order is locked for regression protection.
+        self.assertEqual(
+            [item.model.runtime_local_id for item in first],
+            [
+                "google/gemma-4-12b-qat",
+                "prism-ml/bonsai-27b",
+                "bitnet-b1.58-2b-4t",
+            ],
+        )
 
 
 if __name__ == "__main__":
