@@ -2,7 +2,7 @@
 
 ## Trusted workflow call
 
-- `repository`: fixed `MahdiHedhli/LocalInferenceTestBench`
+- `repository`: fixed `MahdiHedhli/LITB`
 - `pull_request_number`: positive integer passed by the base-controlled caller
 - `request_base_sha`: trusted full 40-character lowercase hexadecimal base SHA
 - `request_head_sha`: trusted full 40-character lowercase hexadecimal head SHA

@@ -41,6 +41,6 @@ a fixed categorical handoff message and never exception text.
 
 Before exact consent, this feature performs no browser or GitHub request. It may best-effort read the
 existing local public descriptor. After consent it calls the standard-library browser helper once
-with the fixed `https://github.com/MahdiHedhli/LocalInferenceTestBench/issues/new` origin/path and
+with the fixed `https://github.com/MahdiHedhli/LITB/issues/new` origin/path and
 `title`/`body` query. That navigation transmits the draft but does not create an issue. The user must
 click GitHub Submit for public mutation.

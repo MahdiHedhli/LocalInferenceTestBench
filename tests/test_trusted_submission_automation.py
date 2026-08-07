@@ -62,7 +62,7 @@ def pull_fixture() -> dict[str, object]:
         "head": {
             "ref": f"litb/submission-{SUBMISSION_ID}",
             "sha": HEAD_SHA,
-            "repo": {"full_name": "benchmark-contributor/LocalInferenceTestBench"},
+            "repo": {"full_name": "benchmark-contributor/LITB"},
         },
     }
 

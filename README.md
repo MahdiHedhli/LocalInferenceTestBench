@@ -1,4 +1,4 @@
-# Local Inference Test Bench
+# LITB - Local Inference Test Bench
 
 A hardware-agnostic, privacy-conscious process and reference runner for evaluating language models on
 your own inference endpoint.
@@ -9,7 +9,7 @@ does not assume a GPU vendor, memory capacity, operating system, model family, o
 
 ## Why I built this
 
-I built LocalInferenceTestBench to answer a practical question: how well do local models run on my
+I built LITB to answer a practical question: how well do local models run on my
 own hardware when I give them the same set of tasks? Tokens per second matter, but they are only part
 of the answer. I also want to know whether a model returns clean structured data, writes code that
 holds up to static checks, handles a defensive analysis prompt, and respects a safe tool boundary.
@@ -164,7 +164,7 @@ shell, local draft file, or automatic submission is used. Disable the prompt wit
 
 ## Public leaderboard
 
-The [GitHub Pages leaderboard](https://mahdihedhli.github.io/LocalInferenceTestBench/) puts the
+The [GitHub Pages leaderboard](https://mahdihedhli.github.io/LITB/) puts the
 community results first. It shows pass counts with outward-rounded 95% Wilson intervals and groups
 statistically overlapping semantic/exact-format evidence into explicit rank bands. Latency and
 throughput are shown with the hardware and runtime reported for them, but speed does not affect rank.

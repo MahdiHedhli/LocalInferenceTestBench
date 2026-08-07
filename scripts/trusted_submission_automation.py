@@ -13,7 +13,7 @@ import sys
 from typing import Any, Mapping, Sequence
 
 
-REPOSITORY_FULL_NAME = "MahdiHedhli/LocalInferenceTestBench"
+REPOSITORY_FULL_NAME = "MahdiHedhli/LITB"
 REPOSITORY_ID = 1_324_333_809
 REPOSITORY_NODE_ID = "R_kgDOTu-68Q"
 DEFAULT_BRANCH = "main"

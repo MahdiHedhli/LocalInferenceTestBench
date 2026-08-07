@@ -1,6 +1,6 @@
 # Evaluation methodology
 
-LocalInferenceTestBench answers a narrow question: does a particular model artifact, served with a
+LITB answers a narrow question: does a particular model artifact, served with a
 particular configuration, satisfy the contracts of an intended workload at an acceptable cost?
 
 It does not try to produce a universal model ranking. Quality results can often travel across systems;
