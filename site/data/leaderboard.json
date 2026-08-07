@@ -562,6 +562,157 @@
     },
     {
       "config_cell": {
+        "digest": "0011265c9745b029e6ea1edd1a3faa30798526950fe0cee744333a73b92843ab",
+        "key_version": "1.0",
+        "selection_version": "1.0"
+      },
+      "corroboration": {
+        "accepted_record_count": 1,
+        "by_validity": {
+          "clean": {
+            "count": 0,
+            "earliest_period": null,
+            "latest_period": null
+          },
+          "degraded_midrun": {
+            "count": 0,
+            "earliest_period": null,
+            "latest_period": null
+          },
+          "legacy_unreported": {
+            "count": 0,
+            "earliest_period": null,
+            "latest_period": null
+          },
+          "nonquiescent": {
+            "count": 1,
+            "earliest_period": "2026-08",
+            "latest_period": "2026-08"
+          }
+        }
+      },
+      "facet_id": "all-cases-text",
+      "hardware": {
+        "accelerators": [
+          {
+            "count": 1,
+            "kind": "integrated_gpu",
+            "memory_gb": null,
+            "model": "Apple M2 Max 38-core GPU"
+          }
+        ],
+        "cpu": {
+          "logical_cores": 12,
+          "model": "Apple M2 Max"
+        },
+        "execution_mode": "hybrid",
+        "memory": {
+          "architecture": "shared",
+          "system_gb": 64.0
+        }
+      },
+      "measurement_conditions": {
+        "hard_threshold_crossed": true,
+        "post": {
+          "categories": [
+            "swap"
+          ],
+          "outcome": "threshold_crossed"
+        },
+        "pre": {
+          "categories": [
+            "sustained_load",
+            "swap"
+          ],
+          "outcome": "threshold_crossed"
+        }
+      },
+      "measurement_period": "2026-08",
+      "metrics": {
+        "case_count": 5,
+        "completion_tokens_per_second": 14.2,
+        "exact_format_pass_count": 4,
+        "exact_format_score_percent": 80.0,
+        "latency_ms_mean": 50743.9,
+        "scored_case_count": 5,
+        "semantic_pass_count": 4,
+        "semantic_score_percent": 80.0,
+        "usage_coverage_cases": 5
+      },
+      "model": {
+        "declared_context_tokens": 262144,
+        "digest": "sha256-manifest-v1:1f4e6043f280252f6881884ba69b770d08a05a77e321a6690feadf448ee83ab7",
+        "display_name": "Bonsai 27B",
+        "parameter_scale": {
+          "active_billions": null,
+          "total_billions": 27.0
+        },
+        "precision": "MLX 2-bit",
+        "source": "prism-ml/Ternary-Bonsai-27B-mlx-2bit"
+      },
+      "performance_distribution": {
+        "completion_tokens_per_second": {
+          "maximum": 14.2,
+          "median": 14.2,
+          "minimum": 14.2,
+          "sample_count": 1
+        },
+        "latency_ms_mean": {
+          "maximum": 50743.9,
+          "median": 50743.9,
+          "minimum": 50743.9,
+          "sample_count": 1
+        }
+      },
+      "plausibility": {
+        "basis": {
+          "hardware_class": "shared_accelerator",
+          "model_size_basis": "total_billions",
+          "model_size_bucket": "14b_to_under_35b"
+        },
+        "evaluated_record_count": 1,
+        "outside_envelope_record_count": 0,
+        "policy_version": "1.0",
+        "signals": [],
+        "status": "within_envelope"
+      },
+      "profile": "standard",
+      "rank": 1,
+      "runtime": {
+        "backend": "MLX 1.11.0 / Apple Metal",
+        "name": "LM Studio",
+        "version": "0.4.19+2"
+      },
+      "runtime_configuration": {
+        "concurrent_requests": 1,
+        "context_window_tokens": 251648,
+        "offload_mode": "maximum",
+        "speculative_decoding": "disabled"
+      },
+      "score_intervals": {
+        "exact_format": {
+          "lower_percent": 37,
+          "upper_percent": 97
+        },
+        "method": "wilson_95",
+        "semantic": {
+          "lower_percent": 37,
+          "upper_percent": 97
+        }
+      },
+      "settings": {
+        "max_output_tokens": 4096,
+        "seed": 0,
+        "temperature": 0.0,
+        "top_p": 1.0
+      },
+      "submission_id": "5a653a58ad7a6556e25ba33b20e8e75deb8548c4c63396663b0cde40c3691cdb",
+      "submission_schema_version": "1.1",
+      "suite_version": "1.0",
+      "validity": "nonquiescent"
+    },
+    {
+      "config_cell": {
         "digest": "c3bf39f87f04464014b631b3975b584367cba7b2520cd401b03f03caca163320",
         "key_version": "1.0",
         "selection_version": "1.0"
@@ -970,6 +1121,6 @@
       "validity": "legacy_unreported"
     }
   ],
-  "entry_count": 7,
+  "entry_count": 8,
   "schema_version": "1.1"
 }
