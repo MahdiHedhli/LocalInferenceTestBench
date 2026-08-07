@@ -144,8 +144,13 @@ footer {
   font-family: var(--font-interface);
   font-size: 0.9rem;
   font-weight: 800;
-  letter-spacing: 0.035em;
+  letter-spacing: 0.01em;
   text-decoration: none;
+}
+
+.wordmark > span:last-child {
+  letter-spacing: 0.01em;
+  font-weight: 700;
 }
 
 .wordmark-mark {
