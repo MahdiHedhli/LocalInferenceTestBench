@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-readonly repository="MahdiHedhli/LocalInferenceTestBench"
+readonly repository="MahdiHedhli/LITB"
 readonly pull_request_number="${1:?pull request number is required}"
 readonly destination="${2:?destination is required}"
 

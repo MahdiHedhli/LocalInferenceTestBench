@@ -21,10 +21,10 @@ from .safety import SafetyError, validate_env_file
 from .submissions import render_submission_bytes, validate_submission
 
 
-UPSTREAM_REPOSITORY = "MahdiHedhli/LocalInferenceTestBench"
+UPSTREAM_REPOSITORY = "MahdiHedhli/LITB"
 UPSTREAM_CLONE = f"github.com/{UPSTREAM_REPOSITORY}"
 BASE_BRANCH = "main"
-LEADERBOARD_URL = "https://mahdihedhli.github.io/LocalInferenceTestBench/"
+LEADERBOARD_URL = "https://mahdihedhli.github.io/LITB/"
 DEFAULT_DENYLIST = Path(".local") / "privacy-denylist.txt"
 _VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _MINIMUM_GITLEAKS = (8, 30, 1)

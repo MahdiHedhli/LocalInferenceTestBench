@@ -67,10 +67,10 @@ jobs:
           PR_NUMBER: ${{ inputs.pull_request_number }}
         run: |
           set -euo pipefail
-          gh api repos/MahdiHedhli/LocalInferenceTestBench > "${RUNNER_TEMP}/repository.json"
+          gh api repos/MahdiHedhli/LITB > "${RUNNER_TEMP}/repository.json"
           python3 scripts/trusted_submission_automation.py repository \
             --input "${RUNNER_TEMP}/repository.json"
-          gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
+          gh api repos/MahdiHedhli/LITB/branches/main \
             > "${RUNNER_TEMP}/protection.json"
           python3 scripts/trusted_submission_automation.py protection \
             --input "${RUNNER_TEMP}/protection.json"
@@ -116,7 +116,7 @@ jobs:
         run: |
           set -euo pipefail
           gh api \
-            "repos/MahdiHedhli/LocalInferenceTestBench/issues/comments/${MARKER_COMMENT_ID}" \
+            "repos/MahdiHedhli/LITB/issues/comments/${MARKER_COMMENT_ID}" \
             > "${RUNNER_TEMP}/comments.json"
           python3 scripts/trusted_submission_automation.py comments \
             --input "${RUNNER_TEMP}/comments.json" \
@@ -126,14 +126,14 @@ jobs:
             --head "${HEAD_SHA}"
           gh api graphql --paginate --slurp \
             -f owner=MahdiHedhli \
-            -f name=LocalInferenceTestBench \
+            -f name=LITB \
             -F number="${PR_NUMBER}" \
             -F query=@"${GITHUB_WORKSPACE}/scripts/queries/review_threads.graphql" \
             > "${RUNNER_TEMP}/threads.json"
           python3 scripts/trusted_submission_automation.py threads \
             --input "${RUNNER_TEMP}/threads.json"
           gh api --paginate --slurp \
-            "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}/reviews?per_page=100" \
+            "repos/MahdiHedhli/LITB/pulls/${PR_NUMBER}/reviews?per_page=100" \
             > "${RUNNER_TEMP}/reviews.json"
           python3 scripts/trusted_submission_automation.py review-states \
             --input "${RUNNER_TEMP}/reviews.json"
@@ -178,7 +178,7 @@ jobs:
             local destination="$2"
             gh api \
               -H "Accept: application/vnd.github.raw+json" \
-              "repos/MahdiHedhli/LocalInferenceTestBench/contents/${source}?ref=${BASE_SHA}" \
+              "repos/MahdiHedhli/LITB/contents/${source}?ref=${BASE_SHA}" \
               > "${destination}"
           }
           fetch_trusted_file \
@@ -211,9 +211,9 @@ jobs:
           helper="${RUNNER_TEMP}/trusted_submission_automation.py"
           mergeable_helper="${RUNNER_TEMP}/fetch_mergeable_pull.sh"
           review_threads_query="${RUNNER_TEMP}/review_threads.graphql"
-          gh api repos/MahdiHedhli/LocalInferenceTestBench > "${RUNNER_TEMP}/repository.json"
+          gh api repos/MahdiHedhli/LITB > "${RUNNER_TEMP}/repository.json"
           python3 "${helper}" repository --input "${RUNNER_TEMP}/repository.json"
-          gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
+          gh api repos/MahdiHedhli/LITB/branches/main \
             > "${RUNNER_TEMP}/protection.json"
           python3 "${helper}" protection --input "${RUNNER_TEMP}/protection.json"
           bash "${mergeable_helper}" \
@@ -229,7 +229,7 @@ jobs:
           grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request.out"
           grep -Fqx "submission_id=${SUBMISSION_ID}" "${RUNNER_TEMP}/pull-request.out"
           gh api \
-            "repos/MahdiHedhli/LocalInferenceTestBench/issues/comments/${MARKER_COMMENT_ID}" \
+            "repos/MahdiHedhli/LITB/issues/comments/${MARKER_COMMENT_ID}" \
             > "${RUNNER_TEMP}/comments.json"
           python3 "${helper}" comments \
             --input "${RUNNER_TEMP}/comments.json" \
@@ -238,12 +238,12 @@ jobs:
             --base "${BASE_SHA}" \
             --head "${HEAD_SHA}"
           gh api graphql --paginate --slurp \
-            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -f owner=MahdiHedhli -f name=LITB -F number="${PR_NUMBER}" \
             -F query=@"${review_threads_query}" \
             > "${RUNNER_TEMP}/threads.json"
           python3 "${helper}" threads --input "${RUNNER_TEMP}/threads.json"
           gh api --paginate --slurp \
-            "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}/reviews?per_page=100" \
+            "repos/MahdiHedhli/LITB/pulls/${PR_NUMBER}/reviews?per_page=100" \
             > "${RUNNER_TEMP}/reviews.json"
           python3 "${helper}" review-states --input "${RUNNER_TEMP}/reviews.json"
       - name: Arm protected squash auto-merge, then approve the exact head
@@ -265,12 +265,12 @@ jobs:
             local label="$1"
             local destination="${RUNNER_TEMP}/${label}"
             local live_base
-            gh api repos/MahdiHedhli/LocalInferenceTestBench \
+            gh api repos/MahdiHedhli/LITB \
               > "${destination}-repository.json"
             python3 "${helper}" repository \
               --input "${destination}-repository.json" \
               --require-auto-merge
-            gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
+            gh api repos/MahdiHedhli/LITB/branches/main \
               > "${destination}-base.json"
             python3 "${helper}" protection --input "${destination}-base.json"
             live_base="$(jq -er '.commit.sha | strings' "${destination}-base.json")"
@@ -287,7 +287,7 @@ jobs:
             grep -Fqx "pull_request_node_id=${PR_NODE_ID}" "${destination}-pull.out"
             grep -Fqx "submission_id=${SUBMISSION_ID}" "${destination}-pull.out"
             gh api \
-              "repos/MahdiHedhli/LocalInferenceTestBench/issues/comments/${MARKER_COMMENT_ID}" \
+              "repos/MahdiHedhli/LITB/issues/comments/${MARKER_COMMENT_ID}" \
               > "${destination}-comments.json"
             python3 "${helper}" comments \
               --input "${destination}-comments.json" \
@@ -296,7 +296,7 @@ jobs:
               --base "${BASE_SHA}" \
               --head "${HEAD_SHA}"
             gh api graphql --paginate --slurp \
-              -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+              -f owner=MahdiHedhli -f name=LITB -F number="${PR_NUMBER}" \
               -F query=@"${review_threads_query}" \
               > "${destination}-threads.json"
             python3 "${helper}" threads \
@@ -304,7 +304,7 @@ jobs:
               --output "${destination}-threads.out" \
               --advisory-ids-output "${destination}-advisory-ids.txt"
             gh api --paginate --slurp \
-              "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}/reviews?per_page=100" \
+              "repos/MahdiHedhli/LITB/pulls/${PR_NUMBER}/reviews?per_page=100" \
               > "${destination}-reviews.json"
             python3 "${helper}" review-states --input "${destination}-reviews.json"
           }
@@ -329,11 +329,11 @@ jobs:
           }
           gh api user > "${RUNNER_TEMP}/reviewer.json"
           python3 "${helper}" identity --input "${RUNNER_TEMP}/reviewer.json"
-          gh api repos/MahdiHedhli/LocalInferenceTestBench > "${RUNNER_TEMP}/repository-final.json"
+          gh api repos/MahdiHedhli/LITB > "${RUNNER_TEMP}/repository-final.json"
           python3 "${helper}" repository \
             --input "${RUNNER_TEMP}/repository-final.json" \
             --require-auto-merge
-          gh api repos/MahdiHedhli/LocalInferenceTestBench/branches/main \
+          gh api repos/MahdiHedhli/LITB/branches/main \
             > "${RUNNER_TEMP}/protection-final.json"
           python3 "${helper}" protection --input "${RUNNER_TEMP}/protection-final.json"
           bash "${mergeable_helper}" \
@@ -349,7 +349,7 @@ jobs:
           grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request-final.out"
           grep -Fqx "submission_id=${SUBMISSION_ID}" "${RUNNER_TEMP}/pull-request-final.out"
           gh api \
-            "repos/MahdiHedhli/LocalInferenceTestBench/issues/comments/${MARKER_COMMENT_ID}" \
+            "repos/MahdiHedhli/LITB/issues/comments/${MARKER_COMMENT_ID}" \
             > "${RUNNER_TEMP}/comments-final.json"
           python3 "${helper}" comments \
             --input "${RUNNER_TEMP}/comments-final.json" \
@@ -358,7 +358,7 @@ jobs:
             --base "${BASE_SHA}" \
             --head "${HEAD_SHA}"
           gh api graphql --paginate --slurp \
-            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -f owner=MahdiHedhli -f name=LITB -F number="${PR_NUMBER}" \
             -F query=@"${review_threads_query}" \
             > "${RUNNER_TEMP}/threads-final.json"
           # Resolve advisory-bot threads so conversation-resolution protection
@@ -367,7 +367,7 @@ jobs:
             "${RUNNER_TEMP}/threads-final.json" \
             "${RUNNER_TEMP}/advisory-ids-final.txt"
           gh api graphql --paginate --slurp \
-            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -f owner=MahdiHedhli -f name=LITB -F number="${PR_NUMBER}" \
             -F query=@"${review_threads_query}" \
             > "${RUNNER_TEMP}/threads-post-resolve.json"
           python3 "${helper}" threads \
@@ -376,7 +376,7 @@ jobs:
             --advisory-ids-output "${RUNNER_TEMP}/advisory-ids-post-resolve.txt"
           test ! -s "${RUNNER_TEMP}/advisory-ids-post-resolve.txt"
           gh api --paginate --slurp \
-            "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}/reviews?per_page=100" \
+            "repos/MahdiHedhli/LITB/pulls/${PR_NUMBER}/reviews?per_page=100" \
             > "${RUNNER_TEMP}/reviews-final.json"
           python3 "${helper}" review-states --input "${RUNNER_TEMP}/reviews-final.json"
           python3 "${helper}" approvals \
@@ -384,7 +384,7 @@ jobs:
             --head "${HEAD_SHA}" \
             --output "${RUNNER_TEMP}/approval-state.out"
           gh api graphql \
-            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -f owner=MahdiHedhli -f name=LITB -F number="${PR_NUMBER}" \
             -F query=@"${auto_merge_query}" \
             > "${RUNNER_TEMP}/auto-merge-before.json"
           python3 "${helper}" auto-merge-state \
@@ -413,7 +413,7 @@ jobs:
           else
             grep -Fqx "enabled=true" "${RUNNER_TEMP}/auto-merge-before.out"
           fi
-          gh api "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}" \
+          gh api "repos/MahdiHedhli/LITB/pulls/${PR_NUMBER}" \
             > "${RUNNER_TEMP}/pull-request-after-arm.json"
           test "$(jq -r '.head.sha' "${RUNNER_TEMP}/pull-request-after-arm.json")" = "${HEAD_SHA}"
           if [ "$(jq -r '.merged' "${RUNNER_TEMP}/pull-request-after-arm.json")" = "true" ]; then
@@ -433,7 +433,7 @@ jobs:
           grep -Fqx "base_sha=${BASE_SHA}" "${RUNNER_TEMP}/pull-request-before-approval.out"
           grep -Fqx "head_sha=${HEAD_SHA}" "${RUNNER_TEMP}/pull-request-before-approval.out"
           gh api graphql \
-            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -f owner=MahdiHedhli -f name=LITB -F number="${PR_NUMBER}" \
             -F query=@"${auto_merge_query}" \
             > "${RUNNER_TEMP}/auto-merge-armed.json"
           python3 "${helper}" auto-merge-state \
@@ -444,7 +444,7 @@ jobs:
             --output "${RUNNER_TEMP}/auto-merge-armed.out"
           grep -Fqx "enabled=true" "${RUNNER_TEMP}/auto-merge-armed.out"
           gh api graphql --paginate --slurp \
-            -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+            -f owner=MahdiHedhli -f name=LITB -F number="${PR_NUMBER}" \
             -F query=@"${review_threads_query}" \
             > "${RUNNER_TEMP}/threads-before-approval.json"
           python3 "${helper}" threads --input "${RUNNER_TEMP}/threads-before-approval.json"
@@ -463,7 +463,7 @@ jobs:
           else
             grep -Fqx "exists=true" "${RUNNER_TEMP}/approval-state.out"
           fi
-          gh api "repos/MahdiHedhli/LocalInferenceTestBench/pulls/${PR_NUMBER}" \
+          gh api "repos/MahdiHedhli/LITB/pulls/${PR_NUMBER}" \
             > "${RUNNER_TEMP}/pull-request-after.json"
           test "$(jq -r '.head.sha' "${RUNNER_TEMP}/pull-request-after.json")" = "${HEAD_SHA}"
           final_state="$(jq -r '.state' "${RUNNER_TEMP}/pull-request-after.json")"
@@ -473,7 +473,7 @@ jobs:
           else
             test "${final_state}" = "open"
             gh api graphql \
-              -f owner=MahdiHedhli -f name=LocalInferenceTestBench -F number="${PR_NUMBER}" \
+              -f owner=MahdiHedhli -f name=LITB -F number="${PR_NUMBER}" \
               -F query=@"${auto_merge_query}" \
               > "${RUNNER_TEMP}/auto-merge-after.json"
             python3 "${helper}" auto-merge-state \

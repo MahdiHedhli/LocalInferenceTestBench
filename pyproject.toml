@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 license = { text = "MIT" }
-authors = [{ name = "LocalInferenceTestBench contributors" }]
+authors = [{ name = "LITB contributors" }]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",

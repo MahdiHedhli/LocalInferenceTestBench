@@ -84,7 +84,7 @@ local diagnostic file is used.
   ignored public descriptor and MUST pass descriptor-grade validation. Failure to read or validate
   it MUST yield `unknown` without replacing the original benchmark failure.
 - **FR-008**: The issue destination MUST be hardcoded to
-  `https://github.com/MahdiHedhli/LocalInferenceTestBench/issues/new`; the query MUST contain exactly
+  `https://github.com/MahdiHedhli/LITB/issues/new`; the query MUST contain exactly
   `title` and `body`, and title, body, and URL MUST be bounded and deterministic.
 - **FR-009**: The complete draft and transmission disclosure MUST be shown before consent. Only one
   ASCII `y` or `Y`, after trimming surrounding ASCII whitespace, MAY call the browser once. Opening

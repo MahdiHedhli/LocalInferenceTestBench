@@ -278,7 +278,7 @@ Every case also records its registry-defined task capability and modality. All f
 text; these tags are validation seams and do not create a capability score or view.
 
 You can select the file on the
-[Pages site](https://mahdihedhli.github.io/LocalInferenceTestBench/#submit) to parse its strict public
+[Pages site](https://mahdihedhli.github.io/LITB/#submit) to parse its strict public
 JSON with fatal UTF-8/BOM rejection, reject duplicate member names, validate the closed schema,
 recompute the canonical content digest, and preview the model and hardware details. The file stays in
 your browser. This convenience check does not replace the authoritative Python, privacy,

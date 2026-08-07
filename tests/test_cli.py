@@ -558,7 +558,7 @@ class PostRunCliTests(unittest.TestCase):
         opened_url = opened.call_args.args[0]
         self.assertTrue(
             opened_url.startswith(
-                "https://github.com/MahdiHedhli/LocalInferenceTestBench/issues/new?"
+                "https://github.com/MahdiHedhli/LITB/issues/new?"
             )
         )
         disclosure = output.getvalue()

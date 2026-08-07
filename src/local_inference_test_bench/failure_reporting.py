@@ -20,7 +20,7 @@ from .submissions import (
 
 
 ISSUE_BASE_URL = (
-    "https://github.com/MahdiHedhli/LocalInferenceTestBench/issues/new"
+    "https://github.com/MahdiHedhli/LITB/issues/new"
 )
 FAILURE_DRAFT_SCHEMA_VERSION = "1.0"
 

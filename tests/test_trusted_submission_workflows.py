@@ -253,7 +253,7 @@ class TrustedSubmissionWorkflowContractTests(unittest.TestCase):
             workflow.index("          validate_live_authorization()") : identity
         ]
         self.assertIn("branches/main", function)
-        self.assertIn("repos/MahdiHedhli/LocalInferenceTestBench", function)
+        self.assertIn("repos/MahdiHedhli/LITB", function)
         self.assertIn('python3 "${helper}" repository', function)
         self.assertIn('--input "${destination}-repository.json"', function)
         self.assertIn("--require-auto-merge", function)

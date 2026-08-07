@@ -463,7 +463,7 @@ class FailureReportingTests(unittest.TestCase):
         self.assertEqual(parsed.netloc, "github.com")
         self.assertEqual(
             parsed.path,
-            "/MahdiHedhli/LocalInferenceTestBench/issues/new",
+            "/MahdiHedhli/LITB/issues/new",
         )
         self.assertEqual(parsed.fragment, "")
         self.assertEqual(set(query), {"title", "body"})

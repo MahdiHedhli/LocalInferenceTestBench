@@ -25,7 +25,7 @@ SUBMISSION = {"submission_id": SUBMISSION_ID, "suite_version": "1.0"}
 IDENTITY = PublicationIdentity(
     login="contributor",
     upstream_owner="MahdiHedhli",
-    repository_name="LocalInferenceTestBench",
+    repository_name="LITB",
     base_branch="main",
     can_push_upstream=True,
 )
@@ -99,7 +99,7 @@ class PublishingTests(unittest.TestCase):
             if endpoint == "user":
                 return {"login": "contributor"}
             return {
-                "name": "LocalInferenceTestBench",
+                "name": "LITB",
                 "default_branch": "main",
                 "owner": {"login": "MahdiHedhli"},
                 "permissions": {"push": False},
@@ -117,11 +117,11 @@ class PublishingTests(unittest.TestCase):
 
         self.assertEqual(identity.login, "contributor")
         self.assertFalse(identity.can_push_upstream)
-        self.assertEqual(identity.target_repository, "contributor/LocalInferenceTestBench")
+        self.assertEqual(identity.target_repository, "contributor/LITB")
         self.assertEqual(denylist, b"private-literal\n")
         self.assertEqual(
             [call.args[0] for call in github.call_args_list],
-            ["user", "repos/MahdiHedhli/LocalInferenceTestBench"],
+            ["user", "repos/MahdiHedhli/LITB"],
         )
 
     def test_preflight_requires_local_tools_before_github(self) -> None:
@@ -139,7 +139,7 @@ class PublishingTests(unittest.TestCase):
             if endpoint == "user":
                 return {"login": "contributor"}
             return {
-                "name": "LocalInferenceTestBench",
+                "name": "LITB",
                 "default_branch": "release",
                 "owner": {"login": "MahdiHedhli"},
                 "permissions": {"push": True},
@@ -178,7 +178,7 @@ class PublishingTests(unittest.TestCase):
             mock.patch.object(
                 publishing,
                 "_verified_existing_pull_request",
-                return_value="https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/7",
+                return_value="https://github.com/MahdiHedhli/LITB/pull/7",
             ),
             mock.patch.object(publishing, "_prepare_change", return_value=PREPARED) as prepare,
             mock.patch.object(
@@ -239,7 +239,7 @@ class PublishingTests(unittest.TestCase):
                 }
             if endpoint.endswith("/pulls"):
                 return {
-                    "html_url": "https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8"
+                    "html_url": "https://github.com/MahdiHedhli/LITB/pull/8"
                 }
             return {"ref": f"refs/heads/litb/submission-{SUBMISSION_ID}"}
 
@@ -260,7 +260,7 @@ class PublishingTests(unittest.TestCase):
             mock.patch.object(
                 publishing,
                 "_verified_created_pull_request",
-                return_value="https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8",
+                return_value="https://github.com/MahdiHedhli/LITB/pull/8",
             ) as created_verifier,
             mock.patch.object(
                 publishing,
@@ -622,7 +622,7 @@ class PublishingTests(unittest.TestCase):
                 if state["pull_attempts"] == 1:
                     raise PublicationError("simulated PR API failure")
                 return {
-                    "html_url": "https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8"
+                    "html_url": "https://github.com/MahdiHedhli/LITB/pull/8"
                 }
             self.fail(f"unexpected GitHub API endpoint: {endpoint}")
 
@@ -643,7 +643,7 @@ class PublishingTests(unittest.TestCase):
             mock.patch.object(
                 publishing,
                 "_verified_created_pull_request",
-                return_value="https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/8",
+                return_value="https://github.com/MahdiHedhli/LITB/pull/8",
             ),
             mock.patch.object(
                 publishing,
@@ -796,7 +796,7 @@ class PublishingTests(unittest.TestCase):
         branch = f"litb/submission-{SUBMISSION_ID}"
         head_sha = "6" * 40
         pull = {
-            "html_url": "https://github.com/MahdiHedhli/LocalInferenceTestBench/pull/7",
+            "html_url": "https://github.com/MahdiHedhli/LITB/pull/7",
             "number": 7,
             "base": {
                 "ref": "main",
